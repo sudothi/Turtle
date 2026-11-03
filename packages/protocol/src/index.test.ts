@@ -6,6 +6,10 @@ describe("protocol", () => {
     expect(clientEvent.parse({ t: "ping" })).toEqual({ t: "ping" });
     expect(clientEvent.parse({ t: "send", channelId: "c", content: " oi " }).t).toBe("send");
   });
+  it("aceita entrar e sair da voz", () => {
+    expect(clientEvent.parse({ t: "voice", channelId: "c", muted: true, deafened: false }).t).toBe("voice");
+    expect(clientEvent.parse({ t: "voice", channelId: null, muted: false, deafened: false }).t).toBe("voice");
+  });
   it("rejeita evento desconhecido e mensagem vazia", () => {
     expect(() => clientEvent.parse({ t: "nope" })).toThrow();
     expect(() => clientEvent.parse({ t: "send", channelId: "c", content: "  " })).toThrow();

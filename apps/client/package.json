@@ -10,15 +10,17 @@
     "test": "echo no tests"
   },
   "dependencies": {
+    "@sapphi-red/web-noise-suppressor": "^0.4.1",
+    "@turtle/protocol": "workspace:*",
     "@turtle/ui": "workspace:*",
+    "livekit-client": "^2.23.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "@turtle/protocol": "workspace:*"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.7.0",
-    "vite": "^7.0.0",
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0"
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^7.0.0"
   }
 }

@@ -19,10 +19,9 @@ O pacote exporta o código-fonte (sem build): o Vite do client compila direto.
 - Sem cor de destaque: estados usam inversão (papel sobre tinta), borda tracejada (erro) e anel de papel (falando).
 
 ## Linocut
-- `.lino`: o fundo/borda vai para um pseudo-elemento com o filtro `#lino-rough` (borda de goiva irregular); o texto continua nítido. Ajuste com `--lino-bg`, `--lino-border`, `--lino-radius`. `.lino-lg` usa um entalhe mais forte (cartões grandes).
+- `.lino`: o fundo/borda vai para um pseudo-elemento com o filtro `#lino-rough` (borda de goiva irregular); o texto continua nítido. As bordas "respiram": o ruído do filtro troca de semente algumas vezes por segundo (efeito de traço fervendo, como animação desenhada à mão). Com `prefers-reduced-motion` ficam paradas. Ajuste com `--lino-bg`, `--lino-border`, `--lino-radius`. `.lino-lg` usa um entalhe mais forte (cartões grandes).
 - `.carve`: textura sutil de marcas de goiva (`assets/carve.svg`).
-- `.lino-waves`: mar entalhado com céu estrelado (`assets/waves.svg`), usado no login e no saguão da chamada.
-- As texturas saem de `scripts/gen-art.py` (determinístico).
+- A textura sai de `scripts/gen-art.py` (determinístico).
 
 ## Componentes
 `Button` (primary, secondary, outline, ghost, danger; sm/md/lg), `IconButton` (sempre com `label`), `TextField` (rótulo em caixa alta, erro no rótulo como no Discord), `Avatar` (inicial + 4 padrões estáveis por nome, bolinha de status, anel de fala), `Modal`, `Icon` (ícones próprios 24×24), `TurtleLogo` / `TurtleMark`.

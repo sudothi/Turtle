@@ -67,7 +67,7 @@
   --members-w: 240px;
   --header-h: 48px;
 
-  /* Texturas (assets/carve.svg, assets/waves.svg são servidos pelo app) */
+  /* Textura (assets/carve.svg) */
   --carve-opacity: 0.035;
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);

@@ -1,7 +1,18 @@
 {
-  "name": "@turtle/ui", "version": "0.0.0", "private": true, "type": "module",
-  "main": "dist/index.js", "types": "dist/index.d.ts",
-  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "echo no tests" },
-  "dependencies": { "react": "^19.1.0" },
+  "name": "@turtle/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css",
+    "./assets/*": "./assets/*"
+  },
+  "scripts": { "build": "tsc --noEmit", "typecheck": "tsc --noEmit", "test": "echo no tests" },
+  "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource-variable/figtree": "^5.3.0",
+    "react": "^19.1.0"
+  },
   "devDependencies": { "@types/react": "^19.1.0" }
 }

@@ -1,0 +1,7 @@
+{
+  "name": "@turtle/ui", "version": "0.0.0", "private": true, "type": "module",
+  "main": "dist/index.js", "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "echo no tests" },
+  "dependencies": { "react": "^19.1.0" },
+  "devDependencies": { "@types/react": "^19.1.0" }
+}

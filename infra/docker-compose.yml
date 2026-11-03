@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: turtle
+      POSTGRES_PASSWORD: turtle
+      POSTGRES_DB: turtle
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
+volumes:
+  pgdata:

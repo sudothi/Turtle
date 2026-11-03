@@ -1,6 +1,24 @@
 {
-  "name": "@turtle/client", "version": "0.0.0", "private": true, "type": "module",
-  "scripts": { "dev": "vite", "build": "tsc --noEmit && vite build", "typecheck": "tsc --noEmit", "test": "echo no tests" },
-  "dependencies": { "@turtle/ui": "workspace:*", "react": "^19.1.0", "react-dom": "^19.1.0" },
-  "devDependencies": { "@vitejs/plugin-react": "^4.7.0", "vite": "^7.0.0", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0" }
+  "name": "@turtle/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "echo no tests"
+  },
+  "dependencies": {
+    "@turtle/ui": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@turtle/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^7.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0"
+  }
 }

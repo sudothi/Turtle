@@ -1,0 +1,18 @@
+:root { color-scheme: dark; --bg:#000; --fg:#fff; --dim:#8a8a8a; --line:#2a2a2a; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, sans-serif; }
+button, input { font: inherit; color: inherit; background: transparent; border: 2px solid var(--fg); padding: 8px 12px; }
+button { cursor: pointer; } button:hover { background: var(--fg); color: var(--bg); }
+input:focus { outline: none; background: #111; }
+.auth { min-height:100vh; display:grid; place-items:center; }
+.auth form { display:flex; flex-direction:column; gap:10px; width:320px; }
+.err { color:#fff; border-left:4px solid #fff; padding-left:8px; }
+.app { display:grid; grid-template-columns: 220px 1fr 180px; height:100vh; }
+.side { border-right:2px solid var(--fg); padding:12px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
+.side.right { border-right:none; border-left:2px solid var(--fg); }
+.ch { text-align:left; border-color:transparent; } .ch.on { border-color:var(--fg); }
+.main { display:flex; flex-direction:column; min-width:0; }
+.msgs { flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+.msg b { margin-right:8px; } .msg time { color:var(--dim); font-size:12px; }
+.composer { display:flex; gap:8px; padding:12px; border-top:2px solid var(--fg); } .composer input { flex:1; }
+h1,h2 { margin:0 0 8px; } .dim { color:var(--dim); font-size:13px; }

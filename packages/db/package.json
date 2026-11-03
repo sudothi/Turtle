@@ -1,5 +1,6 @@
 {
   "name": "@turtle/db", "version": "0.0.0", "private": true, "type": "module",
   "main": "dist/index.js", "types": "dist/index.d.ts",
-  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "echo no tests" }
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "echo no tests" },
+  "dependencies": { "drizzle-orm": "^0.44.0", "postgres": "^3.4.0", "@electric-sql/pglite": "^0.3.0" }
 }

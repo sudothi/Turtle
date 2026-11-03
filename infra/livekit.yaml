@@ -5,5 +5,7 @@ rtc:
   port_range_start: 50000
   port_range_end: 50100
   use_external_ip: false
+  # O navegador fala com o LiveKit pelas portas publicadas no host (funciona no Docker Desktop do Windows).
+  node_ip: 127.0.0.1
 keys:
   devkey: devsecret-devsecret-devsecret-1234

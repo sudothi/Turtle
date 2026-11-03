@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/auth": server, "/me": server, "/channels": server, "/invites": server, "/health": server,
+      "/auth": server, "/me": server, "/channels": server, "/invites": server, "/health": server, "/voice": server,
       "/ws": { target: server, ws: true },
     },
   },

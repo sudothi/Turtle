@@ -8,9 +8,13 @@ services:
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.11
     command: --config /etc/livekit.yaml
-    network_mode: host
+    # Portas publicadas em vez de network_mode: host, que não funciona no Docker Desktop (Windows).
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
     volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
 volumes:
   pgdata:

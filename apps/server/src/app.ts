@@ -1,4 +1,5 @@
 import Fastify, { type FastifyRequest } from "fastify";
+import { AccessToken, TrackSource } from "livekit-server-sdk";
 import websocket from "@fastify/websocket";
 import { and, channels, desc, eq, invites, lt, messages, sessions, users, type Db } from "@turtle/db";
 import {
@@ -9,6 +10,8 @@ import {
   type Message,
   type ServerEvent,
   type User,
+  type VoiceState,
+  type VoiceToken,
 } from "@turtle/protocol";
 import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
 
@@ -16,7 +19,19 @@ export interface AppOptions {
   db: Db;
   /** Convite inicial criado se ainda não existe nenhum usuário (primeiro usuário vira admin). */
   bootstrapInvite?: string;
+  /** Sem isso, o endpoint de token de voz responde 503. */
+  livekit?: LiveKitConfig;
 }
+
+export interface LiveKitConfig {
+  /** URL que o cliente usa para conectar (ws://localhost:7880 local, wss://lk.ogturtle.xyz em produção). */
+  url: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
+/** Nome da sala LiveKit de um canal de voz. */
+export const voiceRoomName = (channelId: string) => `voice-${channelId}`;
 
 interface Socket {
   send(data: string): void;
@@ -24,7 +39,7 @@ interface Socket {
   on(event: "message" | "close", cb: (...args: any[]) => void): void;
 }
 
-export async function buildApp({ db, bootstrapInvite }: AppOptions) {
+export async function buildApp({ db, bootstrapInvite, livekit }: AppOptions) {
   const app = Fastify({ logger: false });
   await app.register(websocket);
 
@@ -35,12 +50,25 @@ export async function buildApp({ db, bootstrapInvite }: AppOptions) {
   };
   const presence = () => broadcast({ t: "presence", online: [...new Set([...online.values()].map((u) => u.username))] });
 
+  // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
+  const voice = new Map<Socket, VoiceState>();
+  const voiceStates = (): ServerEvent => {
+    const seen = new Set<string>();
+    const states = [...voice.values()].filter((v) => !seen.has(v.userId) && seen.add(v.userId));
+    return { t: "voiceStates", states };
+  };
+
   if (bootstrapInvite) {
     const any = await db.select({ id: users.id }).from(users).limit(1);
     if (any.length === 0) await db.insert(invites).values({ code: bootstrapInvite }).onConflictDoNothing();
   }
   const general = await db.select().from(channels).where(eq(channels.name, "geral")).limit(1);
-  if (general.length === 0) await db.insert(channels).values({ id: newId(), name: "geral" });
+  if (general.length === 0) await db.insert(channels).values({ id: newId(), name: "geral", kind: "text" });
+  const anyVoice = await db.select({ id: channels.id }).from(channels).where(eq(channels.kind, "voice")).limit(1);
+  if (anyVoice.length === 0) await db.insert(channels).values({ id: newId(), name: "Sala", kind: "voice" }).onConflictDoNothing();
+
+  const findChannel = async (id: string) =>
+    (await db.select({ id: channels.id, name: channels.name, kind: channels.kind }).from(channels).where(eq(channels.id, id)).limit(1))[0];
 
   async function userFromToken(token: string | undefined): Promise<User | null> {
     if (!token) return null;
@@ -98,13 +126,15 @@ export async function buildApp({ db, bootstrapInvite }: AppOptions) {
 
     authed.get("/me", async (req) => me(req));
 
-    authed.get("/channels", async () => db.select({ id: channels.id, name: channels.name }).from(channels).orderBy(channels.createdAt));
+    authed.get("/channels", async () =>
+      db.select({ id: channels.id, name: channels.name, kind: channels.kind }).from(channels).orderBy(channels.createdAt),
+    );
 
     authed.post("/channels", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
       const body = createChannelBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
-      const channel = { id: newId(), name: body.data.name };
+      const channel = { id: newId(), name: body.data.name, kind: body.data.kind };
       try {
         await db.insert(channels).values(channel);
       } catch {
@@ -112,6 +142,24 @@ export async function buildApp({ db, bootstrapInvite }: AppOptions) {
       }
       broadcast({ t: "channel", channel });
       return channel;
+    });
+
+    authed.post<{ Params: { id: string } }>("/voice/:id/token", async (req, reply) => {
+      if (!livekit) return reply.code(503).send({ error: "voz não configurada no servidor" });
+      const channel = await findChannel(req.params.id);
+      if (!channel || channel.kind !== "voice") return reply.code(404).send({ error: "canal de voz não existe" });
+      const user = me(req);
+      const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "6h" });
+      at.addGrant({
+        room: voiceRoomName(channel.id),
+        roomJoin: true,
+        canSubscribe: true,
+        canPublish: true,
+        canPublishData: true,
+        // Marco 2 só voz; tela e câmera entram no marco 3.
+        canPublishSources: [TrackSource.MICROPHONE],
+      });
+      return { url: livekit.url, token: await at.toJwt() } satisfies VoiceToken;
     });
 
     authed.post("/invites", async (req, reply) => {
@@ -144,9 +192,11 @@ export async function buildApp({ db, bootstrapInvite }: AppOptions) {
       if (!user) return socket.close(4401, "unauthorized");
       online.set(socket, user);
       presence();
+      socket.send(JSON.stringify(voiceStates()));
       socket.on("close", () => {
         online.delete(socket);
         presence();
+        if (voice.delete(socket)) broadcast(voiceStates());
       });
       socket.on("message", async (raw: Buffer) => {
         let evt;
@@ -156,8 +206,22 @@ export async function buildApp({ db, bootstrapInvite }: AppOptions) {
           return socket.send(JSON.stringify({ t: "error", error: "evento inválido" } satisfies ServerEvent));
         }
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
-        const channel = (await db.select({ id: channels.id }).from(channels).where(eq(channels.id, evt.channelId)).limit(1))[0];
-        if (!channel) return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
+        if (evt.t === "voice") {
+          if (evt.channelId === null) {
+            if (voice.delete(socket)) broadcast(voiceStates());
+            return;
+          }
+          const channel = await findChannel(evt.channelId);
+          if (!channel || channel.kind !== "voice")
+            return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
+          // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
+          for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
+          voice.set(socket, { userId: user.id, username: user.username, channelId: channel.id, muted: evt.muted, deafened: evt.deafened });
+          broadcast(voiceStates());
+          return;
+        }
+        const channel = await findChannel(evt.channelId);
+        if (!channel || channel.kind !== "text") return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username,
           content: evt.content, createdAt: new Date().toISOString(),

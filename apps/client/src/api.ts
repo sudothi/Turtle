@@ -1,4 +1,4 @@
-import type { Channel, Message, User } from "@turtle/protocol";
+import type { Channel, ChannelKind, Message, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
 export const getToken = () => localStorage.getItem(KEY);
@@ -22,7 +22,8 @@ export const api = {
     req<{ token: string; user: User }>("POST", "/auth/register", { inviteCode, username, password }),
   me: () => req<User>("GET", "/me"),
   channels: () => req<Channel[]>("GET", "/channels"),
-  createChannel: (name: string) => req<Channel>("POST", "/channels", { name }),
+  createChannel: (name: string, kind: ChannelKind = "text") => req<Channel>("POST", "/channels", { name, kind }),
+  voiceToken: (channelId: string) => req<VoiceToken>("POST", `/voice/${channelId}/token`, {}),
   createInvite: () => req<{ code: string }>("POST", "/invites", {}),
   messages: (channelId: string) => req<Message[]>("GET", `/channels/${channelId}/messages`),
 };

@@ -24,6 +24,7 @@ export const invites = pgTable("invites", {
 export const channels = pgTable("channels", {
   id: text("id").primaryKey(),
   name: text("name").notNull().unique(),
+  kind: text("kind", { enum: ["text", "voice"] }).notNull().default("text"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

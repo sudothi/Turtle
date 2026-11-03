@@ -13,7 +13,8 @@
     "@fastify/websocket": "^11.1.0",
     "@turtle/db": "workspace:*",
     "@turtle/protocol": "workspace:*",
-    "fastify": "^5.4.0"
+    "fastify": "^5.4.0",
+    "livekit-server-sdk": "^2.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

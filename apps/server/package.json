@@ -1,0 +1,11 @@
+{
+  "name": "@turtle/server", "version": "0.0.0", "private": true, "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "@turtle/protocol": "workspace:*", "fastify": "^5.4.0", "@fastify/websocket": "^11.1.0" },
+  "devDependencies": { "tsx": "^4.20.0", "vitest": "^3.2.0", "@types/node": "^22.0.0", "@types/ws": "^8.18.0" }
+}

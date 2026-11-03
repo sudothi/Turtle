@@ -1,0 +1,240 @@
+/*
+ * Turtle — base e componentes do design system.
+ * Uso: import "@turtle/ui/styles.css" uma vez na raiz do app e renderize <LinoDefs /> uma vez.
+ */
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "./tokens.css";
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--ink-0);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: 1.375;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+::selection { background: var(--paper); color: var(--ink-0); }
+
+/* Barra de rolagem fina, como no Discord */
+* { scrollbar-width: thin; scrollbar-color: var(--ink-5) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--ink-5); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+
+/* ---------- Linocut: bordas irregulares e textura de entalhe ---------- */
+
+/*
+ * .lino desenha o fundo/borda num pseudo-elemento que passa pelo filtro #lino-rough
+ * (ruído + deslocamento). O texto fica nítido; só a "chapa" ganha borda de goiva.
+ * Controle com --lino-bg, --lino-border e --lino-radius.
+ */
+.lino {
+  /* Valores próprios em cada .lino, para não herdar a chapa do pai (variáveis CSS herdam) */
+  --lino-bg: var(--ink-3);
+  --lino-border: 0 solid transparent;
+  --lino-radius: var(--radius-md);
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  border: none;
+}
+.lino::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--lino-bg);
+  border: var(--lino-border);
+  border-radius: var(--lino-radius);
+  filter: url(#lino-rough);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.lino.lino-lg::before { filter: url(#lino-rough-lg); }
+
+/* Textura de marcas de goiva por cima de um painel (bem sutil) */
+.carve { position: relative; }
+.carve::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: url("../assets/carve.svg") repeat;
+  opacity: var(--carve-opacity);
+}
+
+/* Mar entalhado com céu estrelado (fundo do login e do saguão da chamada) */
+.lino-waves { background: var(--ink-0) url("../assets/waves.svg") center bottom / cover no-repeat; }
+
+/* ---------- Tipografia ---------- */
+.t-display { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+.t-eyebrow { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.t-muted { color: var(--text-muted); }
+.t-faint { color: var(--text-faint); }
+
+/* ---------- Botão ---------- */
+.t-btn {
+  --lino-bg: var(--paper);
+  --lino-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 38px;
+  padding: 2px 16px;
+  color: var(--ink-0);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  user-select: none;
+  transition: transform 80ms var(--ease);
+}
+.t-btn:hover { --lino-bg: #ffffff; }
+.t-btn:active { transform: translateY(1px); }
+.t-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.t-btn.block { width: 100%; }
+.t-btn.lg { min-height: 44px; font-size: var(--fs-md); }
+.t-btn.sm { min-height: 32px; padding: 2px 12px; }
+.t-btn.secondary { --lino-bg: var(--ink-5); color: var(--text); }
+.t-btn.secondary:hover { --lino-bg: #3a3a3a; }
+.t-btn.outline { --lino-bg: transparent; --lino-border: 2px solid var(--paper); color: var(--text); }
+.t-btn.outline:hover { --lino-bg: var(--bg-active); }
+.t-btn.ghost { --lino-bg: transparent; color: var(--text); }
+.t-btn.ghost:hover { --lino-bg: var(--bg-hover); }
+/* "Perigo" sem cor: inverte para preto com borda de papel grossa */
+.t-btn.danger { --lino-bg: var(--ink-0); --lino-border: 2px solid var(--paper); color: var(--text); }
+.t-btn.danger:hover { --lino-bg: var(--paper); color: var(--ink-0); }
+
+.t-link { background: none; border: none; padding: 0; color: var(--text); font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer; }
+.t-link:hover { text-decoration-style: wavy; }
+
+/* Botão só com ícone (barra do usuário, cabeçalho) */
+.t-icon-btn {
+  --lino-bg: transparent;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--text-muted);
+}
+.t-icon-btn:hover { --lino-bg: var(--bg-active); color: var(--text); }
+.t-icon-btn[aria-pressed="true"] { color: var(--text); }
+.t-icon-btn.active { color: var(--text); }
+
+/* ---------- Campo de texto ---------- */
+.t-field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.t-field-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--paper-dim); }
+.t-field-label .req { margin-left: 2px; }
+.t-field.has-error .t-field-label { color: var(--text); }
+.t-field-error { font-weight: 500; text-transform: none; letter-spacing: 0; font-style: italic; }
+.t-input-wrap { --lino-bg: var(--ink-0); --lino-radius: var(--radius-sm); display: flex; }
+.t-input-wrap:focus-within { --lino-border: 2px solid var(--paper); }
+.t-field.has-error .t-input-wrap { --lino-border: 2px dashed var(--paper); }
+.t-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--fs-md);
+}
+.t-input::placeholder { color: var(--text-faint); }
+.t-field-hint { font-size: var(--fs-xs); color: var(--text-muted); }
+
+select.t-select {
+  height: 40px;
+  padding: 0 10px;
+  background: var(--ink-0);
+  border: 2px solid var(--ink-4);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Avatar ---------- */
+.t-avatar {
+  --lino-radius: 50%;
+  --lino-bg: var(--paper);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--size, 40px);
+  height: var(--size, 40px);
+  color: var(--ink-0);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: calc(var(--size, 40px) * 0.44);
+  line-height: 1;
+  user-select: none;
+}
+/* Variações por usuário (sem cor): papel, tinta com aro, hachura, pontilhado */
+.t-avatar.v1 { --lino-bg: var(--ink-0); --lino-border: 2px solid var(--paper); color: var(--paper); }
+.t-avatar.v2 { --lino-bg: repeating-linear-gradient(-45deg, var(--paper) 0 2px, var(--ink-0) 2px 5px); }
+.t-avatar.v3 { --lino-bg: radial-gradient(circle, var(--paper) 1.1px, transparent 1.5px) 0 0 / 5px 5px, var(--ink-0); }
+.t-avatar.v2 > span, .t-avatar.v3 > span {
+  width: 64%;
+  height: 64%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink-0);
+  font-size: calc(var(--size, 40px) * 0.34);
+}
+/* Falando: anel grosso de papel, como no Discord (verde lá, branco aqui) */
+.t-avatar.speaking { box-shadow: 0 0 0 2px var(--ink-1), 0 0 0 5px var(--paper); border-radius: 50%; }
+
+.t-avatar-wrap { position: relative; display: inline-flex; flex: none; }
+.t-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: calc(var(--size, 40px) * 0.38);
+  height: calc(var(--size, 40px) * 0.38);
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 0 0 3px var(--status-ring, var(--bg-sidebar));
+}
+.t-status.offline { background: var(--ink-0); box-shadow: inset 0 0 0 2px var(--text-faint), 0 0 0 3px var(--status-ring, var(--bg-sidebar)); }
+
+/* ---------- Modal ---------- */
+.t-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: var(--bg-overlay);
+  animation: t-fade 120ms var(--ease);
+}
+.t-modal {
+  --lino-bg: var(--ink-2);
+  --lino-border: 2px solid var(--paper);
+  --lino-radius: var(--radius-md);
+  width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  animation: t-pop 160ms var(--ease);
+}
+.t-modal-head { padding: 24px 24px 8px; text-align: center; }
+.t-modal-head h2 { margin: 0; font-size: var(--fs-xl); }
+.t-modal-head p { margin: 8px 0 0; color: var(--text-muted); font-size: var(--fs-sm); }
+.t-modal-close { position: absolute; top: 12px; right: 12px; }
+.t-modal-body { padding: 16px 24px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+.t-modal-foot { padding: 8px 24px 24px; display: flex; justify-content: flex-end; gap: 8px; }
+
+@keyframes t-fade { from { opacity: 0; } }
+@keyframes t-pop { from { opacity: 0; transform: scale(0.96); } }
+
+/* ---------- Divisor entalhado ---------- */
+.t-divider { height: 2px; border: none; margin: 0; background: var(--line); }

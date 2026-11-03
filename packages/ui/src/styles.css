@@ -68,9 +68,6 @@ button { cursor: pointer; }
   opacity: var(--carve-opacity);
 }
 
-/* Mar entalhado com céu estrelado (fundo do login e do saguão da chamada) */
-.lino-waves { background: var(--ink-0) url("../assets/waves.svg") center bottom / cover no-repeat; }
-
 /* ---------- Tipografia ---------- */
 .t-display { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
 .t-eyebrow { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }

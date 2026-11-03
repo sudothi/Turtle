@@ -20,7 +20,7 @@ export function CallView({ channel, snap, voice, members = [] }: { channel?: Cha
       </ChannelHeader>
 
       {!inThis ? (
-        <div className="call-lobby lino-waves">
+        <div className="call-lobby">
           <div className="call-lobby-faces">
             {here.length ? here.map((m) => <Avatar key={m.userId} name={m.username} size={72} />) : <Icon name="speaker" size={56} />}
           </div>

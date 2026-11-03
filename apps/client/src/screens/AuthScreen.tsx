@@ -44,7 +44,7 @@ export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
   };
 
   return (
-    <main className="auth">
+    <main className="auth lino-live">
       <div className="auth-brand" aria-hidden="true">
         <TurtleMark size={30} />
         <span className="t-display">Turtle</span>

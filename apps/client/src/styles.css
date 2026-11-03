@@ -58,6 +58,7 @@
 .auth-side h2 { margin: 16px 0 0; font-size: var(--fs-xl); }
 .auth-side p { margin: 6px 0 0; font-size: var(--fs-sm); }
 .auth-logo { filter: url(#lino-rough); }
+.lino-live .auth-logo { filter: url(#lino-boil); }
 @media (max-width: 760px) {
   .auth-card { grid-template-columns: 1fr; padding: 24px; }
   .auth-side { display: none; }

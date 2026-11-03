@@ -56,6 +56,10 @@ button { cursor: pointer; }
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .lino.lino-lg::before { filter: url(#lino-rough-lg); }
+/* Opt-in: dentro de um container .lino-live as bordas ficam "fervendo" (ver LinoDefs) */
+.lino-live .lino::before { filter: url(#lino-boil); }
+.lino-live .lino.lino-lg::before { filter: url(#lino-boil-lg); }
+.lino-live .lino-boil-filter { filter: url(#lino-boil); }
 
 /* Textura de marcas de goiva por cima de um painel (bem sutil) */
 .carve { position: relative; }

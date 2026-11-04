@@ -4,6 +4,7 @@ import { Button, Modal, TextField } from "@turtle/ui";
 import { api } from "../api";
 import { AppInvitePanel } from "./modals";
 import { ProfileCard } from "./ProfileCard";
+import { ImageCropper } from "./ImageCropper";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const mb = (n: number) => `${n / 1024 / 1024} MB`;
@@ -16,6 +17,7 @@ export function ProfileModal({ user, onChanged, onClose }: { user: User; onChang
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [crop, setCrop] = useState<{ kind: "avatar" | "banner"; file: File } | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
   const bannerInput = useRef<HTMLInputElement>(null);
 
@@ -37,9 +39,31 @@ export function ProfileModal({ user, onChanged, onClose }: { user: User; onChang
     e.target.value = "";
     if (!file) return;
     if (file.size > max) return setError(`imagem grande demais (máximo ${mb(max)})`);
-    void run(() => api.uploadImage(kind, file));
+    setError("");
+    setCrop({ kind, file });
+  };
+  const cropped = (blob: Blob) => {
+    if (!crop) return;
+    const kind = crop.kind;
+    setCrop(null);
+    void run(() => api.uploadImage(kind, new File([blob], `${kind}.png`, { type: "image/png" })));
   };
   const dirty = name.trim() !== (me.displayName ?? "") || bio.trim() !== (me.bio ?? "");
+
+  if (crop) {
+    const avatar = crop.kind === "avatar";
+    return (
+      <ImageCropper
+        file={crop.file}
+        width={avatar ? 256 : 960}
+        height={avatar ? 256 : 320}
+        round={avatar}
+        title={avatar ? "Recortar foto" : "Recortar banner"}
+        onCancel={() => setCrop(null)}
+        onDone={cropped}
+      />
+    );
+  }
 
   return (
     <Modal

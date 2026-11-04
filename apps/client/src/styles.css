@@ -483,3 +483,10 @@
 .profile-bio-input:focus { outline: none; border-color: var(--paper); }
 @media (max-width: 720px) { .profile-editor { grid-template-columns: 1fr; } }
 .t-modal:has(.profile-editor) { width: min(780px, calc(100vw - 32px)); max-width: none; }
+
+/* Recorte de foto/banner */
+.cropper { position: relative; overflow: hidden; margin: 0 auto; max-width: 100%; cursor: grab; touch-action: none; user-select: none; background: var(--ink-0); border: 2px solid var(--paper); border-radius: var(--radius-md); }
+.cropper:active { cursor: grabbing; }
+.cropper img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
+.cropper-round::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgb(0 0 0 / 0.55); pointer-events: none; }
+.cropper-zoom { display: block; width: 100%; max-width: 480px; margin: 16px auto 0; accent-color: var(--paper); }

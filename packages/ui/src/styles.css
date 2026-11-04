@@ -30,8 +30,8 @@ button { cursor: pointer; }
 /* ---------- Linocut: bordas irregulares e textura de entalhe ---------- */
 
 /*
- * .lino desenha o fundo/borda num pseudo-elemento que passa pelo filtro #lino-rough
- * (ruído + deslocamento). O texto fica nítido; só a "chapa" ganha borda de goiva.
+ * .lino desenha o fundo/borda num pseudo-elemento ("chapa"). Normalmente é lisa; dentro de
+ * .lino-live (login) a chapa passa pelo filtro de entalhe animado e o texto continua nítido.
  * Controle com --lino-bg, --lino-border e --lino-radius.
  */
 .lino {
@@ -52,11 +52,10 @@ button { cursor: pointer; }
   background: var(--lino-bg);
   border: var(--lino-border);
   border-radius: var(--lino-radius);
-  filter: url(#lino-rough);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.lino.lino-lg::before { filter: url(#lino-rough-lg); }
-/* Opt-in: dentro de um container .lino-live as bordas ficam "fervendo" (ver LinoDefs) */
+/* Opt-in: só dentro de um container .lino-live (tela de login) a borda ganha o entalhe e "ferve" (ver LinoDefs).
+   No resto do app a chapa .lino é lisa, como no Discord. */
 .lino-live .lino::before { filter: url(#lino-boil); }
 .lino-live .lino.lino-lg::before { filter: url(#lino-boil-lg); }
 .lino-live .lino-boil-filter { filter: url(#lino-boil); }

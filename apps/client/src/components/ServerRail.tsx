@@ -33,7 +33,7 @@ export function ServerRail({
   onJoin?: () => void;
 }) {
   return (
-    <nav className="rail carve" aria-label="Servidores">
+    <nav className="rail" aria-label="Servidores">
       <div className="rail-item">
         <span className="rail-pill" aria-hidden="true" />
         <div className="rail-home" title="Turtle (mensagens diretas em breve)" aria-hidden="true">

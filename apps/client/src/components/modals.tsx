@@ -105,8 +105,8 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
   );
 }
 
-/** Só admin do app: gera um convite para criar conta no Turtle (uso único). */
-export function AppInviteModal({ onClose }: { onClose: () => void }) {
+/** Só admin do app (nas Configurações): gera um convite para criar conta no Turtle, de uso único. */
+export function AppInvitePanel() {
   const [code, setCode] = useState<string>();
   const [error, setError] = useState<string>();
   const [copied, setCopied] = useState(false);
@@ -115,7 +115,6 @@ export function AppInviteModal({ onClose }: { onClose: () => void }) {
     setError(undefined);
     api.createAccountInvite().then((r) => setCode(r.code), (e: Error) => setError(e.message));
   };
-  useEffect(generate, []);
   const link = code ? `${location.origin}/convite/${code}` : "";
   const copy = async () => {
     await navigator.clipboard.writeText(link).catch(() => {});
@@ -123,18 +122,24 @@ export function AppInviteModal({ onClose }: { onClose: () => void }) {
     setTimeout(() => setCopied(false), 1600);
   };
   return (
-    <Modal title="Convidar para o Turtle" subtitle="Link para criar uma conta nova. Vale para uma pessoa só. Depois, ela entra nos servidores com convites de servidor." onClose={onClose}>
-      <div className="invite-box lino">
-        <code>{link || (error ? "—" : "gerando…")}</code>
-        <Button size="sm" onClick={copy} disabled={!code}>
-          <Icon name={copied ? "check" : "copy"} size={16} />
-          {copied ? "Copiado" : "Copiar"}
-        </Button>
-      </div>
-      {error && <p className="t-muted">{error}</p>}
-      <div className="modal-actions">
-        <Button variant="ghost" onClick={generate}>Gerar outro</Button>
-      </div>
-    </Modal>
+    <div className="t-field app-invite">
+      <span className="t-field-label">Convidar para o Turtle (só admin)</span>
+      {code ? (
+        <div className="invite-box lino">
+          <code>{link}</code>
+          <Button size="sm" onClick={copy}>
+            <Icon name={copied ? "check" : "copy"} size={16} />
+            {copied ? "Copiado" : "Copiar"}
+          </Button>
+        </div>
+      ) : (
+        <div className="profile-actions">
+          <Button size="sm" onClick={generate}>Gerar convite de conta</Button>
+        </div>
+      )}
+      <span className="t-field-hint">Link de uso único para uma pessoa criar a conta. Depois ela entra nos servidores com convites de servidor.</span>
+      {code && <div className="profile-actions"><Button size="sm" variant="ghost" onClick={generate}>Gerar outro</Button></div>}
+      {error && <div className="err" role="alert">{error}</div>}
+    </div>
   );
 }

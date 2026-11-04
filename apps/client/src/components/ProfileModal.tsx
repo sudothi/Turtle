@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { AVATAR_MAX_BYTES, BANNER_MAX_BYTES, BIO_MAX, type User } from "@turtle/protocol";
 import { Button, Modal, TextField } from "@turtle/ui";
 import { api } from "../api";
+import { AppInvitePanel } from "./modals";
 import { ProfileCard } from "./ProfileCard";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -81,6 +82,7 @@ export function ProfileModal({ user, onChanged, onClose }: { user: User; onChang
             <input ref={bannerInput} type="file" accept={ACCEPT} hidden aria-label="Arquivo do banner" onChange={pick("banner", BANNER_MAX_BYTES)} />
           </div>
           {error && <div className="err" role="alert">{error}</div>}
+          {user.isAdmin && <AppInvitePanel />}
         </div>
         <div className="profile-preview">
           <div className="t-eyebrow">Prévia</div>

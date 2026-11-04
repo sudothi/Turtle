@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { micConstraints, type AudioPrefs, type NoiseMode } from "./prefs";
+import { micConstraints, needsAudioProcessor, type AudioPrefs, type NoiseMode } from "./prefs";
 import { createRnnoiseGraph, type RnnoiseGraph } from "./rnnoise";
 import type { VoiceClient } from "./client";
 
 const noiseLabels: Record<NoiseMode, string> = {
-  rnnoise: "RNNoise (recomendado)",
-  browser: "Do navegador",
+  gtcrn: "GTCRN (recomendado · rede neural)",
+  rnnoise: "RNNoise (leve · voz contínua)",
+  speex: "Speex (clássico · ventilador)",
+  browser: "Do navegador (WebRTC)",
   off: "Desligada",
+};
+
+const noiseHints: Record<NoiseMode, string> = {
+  gtcrn: "Rede neural moderna (~190 KB): corta teclado, cliques e ruído de fundo mantendo a voz natural.",
+  rnnoise: "Modelo leve (~150 KB): mais suave, mas deixa passar ruídos curtos se a porta de ruído estiver desligada.",
+  speex: "Filtro espectral clássico (~55 KB): bom para chiado constante e ventilador, uso mínimo de CPU.",
+  browser: "Processamento nativo do navegador/sistema operacional.",
+  off: "Sem supressão de ruído (apenas cancelamento de eco e ganho automático do navegador).",
 };
 
 async function listDevices() {
@@ -27,13 +37,27 @@ async function listDevices() {
   };
 }
 
-/** Teste de microfone: medidor de nível e, opcionalmente, ouvir a si mesmo com o filtro escolhido. */
+const calcDb = (buf: Float32Array) => {
+  let sum = 0;
+  for (const v of buf) sum += v * v;
+  return 20 * Math.log10(Math.sqrt(sum / buf.length) || 1e-8);
+};
+
+const dbToPct = (db: number) => Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
+
+/** Teste de microfone: medidor de nível (entrada vs filtrado) e, opcionalmente, ouvir a si mesmo com o filtro escolhido. */
 function MicTest({ prefs }: { prefs: AudioPrefs }) {
   const [on, setOn] = useState(false);
   const [loopback, setLoopback] = useState(false);
-  const [level, setLevel] = useState(0);
+  const [rawDb, setRawDb] = useState(-60);
+  const [outDb, setOutDb] = useState(-60);
   const [error, setError] = useState("");
   const audio = useRef<HTMLAudioElement>(null);
+  const graphRef = useRef<RnnoiseGraph | undefined>(undefined);
+
+  useEffect(() => {
+    graphRef.current?.setGain(prefs.inputGain);
+  }, [prefs.inputGain]);
 
   useEffect(() => {
     if (!on) return;
@@ -47,19 +71,28 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
         stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(prefs) });
         if (stopped) return stream.getTracks().forEach((t) => t.stop());
         const track = stream.getAudioTracks()[0]!;
+        let rawNode: AudioNode;
         let output: AudioNode;
-        if (prefs.noise === "rnnoise") {
-          graph = await createRnnoiseGraph(track);
+        if (needsAudioProcessor(prefs)) {
+          graph = await createRnnoiseGraph(track, prefs);
+          graphRef.current = graph;
           ctx = graph.context;
+          rawNode = graph.source;
           output = graph.output;
         } else {
           ctx = new AudioContext({ sampleRate: 48000 });
-          output = ctx.createMediaStreamSource(stream);
+          rawNode = ctx.createMediaStreamSource(stream);
+          output = rawNode;
         }
         if (stopped) return;
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        output.connect(analyser);
+        const rawAnalyser = ctx.createAnalyser();
+        rawAnalyser.fftSize = 1024;
+        rawNode.connect(rawAnalyser);
+
+        const outAnalyser = ctx.createAnalyser();
+        outAnalyser.fftSize = 1024;
+        output.connect(outAnalyser);
+
         const dest = ctx.createMediaStreamDestination();
         output.connect(dest);
         if (audio.current) {
@@ -67,13 +100,13 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
           if (prefs.outputId !== "default" && "setSinkId" in audio.current)
             await (audio.current as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(prefs.outputId).catch(() => {});
         }
-        const buf = new Float32Array(analyser.fftSize);
+        const rawBuf = new Float32Array(rawAnalyser.fftSize);
+        const outBuf = new Float32Array(outAnalyser.fftSize);
         const tick = () => {
-          analyser.getFloatTimeDomainData(buf);
-          let sum = 0;
-          for (const v of buf) sum += v * v;
-          const db = 20 * Math.log10(Math.sqrt(sum / buf.length) || 1e-8);
-          setLevel(Math.max(0, Math.min(1, (db + 60) / 60)));
+          rawAnalyser.getFloatTimeDomainData(rawBuf);
+          outAnalyser.getFloatTimeDomainData(outBuf);
+          setRawDb(calcDb(rawBuf));
+          setOutDb(calcDb(outBuf));
           raf = requestAnimationFrame(tick);
         };
         tick();
@@ -86,16 +119,30 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
       stopped = true;
       cancelAnimationFrame(raf);
       stream?.getTracks().forEach((t) => t.stop());
+      graphRef.current = undefined;
       if (graph) graph.destroy();
       else void ctx?.close();
       if (audio.current) audio.current.srcObject = null;
-      setLevel(0);
+      setRawDb(-60);
+      setOutDb(-60);
     };
-  }, [on, prefs.inputId, prefs.outputId, prefs.noise]);
+  }, [on, prefs.inputId, prefs.outputId, prefs.noise, prefs.noiseGate, prefs.gateThreshold]);
+
+  const gatePct = dbToPct(prefs.gateThreshold);
 
   return (
     <div className="mictest">
-      <div className="meter"><div style={{ width: `${level * 100}%` }} /></div>
+      <div className="meter-group">
+        <div className="meter-head">
+          <span>Entrada vs. saída filtrada</span>
+          {on && <span className="t-muted">{Math.max(-60, Math.round(outDb))} dB</span>}
+        </div>
+        <div className="meter" title="Barra clara: áudio enviado · Barra escura ao fundo: ruído captado antes do filtro">
+          <div className="meter-raw" style={{ width: `${dbToPct(rawDb)}%` }} />
+          <div className="meter-out" style={{ width: `${dbToPct(outDb)}%` }} />
+          {prefs.noiseGate && <span className="meter-gate" style={{ left: `${gatePct}%` }} title={`Porta de ruído: ${prefs.gateThreshold} dB`} />}
+        </div>
+      </div>
       <div className="row">
         <button type="button" onClick={() => { setError(""); setOn(!on); }}>{on ? "Parar teste" : "Testar microfone"}</button>
         <label className="check">
@@ -119,6 +166,7 @@ export function VoiceSettings({ voice, prefs, onClose }: { voice: VoiceClient; p
   }, []);
 
   const name = (d: MediaDeviceInfo, i: number) => d.label || (d.kind === "audioinput" ? `Microfone ${i + 1}` : `Saída ${i + 1}`);
+  const gainPct = Math.round(prefs.inputGain * 100);
 
   return (
     <div className="modal" role="dialog" aria-label="Configurações de voz" onClick={onClose}>
@@ -143,6 +191,38 @@ export function VoiceSettings({ voice, prefs, onClose }: { voice: VoiceClient; p
           <select value={prefs.noise} onChange={(e) => void voice.setNoise(e.target.value as NoiseMode)}>
             {(Object.keys(noiseLabels) as NoiseMode[]).map((k) => <option key={k} value={k}>{noiseLabels[k]}</option>)}
           </select>
+          <span className="field-note">{noiseHints[prefs.noise]}</span>
+        </label>
+        <div className="voice-gate-box">
+          <label className="check">
+            <input type="checkbox" checked={prefs.noiseGate} onChange={(e) => void voice.setNoiseGate(e.target.checked)} />
+            Porta de ruído (corta som abaixo de {prefs.gateThreshold} dB)
+          </label>
+          {prefs.noiseGate && (
+            <input
+              className="voice-slider"
+              type="range"
+              min={-70}
+              max={-20}
+              step={2}
+              aria-label="Limiar da porta de ruído em dB"
+              value={prefs.gateThreshold}
+              onChange={(e) => void voice.setGateThreshold(Number(e.target.value))}
+            />
+          )}
+        </div>
+        <label>
+          <span>Ganho do microfone ({gainPct}%)</span>
+          <input
+            className="voice-slider"
+            type="range"
+            min={0.25}
+            max={2.5}
+            step={0.05}
+            aria-label="Ganho do microfone"
+            value={prefs.inputGain}
+            onChange={(e) => void voice.setInputGain(Number(e.target.value))}
+          />
         </label>
         <MicTest prefs={prefs} />
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>

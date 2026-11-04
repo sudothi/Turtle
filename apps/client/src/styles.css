@@ -406,8 +406,15 @@
 .panel > button:last-child { align-self: flex-end; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .mictest { display: flex; flex-direction: column; gap: 10px; }
-.meter { height: 10px; border-radius: 6px; background: var(--ink-0); border: 2px solid var(--ink-4); overflow: hidden; }
-.meter div { height: 100%; background: repeating-linear-gradient(90deg, var(--paper) 0 6px, transparent 6px 8px); transition: width 60ms linear; }
+.meter-group { display: flex; flex-direction: column; gap: 6px; }
+.meter-head { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--paper-dim); }
+.meter { position: relative; height: 12px; border-radius: 6px; background: var(--ink-0); border: 2px solid var(--ink-4); overflow: hidden; }
+.meter-raw { position: absolute; inset: 0 auto 0 0; height: 100%; background: var(--ink-5); opacity: 0.7; transition: width 60ms linear; }
+.meter-out { position: relative; height: 100%; background: repeating-linear-gradient(90deg, var(--paper) 0 6px, transparent 6px 8px); transition: width 60ms linear; }
+.meter-gate { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--paper); box-shadow: 0 0 0 1px var(--ink-0); pointer-events: none; }
+.field-note { font-size: var(--fs-xs); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); line-height: 1.35; }
+.voice-gate-box { display: flex; flex-direction: column; gap: 8px; }
+.voice-slider { width: 100%; accent-color: var(--paper); cursor: pointer; }
 .err { font-size: var(--fs-sm); font-style: italic; border-left: 3px solid var(--paper); padding-left: 8px; }
 .dim { color: var(--text-muted); font-size: var(--fs-sm); }
 

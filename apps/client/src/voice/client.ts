@@ -13,9 +13,9 @@ import {
   VideoPresets,
 } from "livekit-client";
 import { api } from "../api";
-import { loadPrefs, micConstraints, savePrefs, screenProfiles, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
+import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfiles, usesWasmNoise, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
 import { preferHardwareH264 } from "./codec";
-import { preloadRnnoise, RnnoiseProcessor } from "./rnnoise";
+import { preloadNoiseWasm, RnnoiseProcessor } from "./rnnoise";
 
 export interface CallParticipant {
   id: string;
@@ -155,7 +155,7 @@ export class VoiceClient {
     const seq = ++this.joinSeq;
     const prefs = this.snap.prefs;
     this.set({ status: "connecting", channelId, error: undefined, participants: [], videos: [], camera: false, screen: false });
-    if (prefs.noise === "rnnoise") void preloadRnnoise().catch(() => {});
+    if (usesWasmNoise(prefs.noise)) void preloadNoiseWasm(prefs.noise).catch(() => {});
 
     preferHardwareH264();
     const room = new Room({
@@ -194,7 +194,7 @@ export class VoiceClient {
         this.mic = mic;
         await room.localParticipant.publishTrack(mic, { source: Track.Source.Microphone });
         if (this.snap.muted) await mic.mute();
-        await this.applyNoise(prefs.noise);
+        await this.applyNoise();
       }
       this.refresh();
     } catch (err) {
@@ -241,7 +241,7 @@ export class VoiceClient {
         const mic = await createLocalAudioTrack(micConstraints(this.snap.prefs));
         this.mic = mic;
         await this.room.localParticipant.publishTrack(mic, { source: Track.Source.Microphone });
-        await this.applyNoise(this.snap.prefs.noise);
+        await this.applyNoise();
         this.set({ error: undefined });
       } catch (err) {
         this.set({ muted: true, error: `Sem acesso ao microfone (${(err as Error).message}).` });
@@ -373,10 +373,36 @@ export class VoiceClient {
   }
 
   async setNoise(noise: NoiseMode) {
+    const prev = this.snap.prefs.noise;
     this.savePrefs({ noise });
+    if (usesWasmNoise(noise)) void preloadNoiseWasm(noise).catch(() => {});
     if (!this.mic) return;
-    await this.mic.restartTrack(micConstraints(this.snap.prefs));
-    await this.applyNoise(noise);
+    // Só reinicia a captura se a constraint noiseSuppression do navegador mudou.
+    if ((prev === "browser") !== (noise === "browser")) {
+      await this.mic.restartTrack(micConstraints(this.snap.prefs));
+    }
+    await this.applyNoise();
+  }
+
+  async setNoiseGate(noiseGate: boolean) {
+    this.savePrefs({ noiseGate });
+    await this.applyNoise();
+  }
+
+  async setGateThreshold(gateThreshold: number) {
+    this.savePrefs({ gateThreshold });
+    await this.applyNoise();
+  }
+
+  async setInputGain(inputGain: number) {
+    const prevNeeds = needsAudioProcessor(this.snap.prefs);
+    this.savePrefs({ inputGain });
+    const proc = this.mic?.getProcessor();
+    if (proc instanceof RnnoiseProcessor && needsAudioProcessor(this.snap.prefs)) {
+      proc.setGain(inputGain);
+    } else if (prevNeeds !== needsAudioProcessor(this.snap.prefs)) {
+      await this.applyNoise();
+    }
   }
 
   setVolume(userId: string, volume: number) {
@@ -485,16 +511,20 @@ export class VoiceClient {
     }
   }
 
-  private async applyNoise(noise: NoiseMode) {
+  private async applyNoise() {
     const mic = this.mic;
     if (!mic) return;
+    const prefs = this.snap.prefs;
     try {
-      if (noise === "rnnoise") await mic.setProcessor(new RnnoiseProcessor());
-      else if (mic.getProcessor()) await mic.stopProcessor();
+      if (needsAudioProcessor(prefs)) {
+        await mic.setProcessor(new RnnoiseProcessor(prefs));
+      } else if (mic.getProcessor()) {
+        await mic.stopProcessor();
+      }
     } catch (err) {
-      // Sem RNNoise a chamada continua com a supressão do navegador desligada; avisa.
-      console.warn("RNNoise falhou", err);
-      this.set({ error: "Não deu para ligar o RNNoise; usando o microfone sem filtro." });
+      // Sem processador a chamada continua com o microfone direto; avisa.
+      console.warn("Filtro de áudio falhou", err);
+      this.set({ error: "Não deu para ligar o filtro de ruído; usando o microfone direto." });
     }
   }
 

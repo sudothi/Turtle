@@ -16,6 +16,7 @@ const livekit =
     ? { url: LIVEKIT_URL, apiKey: LIVEKIT_API_KEY, apiSecret: LIVEKIT_API_SECRET }
     : undefined;
 if (!livekit) console.warn("LIVEKIT_URL/API_KEY/API_SECRET ausentes: chamadas de voz desativadas");
-const app = await buildApp({ db, bootstrapInvite: process.env.BOOTSTRAP_INVITE, livekit });
+// Em produção, CLIENT_DIST aponta para o site compilado (apps/client/dist).
+const app = await buildApp({ db, bootstrapInvite: process.env.BOOTSTRAP_INVITE, livekit, clientDir: process.env.CLIENT_DIST });
 await app.listen({ port, host: "0.0.0.0" });
 console.log(`turtle server on :${port}${process.env.DATABASE_URL ? "" : " (banco em memória)"}`);

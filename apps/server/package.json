@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/static": "^8.3.0",
     "@fastify/websocket": "^11.1.0",
     "@turtle/db": "workspace:*",
     "@turtle/protocol": "workspace:*",

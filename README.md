@@ -20,3 +20,14 @@ O servidor lê o `.env` da raiz sozinho. Com `DATABASE_URL` definido o servidor 
 
 O primeiro cadastro usa o `BOOTSTRAP_INVITE` e vira admin; admins geram convites e criam canais.
 Plano de desenvolvimento: marcos 0 a 5 (fundação, chat, voz, tela/câmera, design, extras).
+
+## Publicar (produção)
+
+Uma imagem só (`Dockerfile`) roda a API, o WebSocket e entrega o site compilado na mesma origem (`CLIENT_DIST`). `infra/docker-compose.prod.yml` sobe Postgres, LiveKit, o app e o Caddy (HTTPS automático) para `app.ogturtle.xyz` e `lk.ogturtle.xyz`:
+
+```bash
+cp infra/.env.prod.example infra/.env   # preencha as senhas e as chaves do LiveKit
+docker compose -f infra/docker-compose.prod.yml up -d --build
+```
+
+O primeiro cadastro usa `BOOTSTRAP_INVITE`; esse primeiro usuário vira admin e dono do servidor "Turtle". Portas a liberar no firewall: 80, 443, 7881/tcp, 7882/udp e 3478/udp. O app desktop aponta para o site publicado com `TURTLE_CLIENT_URL=https://app.ogturtle.xyz pnpm desktop`.

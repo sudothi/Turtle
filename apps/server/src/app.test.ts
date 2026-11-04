@@ -95,6 +95,8 @@ describe("server", () => {
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, friendToken)).status).toBe(403);
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, adminToken)).status).toBe(200);
     expect((await get("/me", friendToken)).body.canInvite).toBe(true);
+    // a tag TURTLE vem junto: no cartão e na lista de membros, e some ao tirar o cargo
+    expect((await get(`/users/${amigo.id}`, adminToken)).body.staff).toBe(true);
     // o cartão público não expõe o cargo
     expect((await get(`/users/${amigo.id}`, adminToken)).body.canInvite).toBeUndefined();
     const inv = await post("/invites", {}, friendToken);
@@ -104,6 +106,7 @@ describe("server", () => {
     expect((await get("/admin/users", friendToken)).status).toBe(403);
     await patch(`/admin/users/${amigo.id}`, { canInvite: false }, adminToken);
     expect((await post("/invites", {}, friendToken)).status).toBe(403);
+    expect((await get(`/users/${amigo.id}`, adminToken)).body.staff).toBe(false);
     expect((await patch("/admin/users/ninguem", { canInvite: true }, adminToken)).status).toBe(404);
   });
 

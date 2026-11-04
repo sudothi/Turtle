@@ -20,7 +20,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 export const fileUrl = (key: string | null | undefined) => (key ? `/files/${key}` : null);
 
 /** Perfil público de alguém (cartão de perfil). */
-export type Profile = Pick<User, "id" | "username" | "displayName" | "bio" | "avatar" | "banner">;
+export type Profile = Pick<User, "id" | "username" | "displayName" | "bio" | "avatar" | "banner"> & { staff?: boolean };
 
 async function upload(kind: "avatar" | "banner", file: File): Promise<User> {
   const form = new FormData();

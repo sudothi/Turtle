@@ -1,5 +1,5 @@
 import { shownName, type ServerRole } from "@turtle/protocol";
-import { Avatar } from "@turtle/ui";
+import { Avatar, StaffTag } from "@turtle/ui";
 import { fileUrl, type Profile } from "../api";
 
 const roleLabel: Record<ServerRole, string> = { owner: "Dono", admin: "Admin", member: "" };
@@ -10,7 +10,7 @@ export function ProfileCard({
   role,
   preview,
 }: {
-  profile: Pick<Profile, "username" | "displayName" | "bio" | "avatar" | "banner">;
+  profile: Pick<Profile, "username" | "displayName" | "bio" | "avatar" | "banner"> & { staff?: boolean };
   role?: ServerRole;
   /** Prévia do editor: nome/bio ainda não salvos. */
   preview?: { displayName?: string; bio?: string };
@@ -25,7 +25,7 @@ export function ProfileCard({
         <Avatar name={name} size={80} src={fileUrl(profile.avatar)} />
       </div>
       <div className="profile-info">
-        <h3 className="t-display profile-name">{name}</h3>
+        <h3 className="t-display profile-name">{name} {profile.staff && <StaffTag />}</h3>
         <div className="profile-user t-muted">
           @{profile.username}
           {role && roleLabel[role] && <span className="role-badge"> · {roleLabel[role]}</span>}

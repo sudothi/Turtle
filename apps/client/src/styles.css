@@ -557,3 +557,8 @@
 .friends-add-row input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--paper); font: inherit; padding: 8px; }
 .friends-error { color: var(--paper); font-weight: 700; }
 .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+.member .t-staff-tag, .voice-member .t-staff-tag { margin-left: 2px; }
+.msg-meta .t-staff-tag { margin: 0 4px 0 -2px; }
+.profile-name .t-staff-tag { width: 26px; height: 24px; margin-left: 4px; }
+.profile-name .t-staff-tag svg { width: 17px; height: 17px; }

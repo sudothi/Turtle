@@ -7,6 +7,7 @@ export { Button, IconButton } from "./Button";
 export { TextField } from "./TextField";
 export { Avatar, avatarVariant } from "./Avatar";
 export { Modal } from "./Modal";
+export { StaffTag } from "./StaffTag";
 export { TURTLE_PATH } from "./logo-path";
 
 /** Tokens para uso em JS (os mesmos de tokens.css). */

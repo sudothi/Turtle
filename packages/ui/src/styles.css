@@ -243,3 +243,21 @@ select.t-select {
 
 /* ---------- Divisor entalhado ---------- */
 .t-divider { height: 2px; border: none; margin: 0; background: var(--line); }
+
+/* ---------- Selo do admin: tartaruga roxa em dois tons, ao lado do nome ---------- */
+.t-staff-tag {
+  --staff-deep: #3b1d78;
+  --staff-light: #b998ff;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--staff-deep);
+  box-shadow: inset 0 0 0 1px #7c4dd6;
+  color: var(--staff-light);
+  line-height: 1;
+  vertical-align: middle;
+  user-select: none;
+}

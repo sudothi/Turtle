@@ -296,7 +296,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const fresh = await loadUser(userId);
       if (!fresh) return;
       for (const [s, u] of online) if (u.id === userId) online.set(s, fresh);
-      for (const [s, v] of voice) if (v.userId === userId) voice.set(s, { ...v, displayName: fresh.displayName, avatar: fresh.avatar });
+      for (const [s, v] of voice) if (v.userId === userId) voice.set(s, { ...v, displayName: fresh.displayName, avatar: fresh.avatar, staff: canInviteAccounts(fresh) });
       broadcastVoice();
       broadcast({ t: "sync" });
       return fresh;
@@ -358,7 +358,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const u = await loadUser(req.params.id);
       if (!u) return reply.code(404).send({ error: "pessoa não encontrada" });
       const { isAdmin: _a, canInvite: _c, ...pub } = u;
-      return pub;
+      return { ...pub, staff: canInviteAccounts(u) };
     });
 
     // ---- Servidores ----
@@ -451,11 +451,11 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     authed.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const rows = await db
-        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, role: serverMembers.role })
+        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, role: serverMembers.role })
         .from(serverMembers)
         .innerJoin(users, eq(users.id, serverMembers.userId))
         .where(eq(serverMembers.serverId, req.params.id));
-      return rows satisfies Member[];
+      return rows.map(({ isAdmin, canInvite, ...r }): Member => ({ ...r, staff: canInviteAccounts({ isAdmin, canInvite }) }));
     });
 
     authed.patch<{ Params: { id: string; user: string } }>("/servers/:id/members/:user", async (req, reply) => {
@@ -646,9 +646,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
       const done = await db.update(users).set({ canInvite: body.data.canInvite }).where(eq(users.id, req.params.id)).returning({ id: users.id });
       if (!done.length) return reply.code(404).send({ error: "pessoa não encontrada" });
-      const fresh = await loadUser(req.params.id);
-      if (fresh) for (const [s, u] of online) if (u.id === fresh.id) online.set(s, fresh);
-      toUsers([req.params.id], { t: "sync" });
+      await profileChanged(req.params.id); // a tag TURTLE aparece/some para todo mundo
       return { ok: true };
     });
 
@@ -661,13 +659,13 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         const limit = Math.min(Number(req.query.limit ?? 50) || 50, 100);
         const before = req.query.before ? new Date(req.query.before) : undefined;
         const rows = await db
-          .select({ id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, content: messages.content, createdAt: messages.createdAt })
+          .select({ id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt })
           .from(messages)
           .innerJoin(users, eq(users.id, messages.userId))
           .where(and(eq(messages.channelId, req.params.id), before ? lt(messages.createdAt, before) : undefined))
           .orderBy(desc(messages.createdAt))
           .limit(limit);
-        return rows.reverse().map((r): Message => ({ ...r, createdAt: r.createdAt.toISOString() }));
+        return rows.reverse().map(({ isAdmin, canInvite, ...r }): Message => ({ ...r, staff: canInviteAccounts({ isAdmin, canInvite }), createdAt: r.createdAt.toISOString() }));
       },
     );
   });
@@ -707,7 +705,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
           voice.set(socket, {
-            userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, channelId: channel.id, serverId: channel.serverId,
+            userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId,
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
           broadcastVoice();
@@ -723,7 +721,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         if (!channel || !allowed)
           return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
         const message: Message = {
-          id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar,
+          id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(),
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });

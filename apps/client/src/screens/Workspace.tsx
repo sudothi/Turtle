@@ -229,7 +229,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const dm = dms.find((d) => d.channelId === dmId);
   const dmChannel: Channel | undefined = dm && { id: dm.channelId, serverId: "", name: shownName(dm.user), kind: "text" };
   const dmMembers: Member[] = dm
-    ? [dm.user, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const }))
+    ? [dm.user, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const, staff: false }))
     : [];
   const pendingIn = friends.filter((f) => f.status === "incoming").length;
   const server = servers.find((s) => s.id === serverId);

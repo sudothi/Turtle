@@ -8,6 +8,7 @@ pnpm install
 cp .env.example .env
 pnpm infra:up   # Postgres + LiveKit
 pnpm dev        # server :3000, client :5173
+pnpm desktop    # app Electron (com o pnpm dev rodando): seletor de tela, áudio do sistema; Ctrl+Shift+D abre o diagnóstico WebRTC
 ```
 O servidor lê o `.env` da raiz sozinho. Com `DATABASE_URL` definido o servidor usa Postgres; sem ele usa um banco em memória (some ao reiniciar).
 ## Voz (marco 2)

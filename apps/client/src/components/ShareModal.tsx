@@ -1,4 +1,5 @@
 import { Button, Modal } from "@turtle/ui";
+import { desktop } from "../desktop";
 import { screenProfiles, type ScreenProfileId } from "../voice/prefs";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 
@@ -8,7 +9,7 @@ export function ShareModal({ snap, voice, onClose }: { snap: VoiceSnapshot; voic
   return (
     <Modal
       title="Transmitir tela"
-      subtitle="Depois de começar, o navegador pede para você escolher a tela, a janela ou a aba."
+      subtitle={desktop() ? "Depois de começar, você escolhe a tela ou a janela." : "Depois de começar, o navegador pede para você escolher a tela, a janela ou a aba."}
       onClose={onClose}
       footer={
         <>

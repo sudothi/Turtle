@@ -1,8 +1,7 @@
 import { useRef, useState } from "react";
 import { AVATAR_MAX_BYTES, BANNER_MAX_BYTES, BIO_MAX, type User } from "@turtle/protocol";
-import { Button, Modal, TextField } from "@turtle/ui";
+import { Button, TextField } from "@turtle/ui";
 import { api } from "../api";
-import { AppInvitePanel } from "./modals";
 import { ProfileCard } from "./ProfileCard";
 import { ImageCropper } from "./ImageCropper";
 
@@ -10,7 +9,7 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const mb = (n: number) => `${n / 1024 / 1024} MB`;
 
 /** Configurações > Perfil: nome de exibição, bio, foto e banner, com prévia do cartão. */
-export function ProfileModal({ user, onChanged, onClose }: { user: User; onChanged: (u: User) => void; onClose: () => void }) {
+export function ProfileSettings({ user, onChanged }: { user: User; onChanged: (u: User) => void }) {
   const [me, setMe] = useState(user);
   const [name, setName] = useState(user.displayName ?? "");
   const [bio, setBio] = useState(user.bio ?? "");
@@ -66,19 +65,7 @@ export function ProfileModal({ user, onChanged, onClose }: { user: User; onChang
   }
 
   return (
-    <Modal
-      title="Configurações"
-      subtitle="Perfil: como as pessoas veem você"
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>Fechar</Button>
-          <Button disabled={busy || !dirty} onClick={() => void run(async () => { const u = await api.updateProfile({ displayName: name.trim() || null, bio: bio.trim() || null }); setSaved(true); return u; })}>
-            {saved && !dirty ? "Salvo" : "Salvar"}
-          </Button>
-        </>
-      }
-    >
+    <>
       <div className="profile-editor">
         <div className="profile-form">
           <TextField label="Nome de exibição" value={name} maxLength={32} placeholder={me.username} hint="Aparece no lugar do usuário. Vazio usa o usuário." onChange={(e) => setName(e.target.value)} />
@@ -106,13 +93,17 @@ export function ProfileModal({ user, onChanged, onClose }: { user: User; onChang
             <input ref={bannerInput} type="file" accept={ACCEPT} hidden aria-label="Arquivo do banner" onChange={pick("banner", BANNER_MAX_BYTES)} />
           </div>
           {error && <div className="err" role="alert">{error}</div>}
-          {user.isAdmin && <AppInvitePanel />}
+          <div className="profile-actions">
+            <Button disabled={busy || !dirty} onClick={() => void run(async () => { const u = await api.updateProfile({ displayName: name.trim() || null, bio: bio.trim() || null }); setSaved(true); return u; })}>
+              {saved && !dirty ? "Salvo" : "Salvar"}
+            </Button>
+          </div>
         </div>
         <div className="profile-preview">
           <div className="t-eyebrow">Prévia</div>
           <ProfileCard profile={me} preview={{ displayName: name.trim(), bio: bio.trim() }} />
         </div>
       </div>
-    </Modal>
+    </>
   );
 }

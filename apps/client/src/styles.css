@@ -72,9 +72,11 @@
   overflow: hidden;
 }
 .app.with-members { grid-template-columns: var(--rail-w) var(--sidebar-w) minmax(0, 1fr) var(--members-w); }
+.app.with-profile { grid-template-columns: var(--rail-w) var(--sidebar-w) minmax(0, 1fr) var(--profile-w, 340px); }
 @media (max-width: 1000px) {
   .app.with-members { grid-template-columns: var(--rail-w) var(--sidebar-w) minmax(0, 1fr); }
-  .members { display: none; }
+  .app.with-profile { grid-template-columns: var(--rail-w) var(--sidebar-w) minmax(0, 1fr); }
+  .members, .up-panel { display: none; }
 }
 .stage { min-width: 0; min-height: 0; display: flex; background: var(--bg-chat); }
 
@@ -577,3 +579,59 @@
 .new-group-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
 .new-group-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--paper); text-align: left; }
 .new-group-row:hover { background: var(--bg-hover); }
+
+/* ---------- Perfil de usuário (mini perfil, perfil completo, painel da DM) ---------- */
+.up { --up-bg: var(--ink-2); background: var(--up-bg); color: var(--paper); }
+.up-layer { position: fixed; inset: 0; z-index: 60; }
+.up-popout { --lino-bg: var(--ink-2); --lino-border: 2px solid var(--paper); --lino-radius: var(--radius-md); position: fixed; width: 300px; max-height: calc(100vh - 16px); overflow: auto; animation: t-pop 120ms var(--ease); }
+.up-full { --lino-bg: var(--ink-2); --lino-border: 2px solid var(--paper); --lino-radius: var(--radius-md); position: relative; width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.up-mast { position: relative; }
+.up-banner { height: 60px; background: repeating-linear-gradient(-45deg, var(--ink-0) 0 3px, var(--ink-3) 3px 7px); overflow: hidden; }
+.up-mast-md .up-banner { height: 120px; }
+.up-mast-lg .up-banner { height: 140px; }
+.up-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.up-avatar { position: absolute; left: 16px; bottom: -40px; padding: 5px; border-radius: 50%; background: var(--up-bg); line-height: 0; }
+.up-mast-lg .up-avatar { bottom: -56px; }
+.up-mast { margin-bottom: 40px; }
+.up-mast-lg { margin-bottom: 56px; }
+.up-mast-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+.up-icon-btn { background: rgb(0 0 0 / .6); border-radius: 50%; }
+.up-full-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 8px 16px 0; margin-top: -48px; position: relative; }
+.up-body { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.up-names { min-width: 0; }
+.up-name { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.up-name-btn:hover .up-name { text-decoration: underline; }
+.up-user { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--fs-sm); }
+.up-role { border: 1px solid var(--text-muted); border-radius: 3px; padding: 0 5px; font-size: 11px; }
+.up-card { background: var(--ink-0); border: 2px solid var(--ink-4); border-radius: var(--radius-md); padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.up-card-flush { padding: 0; gap: 0; }
+.up-sec h4 { margin: 0 0 2px; }
+.up-bio, .up-since { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.up-bio.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.up-dm-input { width: 100%; box-sizing: border-box; background: var(--ink-0); border: 2px solid var(--ink-4); border-radius: var(--radius-sm); padding: 8px 10px; color: inherit; font: inherit; font-size: var(--fs-sm); }
+.up-dm-input:focus { outline: none; border-color: var(--paper); }
+.up-full-link { align-self: center; color: var(--paper-dim); font-size: var(--fs-sm); font-weight: 600; text-decoration: underline; }
+.up-full-link:hover { color: var(--paper); }
+.up-note, .up-empty { margin: 0; font-size: var(--fs-sm); }
+.up-more { position: relative; }
+.up-menu { left: auto; right: 0; top: calc(100% + 4px); width: 220px; }
+.up-menu-left { right: auto; left: 0; }
+.menu-item.danger { color: var(--paper); }
+.up-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--ink-4); }
+.up-tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 8px 10px; color: var(--dim); font: inherit; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
+.up-tab:hover { color: var(--fg); }
+.up-tab.active { color: var(--fg); border-bottom-color: var(--paper); }
+.up-tab-body { display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+.up-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.up-row:hover:not(:disabled) { background: var(--bg-hover); }
+.up-row:disabled { cursor: default; }
+.up-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-server-icon { --lino-bg: var(--ink-4); --lino-radius: 8px; width: 32px; height: 32px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.up-panel { --up-bg: var(--ink-1); background: var(--ink-1); border-left: 2px solid var(--ink-4); overflow-y: auto; display: flex; flex-direction: column; min-width: 0; }
+.up-panel .up-body { flex: 1; }
+.up-panel-foot { margin: 0 16px 16px; padding: 10px; border: 2px solid var(--paper); border-radius: var(--radius-sm); background: none; color: var(--paper); font: inherit; font-weight: 700; cursor: pointer; }
+.up-panel-foot:hover { background: var(--paper); color: var(--ink-0); }
+.up-fold-head { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px; background: none; border: 0; border-top: 2px solid var(--ink-4); color: inherit; font: inherit; font-weight: 700; font-size: var(--fs-sm); cursor: pointer; }
+.up-fold:first-child .up-fold-head { border-top: 0; }
+.up-fold-body { padding: 0 6px 8px; display: flex; flex-direction: column; }
+.up-group h3 { margin: 8px 8px 6px; }

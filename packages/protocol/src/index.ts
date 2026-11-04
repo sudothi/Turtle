@@ -154,6 +154,25 @@ export const personSchema = z.object({
   avatar: z.string().nullable().default(null),
 });
 export type Person = z.infer<typeof personSchema>;
+/**
+ * Perfil visto por outra pessoa (GET /users/:id): dados públicos, data da conta e o que vocês têm em comum.
+ * `friendship` é do ponto de vista de quem pede; `blocked` = você bloqueou essa pessoa.
+ */
+export const profileViewSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  bio: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  banner: z.string().nullable().default(null),
+  staff: z.boolean().default(false),
+  createdAt: z.string(),
+  mutualServers: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
+  mutualFriends: z.array(personSchema).default([]),
+  friendship: z.enum(["none", "friend", "incoming", "outgoing"]).default("none"),
+  blocked: z.boolean().default(false),
+});
+export type ProfileView = z.infer<typeof profileViewSchema>;
 /** friend = amigos; incoming = pediu amizade a você; outgoing = você pediu. */
 export const friendSchema = z.object({ user: personSchema, status: z.enum(["friend", "incoming", "outgoing"]) });
 export type Friend = z.infer<typeof friendSchema>;

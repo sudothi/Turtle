@@ -1,4 +1,4 @@
-import type { Account, Channel, ChannelKind, Dm, Friend, Person, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
+import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
 export const getToken = () => localStorage.getItem(KEY);
@@ -36,7 +36,7 @@ export const api = {
   updateProfile: (p: { displayName?: string | null; bio?: string | null }) => req<User>("PATCH", "/me", p),
   uploadImage: upload,
   removeImage: (kind: "avatar" | "banner") => req<User>("DELETE", `/me/${kind}`),
-  profile: (id: string) => req<Profile>("GET", `/users/${id}`),
+  profile: (id: string) => req<ProfileView>("GET", `/users/${id}`),
   login: (username: string, password: string) => req<{ token: string; user: User }>("POST", "/auth/login", { username, password }),
   register: (inviteCode: string, username: string, password: string) =>
     req<{ token: string; user: User }>("POST", "/auth/register", { inviteCode, username, password }),

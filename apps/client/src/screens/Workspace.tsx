@@ -11,13 +11,14 @@ import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
-import { ProfilePopup } from "../components/ProfilePopup";
+import { DmGroupPanel, DmProfilePanel, ProfileModal, ProfilePopout, type ProfileHandlers } from "../components/UserProfile";
 import { AddToGroupModal, FriendsPanel, HomeSidebar, NewGroupModal } from "../components/Home";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
 
 const MEMBERS_KEY = "turtle.membersOpen";
+const DM_PANEL_KEY = "turtle.dmPanel";
 const SERVER_KEY = "turtle.server";
 const remembered = () => {
   try {
@@ -44,7 +45,34 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [online, setOnline] = useState<string[]>([]);
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
-  const [viewProfile, setViewProfile] = useState<string>();
+  /** Mini perfil aberto e onde foi o clique (para abrir ao lado). */
+  const [popout, setPopout] = useState<{ id: string; anchor?: DOMRect }>();
+  const [fullProfile, setFullProfile] = useState<string>();
+  const [dmPanel, setDmPanel] = useState(() => {
+    try {
+      return localStorage.getItem(DM_PANEL_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  /** Muda a cada ação de amizade/bloqueio: o painel da DM recarrega. */
+  const [profileVersion, setProfileVersion] = useState(0);
+  // Último elemento clicado: o mini perfil abre colado nele, como no Discord.
+  const lastPress = useRef<{ rect: DOMRect; at: number }>(undefined);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const el = (e.target as Element | null)?.closest?.("button, [role=button], a");
+      if (el) lastPress.current = { rect: el.getBoundingClientRect(), at: Date.now() };
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, []);
+  const setViewProfile = useCallback((id: string | undefined) => {
+    if (!id) return setPopout(undefined);
+    const recent = lastPress.current && Date.now() - lastPress.current.at < 1000 ? lastPress.current.rect : undefined;
+    const focused = document.activeElement && document.activeElement !== document.body ? document.activeElement.getBoundingClientRect() : undefined;
+    setPopout({ id, anchor: recent ?? focused });
+  }, []);
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
   const [inviting, setInviting] = useState(false);
@@ -205,11 +233,14 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     setDmId(dm.channelId);
     setUnread((u) => { if (!u.has(dm.channelId)) return u; const n = new Set(u); n.delete(dm.channelId); return n; });
   }, []);
-  const messageUser = useCallback(async (userId: string) => {
+  const closePopout = useCallback(() => setPopout(undefined), []);
+  const closeFull = useCallback(() => setFullProfile(undefined), []);
+  const messageUser = useCallback(async (userId: string, text?: string) => {
     try {
       const dm = await api.openDm(userId);
       setDms((l) => (l.some((d) => d.channelId === dm.channelId) ? l : [dm, ...l]));
       openDm(dm);
+      if (text) ws.current?.send(JSON.stringify({ t: "send", channelId: dm.channelId, content: text }));
     } catch {
       // sem permissão (nem amigos nem servidor em comum): o botão do perfil já avisa só pelo erro do servidor
     }
@@ -226,11 +257,23 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     });
   };
 
+  const toggleDmPanel = () => {
+    setDmPanel((o) => {
+      try {
+        localStorage.setItem(DM_PANEL_KEY, o ? "0" : "1");
+      } catch {
+        // sem storage: só não lembra
+      }
+      return !o;
+    });
+  };
+
   const logout = () => { void voice.leave(); onLogout(); };
   const speaking = new Set(snap.channelId ? snap.participants.filter((p) => p.speaking && !p.muted).map((p) => p.id) : []);
   const textChannel = channels.find((c) => c.id === current);
   const showMembers = !home && membersOpen && view === "text" && !!serverId;
   const dm = dms.find((d) => d.channelId === dmId);
+  const showDmPanel = home && !!dm && !dmCall && dmPanel;
   const asChannel = (d: Dm): Channel => ({ id: d.channelId, serverId: "", name: dmTitle(d), kind: "text" });
   const dmChannel: Channel | undefined = dm && asChannel(dm);
   const dmMembers: Member[] = dm
@@ -242,10 +285,18 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
   serverMessageIds.current = new Set(Object.keys(known));
+  const profileHandlers: ProfileHandlers = {
+    meId: user.id,
+    online,
+    onMessage: (id, text) => void messageUser(id, text),
+    onChanged: () => { setProfileVersion((n) => n + 1); void loadHome().catch(() => {}); },
+    onEditProfile: () => setSettings("profile"),
+    onOpenServer: (id) => chooseServer(id),
+  };
   const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />;
 
   return (
-    <div className={`app ${showMembers ? "with-members" : ""}`}>
+    <div className={`app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}>
       <ServerRail
         servers={servers}
         activeId={serverId}
@@ -325,9 +376,15 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
                       <IconButton label="Adicionar ao grupo" onClick={() => setAddToGroup(true)}><Icon name="user-plus" /></IconButton>
                       <IconButton label="Sair do grupo" onClick={() => { if (window.confirm("Sair deste grupo?")) { const id = dm.channelId; if (snap.channelId === id) void voice.leave(); setDmId(undefined); void api.leaveGroup(id).then(() => loadHome()).catch(() => {}); } }}><Icon name="logout" /></IconButton>
                     </>
-                  ) : (
-                    <IconButton label="Perfil e bloqueio" onClick={() => dm.users[0] && setViewProfile(dm.users[0].id)}><Icon name="users" /></IconButton>
-                  )}
+                  ) : null}
+                  <IconButton
+                    label={dm.group ? (dmPanel ? "Ocultar lista de membros" : "Mostrar lista de membros") : dmPanel ? "Ocultar perfil do usuário" : "Mostrar perfil do usuário"}
+                    aria-pressed={dmPanel}
+                    className={dmPanel ? "is-active" : ""}
+                    onClick={toggleDmPanel}
+                  >
+                    <Icon name={dm.group ? "users" : "profile"} />
+                  </IconButton>
                 </>
               }
             />
@@ -362,12 +419,26 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           />
         )}
       </main>
+      {showDmPanel && dm && (dm.group
+        ? <DmGroupPanel people={[...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }]} online={online} onProfile={setViewProfile} />
+        : dm.users[0] && <DmProfilePanel userId={dm.users[0].id} h={profileHandlers} version={profileVersion} onFull={() => setFullProfile(dm.users[0]!.id)} onOpenUser={setFullProfile} />)}
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
       {newGroup && <NewGroupModal friends={friends} onClose={() => setNewGroup(false)} onCreated={(d) => { setDms((l) => [d, ...l.filter((x) => x.channelId !== d.channelId)]); openDm(d); }} />}
       {addToGroup && dm && <AddToGroupModal dm={dm} friends={friends} onClose={() => setAddToGroup(false)} onChanged={() => void loadHome().catch(() => {})} />}
-      {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} meId={user.id} onMessage={(id) => void messageUser(id)} onChanged={() => void loadHome().catch(() => {})} onClose={() => setViewProfile(undefined)} />}
+      {popout && (
+        <ProfilePopout
+          key={popout.id}
+          userId={popout.id}
+          anchor={popout.anchor}
+          role={home ? undefined : members.find((m) => m.userId === popout.id)?.role}
+          h={profileHandlers}
+          onFull={() => { setPopout(undefined); setFullProfile(popout.id); }}
+          onClose={closePopout}
+        />
+      )}
+      {fullProfile && <ProfileModal userId={fullProfile} role={home ? undefined : members.find((m) => m.userId === fullProfile)?.role} h={profileHandlers} onOpenUser={setFullProfile} onClose={closeFull} />}
       {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}

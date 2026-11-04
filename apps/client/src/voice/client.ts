@@ -14,6 +14,7 @@ import {
 } from "livekit-client";
 import { api } from "../api";
 import { loadPrefs, micConstraints, savePrefs, screenProfiles, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
+import { preferHardwareH264 } from "./codec";
 import { preloadRnnoise, RnnoiseProcessor } from "./rnnoise";
 
 export interface CallParticipant {
@@ -156,6 +157,7 @@ export class VoiceClient {
     this.set({ status: "connecting", channelId, error: undefined, participants: [], videos: [], camera: false, screen: false });
     if (prefs.noise === "rnnoise") void preloadRnnoise().catch(() => {});
 
+    preferHardwareH264();
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,

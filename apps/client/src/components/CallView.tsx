@@ -18,10 +18,19 @@ function toggleFullscreen(el: HTMLElement | null) {
 
 function StatsLine({ stats }: { stats?: ShareStats }) {
   if (!stats) return null;
+  if (stats.idle) {
+    return (
+      <div className="tile-stats t-muted" aria-label="Diagnóstico da transmissão">
+        Em espera: ninguém assistindo agora, a transmissão retoma sozinha
+      </div>
+    );
+  }
   const limit = stats.limit === "cpu" ? "limitado pela CPU" : stats.limit === "bandwidth" ? "limitado pela rede" : "";
+  const kind = stats.hardware === undefined ? "" : stats.hardware ? " (hardware)" : " (software)";
   return (
     <div className="tile-stats t-muted" aria-label="Diagnóstico da transmissão">
       {stats.width}×{stats.height} · {stats.fps} fps · {stats.mbps} Mb/s · {stats.encoder}
+      {kind}
       {limit && <b> · {limit}</b>}
     </div>
   );

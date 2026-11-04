@@ -56,10 +56,11 @@ function installPermissions() {
   });
 }
 
-function openWebrtcInternals() {
-  const w = new BrowserWindow({ width: 1100, height: 800, title: "WebRTC internals" });
-  void w.loadURL("chrome://webrtc-internals");
+function openInternal(url: "chrome://webrtc-internals" | "chrome://gpu", title: string) {
+  const w = new BrowserWindow({ width: 1100, height: 800, title });
+  void w.loadURL(url);
 }
+const openWebrtcInternals = () => openInternal("chrome://webrtc-internals", "WebRTC internals");
 
 function createWindow() {
   win = new BrowserWindow({
@@ -86,12 +87,16 @@ function createWindow() {
     if (new URL(url).origin !== clientOrigin) e.preventDefault();
   });
 
-  // Ctrl+Shift+D: diagnóstico do WebRTC (codificador, fps, perdas). Ctrl+Shift+I: DevTools.
+  // Ctrl+Shift+D: diagnóstico do WebRTC (codificador, fps, perdas). Ctrl+Shift+G: estado da GPU
+  // ("Video Encode: Hardware accelerated"). Ctrl+Shift+I: DevTools.
   win.webContents.on("before-input-event", (e, input) => {
     if (input.type !== "keyDown" || !input.control || !input.shift) return;
     if (input.key.toLowerCase() === "d") {
       e.preventDefault();
       openWebrtcInternals();
+    } else if (input.key.toLowerCase() === "g") {
+      e.preventDefault();
+      openInternal("chrome://gpu", "Estado da GPU");
     } else if (input.key.toLowerCase() === "i") {
       e.preventDefault();
       win?.webContents.toggleDevTools();

@@ -1,0 +1,17 @@
+/* Servidores: menu, modais e estados vazios. Fica à parte do styles.css para não brigar com o redesign. */
+.server-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.no-server { margin: auto; max-width: 440px; text-align: center; display: flex; flex-direction: column; gap: 12px; padding: 24px; }
+.no-server-actions { display: flex; gap: 12px; justify-content: center; margin-top: 8px; }
+.invite-days { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.invite-days select, .settings-members select { background: var(--ink-3); color: inherit; border: 1px solid var(--ink-5); border-radius: 6px; padding: 4px 8px; font: inherit; }
+.join-preview { --lino-bg: var(--ink-3); --lino-radius: 6px; padding: 10px 12px; margin: 0; }
+.server-settings { display: flex; flex-direction: column; gap: 14px; max-height: 65vh; overflow: auto; padding: 4px; }
+.settings-row { display: flex; gap: 10px; align-items: flex-end; }
+.settings-row .t-field { flex: 1; }
+.settings-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.settings-members li { display: flex; align-items: center; gap: 10px; }
+.settings-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger-zone { --lino-bg: var(--ink-2); --lino-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.danger-zone h3, .danger-zone p { margin: 0; }
+.member.offline { opacity: .55; }
+.role-badge { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-left: auto; }

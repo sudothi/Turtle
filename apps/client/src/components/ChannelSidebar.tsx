@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Channel, ChannelKind, User, VoiceState } from "@turtle/protocol";
+import type { Channel, ChannelKind, VoiceState } from "@turtle/protocol";
 import { Avatar, Icon, type IconName } from "@turtle/ui";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
@@ -22,7 +22,7 @@ function Category({ title, onAdd, children }: { title: string; onAdd?: () => voi
   );
 }
 
-function HeaderMenu({ user, onCreate, onInvite, onLogout }: { user: User; onCreate: (k: ChannelKind) => void; onInvite: () => void; onLogout: () => void }) {
+function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLogout }: { name: string; canManage: boolean; onCreate: (k: ChannelKind) => void; onInvite: () => void; onSettings: () => void; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -40,19 +40,20 @@ function HeaderMenu({ user, onCreate, onInvite, onLogout }: { user: User; onCrea
   return (
     <div className="server-head-wrap" ref={ref}>
       <button className={`server-head ${open ? "open" : ""}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="t-display">Turtle</span>
+        <span className="t-display server-name">{name}</span>
         <Icon name={open ? "close" : "chevron-down"} size={18} />
       </button>
       {open && (
         <div className="menu lino" role="menu">
-          {user.isAdmin && (
+          {item("user-plus", "Convidar pessoas", onInvite)}
+          {canManage && (
             <>
-              {item("user-plus", "Convidar pessoas", onInvite)}
               {item("hash", "Criar canal de texto", () => onCreate("text"))}
               {item("speaker", "Criar canal de voz", () => onCreate("voice"))}
-              <hr className="t-divider" />
             </>
           )}
+          {item("settings", "Configurações do servidor", onSettings)}
+          <hr className="t-divider" />
           {item("logout", "Sair da conta", onLogout)}
         </div>
       )}
@@ -61,7 +62,8 @@ function HeaderMenu({ user, onCreate, onInvite, onLogout }: { user: User; onCrea
 }
 
 export function ChannelSidebar({
-  user,
+  serverName,
+  canManage,
   channels,
   view,
   current,
@@ -72,10 +74,13 @@ export function ChannelSidebar({
   onVoice,
   onCreate,
   onInvite,
+  onSettings,
   onLogout,
   footer,
 }: {
-  user: User;
+  serverName: string;
+  /** Dono ou admin do servidor: cria canais. */
+  canManage: boolean;
   channels: Channel[];
   view: "text" | "voice";
   current?: string;
@@ -87,6 +92,7 @@ export function ChannelSidebar({
   onVoice: (id: string) => void;
   onCreate: (kind: ChannelKind) => void;
   onInvite: () => void;
+  onSettings: () => void;
   onLogout: () => void;
   footer: ReactNode;
 }) {
@@ -94,9 +100,9 @@ export function ChannelSidebar({
   const voice = channels.filter((c) => c.kind === "voice");
   return (
     <aside className="sidebar" aria-label="Canais">
-      <HeaderMenu user={user} onCreate={onCreate} onInvite={onInvite} onLogout={onLogout} />
+      <HeaderMenu name={serverName} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLogout={onLogout} />
       <div className="channels">
-        <Category title="Canais de texto" onAdd={user.isAdmin ? () => onCreate("text") : undefined}>
+        <Category title="Canais de texto" onAdd={canManage ? () => onCreate("text") : undefined}>
           {text.map((c) => {
             const on = view === "text" && c.id === current;
             return (
@@ -107,7 +113,7 @@ export function ChannelSidebar({
             );
           })}
         </Category>
-        <Category title="Canais de voz" onAdd={user.isAdmin ? () => onCreate("voice") : undefined}>
+        <Category title="Canais de voz" onAdd={canManage ? () => onCreate("voice") : undefined}>
           {voice.map((c) => {
             const on = view === "voice" && c.id === voiceView;
             const members = voiceStates.filter((v) => v.channelId === c.id);

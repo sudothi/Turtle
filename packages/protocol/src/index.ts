@@ -12,7 +12,7 @@ export type Message = z.infer<typeof messageSchema>;
 
 export const channelKind = z.enum(["text", "voice"]);
 export type ChannelKind = z.infer<typeof channelKind>;
-export const channelSchema = z.object({ id: z.string(), name: z.string(), kind: channelKind });
+export const channelSchema = z.object({ id: z.string(), serverId: z.string(), name: z.string(), kind: channelKind });
 export type Channel = z.infer<typeof channelSchema>;
 
 export const userSchema = z.object({ id: z.string(), username: z.string(), isAdmin: z.boolean() });
@@ -23,6 +23,32 @@ export const passwordSchema = z.string().min(8).max(200);
 
 export const registerBody = z.object({ inviteCode: z.string().min(1), username: usernameSchema, password: passwordSchema });
 export const loginBody = z.object({ username: z.string(), password: z.string() });
+/** Quantos servidores uma conta pode ter como dona. */
+export const MAX_OWNED_SERVERS = 2;
+
+export const serverRole = z.enum(["owner", "admin", "member"]);
+export type ServerRole = z.infer<typeof serverRole>;
+/** Um servidor visto por quem é membro dele. */
+export const serverSchema = z.object({ id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole });
+export type Server = z.infer<typeof serverSchema>;
+export const memberSchema = z.object({ userId: z.string(), username: z.string(), role: serverRole });
+export type Member = z.infer<typeof memberSchema>;
+
+export const serverNameSchema = z.string().trim().min(2).max(40);
+export const createServerBody = z.object({ name: serverNameSchema });
+export const renameServerBody = z.object({ name: serverNameSchema });
+export const deleteServerBody = z.object({ name: z.string() });
+export const transferBody = z.object({ userId: z.string() });
+export const roleBody = z.object({ role: z.enum(["admin", "member"]) });
+/** days: validade em dias (padrão 7; 0 = não expira). */
+export const createInviteBody = z.object({
+  days: z.number().int().min(0).max(365).default(7),
+  maxUses: z.number().int().min(1).max(1000).optional(),
+});
+/** O que se vê de um convite antes de entrar. */
+export const invitePreviewSchema = z.object({ serverName: z.string(), members: z.number() });
+export type InvitePreview = z.infer<typeof invitePreviewSchema>;
+
 export const createChannelBody = z.object({ name: z.string().trim().min(1).max(40), kind: channelKind.default("text") });
 
 /** Quem está em qual canal de voz (para a barra lateral, mesmo fora da chamada). */
@@ -30,6 +56,7 @@ export const voiceStateSchema = z.object({
   userId: z.string(),
   username: z.string(),
   channelId: z.string(),
+  serverId: z.string(),
   muted: z.boolean(),
   deafened: z.boolean(),
   camera: z.boolean().default(false),
@@ -56,6 +83,8 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),
   z.object({ t: z.literal("message"), message: messageSchema }),
   z.object({ t: z.literal("channel"), channel: channelSchema }),
+  /** Algo mudou nos servidores, canais ou membros: buscar de novo. */
+  z.object({ t: z.literal("sync") }),
   z.object({ t: z.literal("presence"), online: z.array(z.string()) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
   z.object({ t: z.literal("error"), error: z.string() }),

@@ -3,7 +3,7 @@ import type { ChannelKind } from "@turtle/protocol";
 import { Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api } from "../api";
 
-export function CreateChannelModal({ initialKind, onClose }: { initialKind: ChannelKind; onClose: () => void }) {
+export function CreateChannelModal({ serverId, initialKind, onClose }: { serverId: string; initialKind: ChannelKind; onClose: () => void }) {
   const [kind, setKind] = useState<ChannelKind>(initialKind);
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
@@ -15,7 +15,7 @@ export function CreateChannelModal({ initialKind, onClose }: { initialKind: Chan
     e.preventDefault();
     setBusy(true);
     try {
-      await api.createChannel(name.trim(), kind);
+      await api.createChannel(serverId, name.trim(), kind);
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -63,14 +63,16 @@ export function CreateChannelModal({ initialKind, onClose }: { initialKind: Chan
   );
 }
 
-export function InviteModal({ onClose }: { onClose: () => void }) {
+export function InviteModal({ serverId, serverName, onClose }: { serverId: string; serverName: string; onClose: () => void }) {
   const [code, setCode] = useState<string>();
+  const [days, setDays] = useState(7);
   const [error, setError] = useState<string>();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    api.createInvite().then((r) => setCode(r.code), (e: Error) => setError(e.message));
-  }, []);
+    setCode(undefined);
+    api.createInvite(serverId, days).then((r) => setCode(r.code), (e: Error) => setError(e.message));
+  }, [serverId, days]);
 
   const copy = async () => {
     if (!code) return;
@@ -80,7 +82,7 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="Convide amigos para Turtle" subtitle="Mande este código para um amigo. Cada convite cria uma conta só." onClose={onClose}>
+    <Modal title={`Convide amigos para ${serverName}`} subtitle="Mande este código. Quem ainda não tem conta cria uma ao usá-lo; quem já tem, entra pelo botão de convite." onClose={onClose}>
       <div className="invite-box lino">
         <code>{code ?? (error ? "—" : "gerando…")}</code>
         <Button size="sm" onClick={copy} disabled={!code}>
@@ -88,6 +90,15 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
           {copied ? "Copiado" : "Copiar"}
         </Button>
       </div>
+      <label className="t-muted invite-days">
+        Validade{" "}
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={1}>1 dia</option>
+          <option value={7}>7 dias</option>
+          <option value={30}>30 dias</option>
+          <option value={0}>não expira</option>
+        </select>
+      </label>
       {error && <p className="t-muted">{error}</p>}
     </Modal>
   );

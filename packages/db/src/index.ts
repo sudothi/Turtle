@@ -7,11 +7,11 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, desc, eq, lt, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, inArray, lt, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-const MIGRATION = `
+export const MIGRATION = `
 CREATE TABLE IF NOT EXISTS users (
   id text PRIMARY KEY, username text NOT NULL UNIQUE, password_hash text NOT NULL,
   is_admin boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
@@ -28,6 +28,40 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS messages_channel_created_idx ON messages (channel_id, created_at);
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
+
+-- Servidores (marco 3.5). Tudo idempotente: roda a cada inicialização.
+CREATE TABLE IF NOT EXISTS servers (
+  id text PRIMARY KEY, name text NOT NULL, owner_id text NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS server_members (
+  server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role text NOT NULL DEFAULT 'member', joined_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (server_id, user_id));
+CREATE INDEX IF NOT EXISTS server_members_user_idx ON server_members (user_id);
+CREATE TABLE IF NOT EXISTS server_invites (
+  code text PRIMARY KEY, server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  created_by text NOT NULL, expires_at timestamptz, max_uses integer, uses integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS server_id text REFERENCES servers(id) ON DELETE CASCADE;
+ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_name_key;
+
+-- Bancos de antes dos servidores: tudo vira o servidor "Turtle" (dono = primeiro admin).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM channels WHERE server_id IS NULL) AND EXISTS (SELECT 1 FROM users) THEN
+    INSERT INTO servers (id, name, owner_id)
+      SELECT 'turtle', 'Turtle', id FROM users ORDER BY is_admin DESC, created_at LIMIT 1
+      ON CONFLICT DO NOTHING;
+    INSERT INTO server_members (server_id, user_id, role)
+      SELECT 'turtle', u.id, CASE WHEN u.id = (SELECT owner_id FROM servers WHERE id = 'turtle') THEN 'owner' ELSE 'member' END
+      FROM users u ON CONFLICT DO NOTHING;
+    UPDATE channels SET server_id = 'turtle' WHERE server_id IS NULL;
+  END IF;
+END $$;
+DELETE FROM channels WHERE server_id IS NULL;
+ALTER TABLE channels ALTER COLUMN server_id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_id, name);
 `;
 
 export interface DbHandle {

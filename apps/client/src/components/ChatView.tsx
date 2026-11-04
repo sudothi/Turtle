@@ -22,7 +22,7 @@ export function ChatView({
   onSend,
   membersOpen,
   onToggleMembers,
-  isAdmin,
+  canInvite,
   onInvite,
 }: {
   channel?: Channel;
@@ -30,7 +30,7 @@ export function ChatView({
   onSend: (content: string) => void;
   membersOpen: boolean;
   onToggleMembers: () => void;
-  isAdmin: boolean;
+  canInvite: boolean;
   onInvite: () => void;
 }) {
   const bottom = useRef<HTMLDivElement>(null);
@@ -51,7 +51,7 @@ export function ChatView({
   return (
     <section className="chat">
       <ChannelHeader icon="hash" name={channel.name}>
-        {isAdmin && (
+        {canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />
           </IconButton>

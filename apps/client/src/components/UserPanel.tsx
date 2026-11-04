@@ -16,6 +16,7 @@ export function UserPanel({
   snap,
   voice,
   channels,
+  serverName,
   onSettings,
   onShare,
   onLogout,
@@ -24,6 +25,8 @@ export function UserPanel({
   snap: VoiceSnapshot;
   voice: VoiceClient;
   channels: Channel[];
+  /** Nome do servidor da chamada em andamento. */
+  serverName?: string;
   onSettings: () => void;
   /** Abre a escolha de qualidade antes de transmitir a tela. */
   onShare: () => void;
@@ -48,7 +51,7 @@ export function UserPanel({
               <b>
                 <Icon name="signal" size={14} /> {statusText[snap.status]}
               </b>
-              <span className="t-muted">{channel ? `${channel.name} / Turtle` : "Turtle"}</span>
+              <span className="t-muted">{channel ? `${channel.name} / ${serverName ?? "Turtle"}` : "Turtle"}</span>
             </div>
             <IconButton label="Sair da chamada" onClick={() => void voice.leave()}>
               <Icon name="phone-off" size={20} />

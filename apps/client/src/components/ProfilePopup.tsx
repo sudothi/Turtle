@@ -20,7 +20,9 @@ export function ProfilePopup({
   const [profile, setProfile] = useState<Profile>();
   const [status, setStatus] = useState<Friend["status"] | "none">("none");
   const [error, setError] = useState<string>();
+  const [blocked, setBlocked] = useState(false);
   const loadStatus = useCallback(() => {
+    api.blocks().then((l) => setBlocked(l.some((p) => p.id === userId))).catch(() => {});
     api.friends().then((l) => setStatus(l.find((f) => f.user.id === userId)?.status ?? "none")).catch(() => {});
   }, [userId]);
   useEffect(() => {
@@ -51,11 +53,13 @@ export function ProfilePopup({
         <ProfileCard profile={profile} role={role} />
         {!mine && (
           <div className="profile-actions">
-            <Button onClick={() => { onClose(); onMessage(userId); }}>Mandar mensagem</Button>
-            {status === "none" && <Button variant="ghost" onClick={() => run(() => api.addFriend(userId))}>Adicionar amigo</Button>}
-            {status === "outgoing" && <Button variant="ghost" onClick={() => run(() => api.removeFriend(userId))}>Pedido enviado (cancelar)</Button>}
-            {status === "incoming" && <Button variant="ghost" onClick={() => run(() => api.addFriend(userId))}>Aceitar pedido de amizade</Button>}
-            {status === "friend" && <Button variant="ghost" onClick={() => run(() => api.removeFriend(userId))}>Amigos · desfazer</Button>}
+            {!blocked && <Button onClick={() => { onClose(); onMessage(userId); }}>Mandar mensagem</Button>}
+            {blocked && <Button variant="ghost" onClick={() => run(() => api.unblock(userId))}>Desbloquear</Button>}
+            {!blocked && status === "none" && <Button variant="ghost" onClick={() => run(() => api.addFriend(userId))}>Adicionar amigo</Button>}
+            {!blocked && status === "outgoing" && <Button variant="ghost" onClick={() => run(() => api.removeFriend(userId))}>Pedido enviado (cancelar)</Button>}
+            {!blocked && status === "incoming" && <Button variant="ghost" onClick={() => run(() => api.addFriend(userId))}>Aceitar pedido de amizade</Button>}
+            {!blocked && status === "friend" && <Button variant="ghost" onClick={() => run(() => api.removeFriend(userId))}>Amigos · desfazer</Button>}
+            {!blocked && <Button variant="ghost" onClick={() => { if (window.confirm(`Bloquear ${profile.username}? Vocês deixam de ser amigos e não poderão se falar.`)) void run(() => api.block(userId)); }}>Bloquear</Button>}
             {error && <p className="friends-error" role="alert">{error}</p>}
           </div>
         )}

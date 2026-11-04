@@ -157,8 +157,23 @@ export type Person = z.infer<typeof personSchema>;
 /** friend = amigos; incoming = pediu amizade a você; outgoing = você pediu. */
 export const friendSchema = z.object({ user: personSchema, status: z.enum(["friend", "incoming", "outgoing"]) });
 export type Friend = z.infer<typeof friendSchema>;
-/** Conversa direta 1:1: `channelId` serve em /channels/:id/messages e no evento "send". */
-export const dmSchema = z.object({ channelId: z.string(), user: personSchema, lastMessageAt: z.string().nullable() });
+/**
+ * Conversa direta: `channelId` serve em /channels/:id/messages, no evento "send" e na chamada.
+ * `users` são as outras pessoas (sem você); `group` = 3 ou mais pessoas; `name` é só de grupo.
+ */
+export const GROUP_MIN_OTHERS = 2;
+export const GROUP_MAX_MEMBERS = 10;
+export const dmSchema = z.object({
+  channelId: z.string(),
+  users: z.array(personSchema),
+  group: z.boolean().default(false),
+  name: z.string().nullable().default(null),
+  lastMessageAt: z.string().nullable(),
+});
+export const createGroupBody = z.object({ userIds: z.array(z.string()).min(GROUP_MIN_OTHERS).max(GROUP_MAX_MEMBERS - 1), name: z.string().trim().max(40).optional() });
+export const addGroupMemberBody = z.object({ userId: z.string() });
+/** Título de uma conversa direta: nome do grupo, ou os nomes das pessoas. */
+export const dmTitle = (d: Pick<Dm, "users" | "name">) => d.name || d.users.map(shownName).join(", ") || "Conversa";
 export type Dm = z.infer<typeof dmSchema>;
 
 /** Quem está em qual canal de voz (para a barra lateral, mesmo fora da chamada). */

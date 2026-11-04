@@ -62,6 +62,8 @@ export const channels = pgTable(
     serverId: text("server_id").references(() => servers.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     kind: text("kind", { enum: ["text", "voice", "dm"] }).notNull().default("text"),
+    /** DM com 3 ou mais pessoas (o nome é opcional). */
+    isGroup: boolean("is_group").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("channels_server_name_idx").on(t.serverId, t.name)],
@@ -99,4 +101,14 @@ export const dmMembers = pgTable(
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.channelId, t.userId] }), index("dm_members_user_idx").on(t.userId)],
+);
+
+export const blocks = pgTable(
+  "blocks",
+  {
+    blocker: text("blocker").notNull().references(() => users.id, { onDelete: "cascade" }),
+    blocked: text("blocked").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.blocker, t.blocked] }), index("blocks_blocked_idx").on(t.blocked)],
 );

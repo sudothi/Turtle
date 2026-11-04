@@ -565,3 +565,15 @@
 
 .security-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px !important; padding: 8px 12px; max-width: 520px; border: 1px dashed var(--ink-4); border-radius: 6px; font-size: 13px; color: var(--text-muted); }
 .security-note svg { flex: none; margin-top: 2px; }
+
+/* Grupos, chamada e bloqueio nas DMs */
+.dm-title-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 4px 4px 8px; }
+.dm-group-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--ink-4); color: var(--paper); flex: none; }
+.channel.dm .live-badge { margin-left: auto; }
+.dm-call { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.dm-call-back { padding: 6px 16px; text-align: left; color: var(--text-muted); }
+.dm-call .call { flex: 1; min-height: 0; }
+.new-group { display: flex; flex-direction: column; gap: 12px; }
+.new-group-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
+.new-group-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--paper); text-align: left; }
+.new-group-row:hover { background: var(--bg-hover); }

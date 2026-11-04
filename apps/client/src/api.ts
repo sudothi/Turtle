@@ -1,4 +1,4 @@
-import type { Account, Channel, ChannelKind, Dm, Friend, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
+import type { Account, Channel, ChannelKind, Dm, Friend, Person, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
 export const getToken = () => localStorage.getItem(KEY);
@@ -64,5 +64,11 @@ export const api = {
   removeFriend: (userId: string) => req<{ ok: true }>("DELETE", `/friends/${userId}`),
   dms: () => req<Dm[]>("GET", "/dms"),
   openDm: (userId: string) => req<Dm>("POST", `/dms/${userId}`),
+  createGroup: (userIds: string[], name?: string) => req<Dm>("POST", "/dms", { userIds, name: name || undefined }),
+  addToGroup: (channelId: string, userId: string) => req<Dm>("POST", `/dms/${channelId}/members`, { userId }),
+  leaveGroup: (channelId: string) => req<{ ok: true }>("DELETE", `/dms/${channelId}/members/me`),
+  blocks: () => req<Person[]>("GET", "/blocks"),
+  block: (userId: string) => req<{ ok: true }>("POST", `/blocks/${userId}`),
+  unblock: (userId: string) => req<{ ok: true }>("DELETE", `/blocks/${userId}`),
   messages: (channelId: string) => req<Message[]>("GET", `/channels/${channelId}/messages`),
 };

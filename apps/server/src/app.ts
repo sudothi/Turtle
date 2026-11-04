@@ -1,5 +1,6 @@
 import Fastify, { type FastifyRequest } from "fastify";
 import { AccessToken, TrackSource } from "livekit-server-sdk";
+import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import { and, channels, desc, eq, invites, lt, messages, sessions, users, type Db } from "@turtle/db";
 import {
@@ -21,6 +22,8 @@ export interface AppOptions {
   bootstrapInvite?: string;
   /** Sem isso, o endpoint de token de voz responde 503. */
   livekit?: LiveKitConfig;
+  /** Pasta do site já compilado (apps/client/dist). Em produção o servidor entrega o site e a API na mesma origem. */
+  clientDir?: string;
 }
 
 export interface LiveKitConfig {
@@ -39,9 +42,25 @@ interface Socket {
   on(event: "message" | "close", cb: (...args: any[]) => void): void;
 }
 
-export async function buildApp({ db, bootstrapInvite, livekit }: AppOptions) {
+export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppOptions) {
   const app = Fastify({ logger: false });
   await app.register(websocket);
+  if (clientDir) {
+    // Arquivos com hash no nome (assets/) nunca mudam; o index.html sempre é revalidado.
+    await app.register(fastifyStatic, {
+      root: clientDir,
+      wildcard: false,
+      cacheControl: false,
+      setHeaders: (res, path) => {
+        res.setHeader("cache-control", path.includes("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    });
+    // Rotas do app (SPA) que não são arquivos nem API caem no index.html.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === "GET" && req.headers.accept?.includes("text/html")) return reply.sendFile("index.html");
+      return reply.code(404).send({ error: "não encontrado" });
+    });
+  }
 
   const online = new Map<Socket, User>();
   const broadcast = (evt: ServerEvent) => {

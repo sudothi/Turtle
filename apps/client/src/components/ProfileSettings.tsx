@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AVATAR_MAX_BYTES, BANNER_MAX_BYTES, BIO_MAX, type User } from "@turtle/protocol";
+import { AVATAR_MAX_BYTES, BANNER_MAX_BYTES, BIO_MAX, canInviteAccounts, type User } from "@turtle/protocol";
 import { Button, TextField } from "@turtle/ui";
 import { api } from "../api";
 import { ProfileCard } from "./ProfileCard";
@@ -101,7 +101,7 @@ export function ProfileSettings({ user, onChanged }: { user: User; onChanged: (u
         </div>
         <div className="profile-preview">
           <div className="t-eyebrow">Prévia</div>
-          <ProfileCard profile={me} preview={{ displayName: name.trim(), bio: bio.trim() }} />
+          <ProfileCard profile={{ ...me, staff: canInviteAccounts(me) }} preview={{ displayName: name.trim(), bio: bio.trim() }} />
         </div>
       </div>
     </>

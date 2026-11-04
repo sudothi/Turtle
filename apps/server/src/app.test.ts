@@ -95,8 +95,11 @@ describe("server", () => {
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, friendToken)).status).toBe(403);
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, adminToken)).status).toBe(200);
     expect((await get("/me", friendToken)).body.canInvite).toBe(true);
-    // o cartão público não expõe o cargo
+    // o cartão público não expõe o cargo, só a tag TURTLE
+    expect((await get(`/users/${amigo.id}`, adminToken)).body).toMatchObject({ staff: true });
     expect((await get(`/users/${amigo.id}`, adminToken)).body.canInvite).toBeUndefined();
+    const tags = (await get(`/servers/${turtleId}/members`, friendToken)).body.map((m: any) => [m.username, m.staff]);
+    expect(Object.fromEntries(tags)).toMatchObject({ thiago: true, amigo: true });
     const inv = await post("/invites", {}, friendToken);
     expect(inv.status).toBe(200);
     expect((await post("/auth/register", { inviteCode: inv.body.code, username: "convidado", password: "12345678" })).status).toBe(200);
@@ -104,6 +107,7 @@ describe("server", () => {
     expect((await get("/admin/users", friendToken)).status).toBe(403);
     await patch(`/admin/users/${amigo.id}`, { canInvite: false }, adminToken);
     expect((await post("/invites", {}, friendToken)).status).toBe(403);
+    expect((await get(`/users/${amigo.id}`, adminToken)).body.staff).toBe(false);
     expect((await patch("/admin/users/ninguem", { canInvite: true }, adminToken)).status).toBe(404);
   });
 

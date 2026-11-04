@@ -144,7 +144,7 @@ export function AppInvitePanel() {
   );
 }
 
-/** Só para o admin: quem tem o cargo Convidador (pode gerar convites de conta). */
+/** Só para o admin: quem é administrador (gera convites de conta e mostra a tag TURTLE). */
 export function InvitersPanel({ me }: { me: string }) {
   const [people, setPeople] = useState<Account[]>();
   const [error, setError] = useState<string>();
@@ -161,8 +161,8 @@ export function InvitersPanel({ me }: { me: string }) {
   };
   return (
     <div className="t-field inviters">
-      <span className="t-field-label">Cargo Convidador</span>
-      <span className="t-field-hint">Quem estiver marcado também pode gerar convites de conta. O admin sempre pode.</span>
+      <span className="t-field-label">Administradores</span>
+      <span className="t-field-hint">Quem estiver marcado vira administrador: pode gerar convites de conta e ganha a tag TURTLE ao lado do nome.</span>
       {people?.map((p) => (
         <label key={p.id} className="inviter-row">
           <Avatar name={shownName(p)} src={fileUrl(p.avatar)} size={28} />
@@ -173,7 +173,7 @@ export function InvitersPanel({ me }: { me: string }) {
           {p.isAdmin || p.id === me ? (
             <span className="role-badge t-muted">Admin</span>
           ) : (
-            <input type="checkbox" aria-label={`Convidador: ${shownName(p)}`} checked={p.canInvite} onChange={(e) => toggle(p, e.target.checked)} />
+            <input type="checkbox" aria-label={`Administrador: ${shownName(p)}`} checked={p.canInvite} onChange={(e) => toggle(p, e.target.checked)} />
           )}
         </label>
       ))}

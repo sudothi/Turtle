@@ -341,7 +341,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const u = await loadUser(req.params.id);
       if (!u) return reply.code(404).send({ error: "pessoa não encontrada" });
       const { isAdmin: _a, canInvite: _c, ...pub } = u;
-      return pub;
+      return { ...pub, staff: canInviteAccounts(u) };
     });
 
     // ---- Servidores ----
@@ -434,11 +434,11 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     authed.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const rows = await db
-        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, role: serverMembers.role })
+        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, role: serverMembers.role, isAdmin: users.isAdmin, canInvite: users.canInvite })
         .from(serverMembers)
         .innerJoin(users, eq(users.id, serverMembers.userId))
         .where(eq(serverMembers.serverId, req.params.id));
-      return rows satisfies Member[];
+      return rows.map(({ isAdmin, canInvite, ...m }): Member => ({ ...m, staff: canInviteAccounts({ isAdmin, canInvite }) }));
     });
 
     authed.patch<{ Params: { id: string; user: string } }>("/servers/:id/members/:user", async (req, reply) => {
@@ -526,7 +526,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const rows = await db.select(userCols).from(users).orderBy(asc(users.createdAt));
       return rows.map((r): Account => ({ id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey, isAdmin: r.isAdmin, canInvite: r.canInvite }));
     });
-    /** Dá ou tira o cargo Convidador. */
+    /** Dá ou tira o cargo de administrador (convites de conta + tag TURTLE). */
     authed.patch<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
       const body = setInviterBody.safeParse(req.body);
@@ -535,7 +535,8 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (!done.length) return reply.code(404).send({ error: "pessoa não encontrada" });
       const fresh = await loadUser(req.params.id);
       if (fresh) for (const [s, u] of online) if (u.id === fresh.id) online.set(s, fresh);
-      toUsers([req.params.id], { t: "sync" });
+      // Todo mundo recarrega a lista de membros para a tag TURTLE aparecer ou sumir.
+      broadcast({ t: "sync" });
       return { ok: true };
     });
 

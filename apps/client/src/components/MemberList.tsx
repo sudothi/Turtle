@@ -1,6 +1,7 @@
 import { shownName, type Member } from "@turtle/protocol";
 import { Avatar } from "@turtle/ui";
 import { fileUrl } from "../api";
+import { TurtleTag } from "./TurtleTag";
 
 const byName = (a: Member, b: Member) => shownName(a).localeCompare(shownName(b), "pt-BR");
 const badge = { owner: "Dono", admin: "Admin", member: "" } as const;
@@ -14,6 +15,7 @@ export function MemberList({ members, online, onProfile }: { members: Member[]; 
     <div key={m.userId} className={`member ${isOnline ? "" : "offline"}`} role="button" tabIndex={0} onClick={() => onProfile(m)} onKeyDown={(e) => e.key === "Enter" && onProfile(m)}>
       <Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={32} status={isOnline ? "online" : undefined} statusRing="var(--bg-sidebar)" />
       <span className="member-name">{shownName(m)}</span>
+      {m.staff && <TurtleTag />}
       {badge[m.role] && <span className="role-badge t-muted">{badge[m.role]}</span>}
     </div>
   );

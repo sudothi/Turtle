@@ -3,6 +3,7 @@ import { encodeMentions, mentionedIds, shownName, splitMentions, type Channel, t
 import { Avatar, Icon, IconButton } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { fileUrl } from "../api";
+import { TurtleTag } from "./TurtleTag";
 
 /** Tamanho da página de histórico do servidor: se veio menos, estamos no começo do canal. */
 const PAGE = 50;
@@ -67,6 +68,7 @@ export function ChatView({
   }, [messages]);
 
   const names = useMemo(() => new Map(members.map((m) => [m.userId, shownName(m)])), [members]);
+  const staff = useMemo(() => new Set(members.filter((m) => m.staff).map((m) => m.userId)), [members]);
   const input = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [query, setQuery] = useState<string>();
@@ -162,6 +164,7 @@ export function ChatView({
                   <button type="button" className="plain-btn msg-author" onClick={() => onProfile(r.message.userId)}>
                     <b>{shownName(r.message)}</b>
                   </button>
+                  {staff.has(r.message.userId) && <TurtleTag />}
                   <time dateTime={r.message.createdAt}>{stamp(r.message.createdAt)}</time>
                 </div>
                 <MessageText content={r.message.content} names={names} onProfile={onProfile} />

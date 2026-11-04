@@ -57,7 +57,6 @@
 }
 .auth-side h2 { margin: 16px 0 0; font-size: var(--fs-xl); }
 .auth-side p { margin: 6px 0 0; font-size: var(--fs-sm); }
-.auth-logo { filter: url(#lino-rough); }
 .lino-live .auth-logo { filter: url(#lino-boil); }
 @media (max-width: 760px) {
   .auth-card { grid-template-columns: 1fr; padding: 24px; }
@@ -393,7 +392,7 @@
   isolation: isolate;
   animation: t-pop 160ms var(--ease);
 }
-.panel::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--ink-2); border: 2px solid var(--paper); border-radius: 8px; filter: url(#lino-rough-lg); }
+.panel::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--ink-2); border: 2px solid var(--paper); border-radius: 8px; }
 .panel h2 { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: var(--fs-xl); }
 .panel label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--paper-dim); }
 .panel label.check { flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); font-weight: 500; }

@@ -95,7 +95,7 @@ describe("server", () => {
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, friendToken)).status).toBe(403);
     expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, adminToken)).status).toBe(200);
     expect((await get("/me", friendToken)).body.canInvite).toBe(true);
-    // o cartão público não expõe o cargo, só a tag TURTLE
+    // o cartão público não expõe o cargo, só a tag da tartaruga
     expect((await get(`/users/${amigo.id}`, adminToken)).body).toMatchObject({ staff: true });
     expect((await get(`/users/${amigo.id}`, adminToken)).body.canInvite).toBeUndefined();
     const tags = (await get(`/servers/${turtleId}/members`, friendToken)).body.map((m: any) => [m.username, m.staff]);

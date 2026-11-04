@@ -503,14 +503,13 @@
 .profile-name { font-size: 22px; overflow-wrap: anywhere; }
 .profile-user { font-size: var(--fs-sm); }
 
-/* Tag TURTLE (administradores): única cor da interface, roxo em dois tons, no formato das tags de servidor. */
+/* Tag dos administradores: só a tartaruga, roxo em dois tons, no formato das tags de servidor. Única cor da interface. */
 .turtle-tag {
   --tag-bg: #3b1d6e; --tag-fg: #c9a8ff;
-  display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
-  height: 17px; padding: 0 5px 0 3px; border-radius: 4px;
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 19px; height: 17px; border-radius: 4px;
   background: var(--tag-bg); color: var(--tag-fg); box-shadow: inset 0 0 0 1px #5b2fa6;
-  font-family: var(--font-body); font-size: 10.5px; font-weight: 800; letter-spacing: 0.02em; line-height: 1;
-  vertical-align: middle; white-space: nowrap; user-select: none; cursor: default;
+  vertical-align: middle; user-select: none; cursor: default;
 }
 .turtle-tag-mark { flex-shrink: 0; }
 .member .turtle-tag { margin-left: -8px; }

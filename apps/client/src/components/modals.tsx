@@ -144,7 +144,7 @@ export function AppInvitePanel() {
   );
 }
 
-/** Só para o admin: quem é administrador (gera convites de conta e mostra a tag TURTLE). */
+/** Só para o admin: quem é administrador (gera convites de conta e mostra a tag da tartaruga). */
 export function InvitersPanel({ me }: { me: string }) {
   const [people, setPeople] = useState<Account[]>();
   const [error, setError] = useState<string>();
@@ -162,7 +162,7 @@ export function InvitersPanel({ me }: { me: string }) {
   return (
     <div className="t-field inviters">
       <span className="t-field-label">Administradores</span>
-      <span className="t-field-hint">Quem estiver marcado vira administrador: pode gerar convites de conta e ganha a tag TURTLE ao lado do nome.</span>
+      <span className="t-field-hint">Quem estiver marcado vira administrador: pode gerar convites de conta e ganha a tag roxa da tartaruga ao lado do nome.</span>
       {people?.map((p) => (
         <label key={p.id} className="inviter-row">
           <Avatar name={shownName(p)} src={fileUrl(p.avatar)} size={28} />

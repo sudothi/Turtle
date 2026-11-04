@@ -24,7 +24,7 @@ export const userSchema = z.object({
   id: z.string(),
   username: z.string(),
   isAdmin: z.boolean(),
-  /** Cargo de administrador marcado pelo admin: pode gerar convites de conta e ganha a tag TURTLE. */
+  /** Cargo de administrador marcado pelo admin: pode gerar convites de conta e ganha a tag da tartaruga. */
   canInvite: z.boolean().default(false),
   displayName: z.string().nullable().default(null),
   bio: z.string().nullable().default(null),
@@ -41,7 +41,7 @@ export const updateProfileBody = z.object({
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 export const BANNER_MAX_BYTES = 4 * 1024 * 1024;
 /** Nome a mostrar: o de exibição, se houver, senão o de usuário. */
-/** Quem pode gerar convites de conta. Também é quem mostra a tag TURTLE ao lado do nome. */
+/** Quem pode gerar convites de conta. Também é quem mostra a tag da tartaruga ao lado do nome. */
 export const canInviteAccounts = (u: { isAdmin: boolean; canInvite?: boolean }) => u.isAdmin || !!u.canInvite;
 /** Conta vista pelo admin na aba Administração. */
 export const accountSchema = z.object({
@@ -123,7 +123,7 @@ export const memberSchema = z.object({
   displayName: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
   role: serverRole,
-  /** Administrador do Turtle (admin ou marcado na aba de convites): mostra a tag TURTLE. */
+  /** Administrador do Turtle (admin ou marcado na aba de convites): mostra a tag da tartaruga. */
   staff: z.boolean().default(false),
 });
 export type Member = z.infer<typeof memberSchema>;

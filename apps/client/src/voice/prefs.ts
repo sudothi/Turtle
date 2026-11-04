@@ -1,10 +1,16 @@
 /** Preferências de áudio deste computador (ficam no navegador/app, não no servidor). */
-export type NoiseMode = "rnnoise" | "browser" | "off";
+export type NoiseMode = "gtcrn" | "rnnoise" | "speex" | "browser" | "off";
 
 export interface AudioPrefs {
   inputId: string;
   outputId: string;
   noise: NoiseMode;
+  /** Porta de ruído (noise gate): corta o som abaixo de `gateThreshold` dB. */
+  noiseGate: boolean;
+  /** Limiar em dB (-70 a -20) para abrir a porta de ruído. */
+  gateThreshold: number;
+  /** Ganho do microfone (0.25 a 2.5, onde 1 = 100%). */
+  inputGain: number;
   /** Volume da voz por pessoa (userId -> 0..1). */
   volumes: Record<string, number>;
   /** Volume do áudio das transmissões de tela por pessoa (userId -> 0..1). */
@@ -37,14 +43,20 @@ export const screenProfiles: Record<ScreenProfileId, ScreenProfile> = {
 };
 
 const KEY = "turtle.audio";
+const validNoise = new Set<NoiseMode>(["gtcrn", "rnnoise", "speex", "browser", "off"]);
 const defaults: AudioPrefs = {
-  inputId: "default", outputId: "default", noise: "rnnoise", volumes: {},
-  streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false,
+  inputId: "default", outputId: "default", noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1,
+  volumes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false,
 };
 
 export function loadPrefs(): AudioPrefs {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<AudioPrefs>;
+    const merged = { ...defaults, ...raw };
+    if (!validNoise.has(merged.noise)) merged.noise = defaults.noise;
+    merged.gateThreshold = Math.max(-70, Math.min(-20, Number(merged.gateThreshold) || defaults.gateThreshold));
+    merged.inputGain = Math.max(0.25, Math.min(2.5, Number(merged.inputGain) || defaults.inputGain));
+    return merged;
   } catch {
     return { ...defaults };
   }
@@ -58,9 +70,16 @@ export function savePrefs(p: AudioPrefs) {
   }
 }
 
+/** Se usa um filtro via AudioWorklet (WASM ou noise gate) ou ajuste de ganho. */
+export const usesWasmNoise = (m: NoiseMode): m is "gtcrn" | "rnnoise" | "speex" =>
+  m === "gtcrn" || m === "rnnoise" || m === "speex";
+
+export const needsAudioProcessor = (p: Pick<AudioPrefs, "noise" | "noiseGate" | "inputGain">) =>
+  usesWasmNoise(p.noise) || p.noiseGate || Math.abs(p.inputGain - 1) > 0.01;
+
 /**
  * Restrições do microfone. Cancelamento de eco e ganho automático sempre ligados;
- * a supressão do navegador só quando o RNNoise está desligado (os dois juntos deixam a voz metálica).
+ * a supressão do navegador só quando o filtro em WASM está desligado (os dois juntos deixam a voz metálica).
  */
 export const micConstraints = (p: Pick<AudioPrefs, "inputId" | "noise">) => ({
   deviceId: p.inputId === "default" ? undefined : { exact: p.inputId },

@@ -1,39 +1,139 @@
 import type { AudioProcessorOptions, Track, TrackProcessor } from "livekit-client";
-import { loadRnnoise, RnnoiseWorkletNode } from "@sapphi-red/web-noise-suppressor";
+import {
+  GtcrnWorkletNode,
+  loadGtcrn,
+  loadRnnoise,
+  loadSpeex,
+  NoiseGateWorkletNode,
+  RnnoiseWorkletNode,
+  SpeexWorkletNode,
+} from "@sapphi-red/web-noise-suppressor";
+import gtcrnWorkletUrl from "@sapphi-red/web-noise-suppressor/gtcrnWorklet.js?url";
+import gtcrnWasmUrl from "@sapphi-red/web-noise-suppressor/gtcrn.wasm?url";
 import rnnoiseWorkletUrl from "@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url";
 import rnnoiseWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
 import rnnoiseSimdWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
+import speexWorkletUrl from "@sapphi-red/web-noise-suppressor/speexWorklet.js?url";
+import speexWasmUrl from "@sapphi-red/web-noise-suppressor/speex.wasm?url";
+import noiseGateWorkletUrl from "@sapphi-red/web-noise-suppressor/noiseGateWorklet.js?url";
+import type { AudioPrefs, NoiseMode } from "./prefs";
 
-let wasm: Promise<ArrayBuffer> | undefined;
-/** Baixa o RNNoise (wasm, ~100 KB) uma vez só; dá pra chamar cedo para adiantar. */
-export const preloadRnnoise = () => (wasm ??= loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdWasmUrl }));
+export type AudioFilterConfig = Pick<AudioPrefs, "noise" | "noiseGate" | "gateThreshold" | "inputGain">;
+
+let rnnoiseWasm: Promise<ArrayBuffer> | undefined;
+let gtcrnWasm: Promise<ArrayBuffer> | undefined;
+let speexWasm: Promise<ArrayBuffer> | undefined;
+
+/** Baixa o binário WASM do filtro escolhido uma vez só; dá pra chamar cedo para adiantar. */
+export function preloadNoiseWasm(mode: NoiseMode = "gtcrn"): Promise<ArrayBuffer | undefined> {
+  if (mode === "gtcrn") return (gtcrnWasm ??= loadGtcrn({ url: gtcrnWasmUrl }));
+  if (mode === "rnnoise") return (rnnoiseWasm ??= loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdWasmUrl }));
+  if (mode === "speex") return (speexWasm ??= loadSpeex({ url: speexWasmUrl }));
+  return Promise.resolve(undefined);
+}
+
+/** Compatibilidade com chamadas existentes. */
+export const preloadRnnoise = () => preloadNoiseWasm("rnnoise");
 
 export interface RnnoiseGraph {
   context: AudioContext;
-  /** Saída já limpa, para ligar em outros nós (medidor, retorno). */
+  /** Entrada bruta (antes do filtro), útil para comparar o medidor em ⚙. */
+  source: AudioNode;
+  /** Saída já limpa e com porta de ruído / ganho aplicados. */
   output: AudioNode;
+  /** Ajusta o ganho em tempo real sem recriar o AudioContext. */
+  setGain(gain: number): void;
   destroy(): void;
 }
 
 /**
- * Monta microfone -> RNNoise num AudioContext próprio de 48 kHz.
- * O RNNoise só funciona em 48 kHz, e o contexto da sala pode estar em 44,1 kHz.
+ * Monta microfone -> [GTCRN | RNNoise | Speex] -> [Noise Gate] -> Gain num AudioContext próprio de 48 kHz.
+ * Os modelos WASM operam em 48 kHz, e o contexto da sala pode estar em outra taxa.
  */
-export async function createRnnoiseGraph(track: MediaStreamTrack): Promise<RnnoiseGraph> {
+export async function createRnnoiseGraph(
+  track: MediaStreamTrack,
+  cfg: AudioFilterConfig = { noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1 },
+): Promise<RnnoiseGraph> {
   const context = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+  const destroyCallbacks: (() => void)[] = [];
   try {
-    const [wasmBinary] = await Promise.all([preloadRnnoise(), context.audioWorklet.addModule(rnnoiseWorkletUrl)]);
+    const tasks: Promise<unknown>[] = [];
+    if (cfg.noise === "gtcrn") {
+      tasks.push(preloadNoiseWasm("gtcrn"), context.audioWorklet.addModule(gtcrnWorkletUrl));
+    } else if (cfg.noise === "rnnoise") {
+      tasks.push(preloadNoiseWasm("rnnoise"), context.audioWorklet.addModule(rnnoiseWorkletUrl));
+    } else if (cfg.noise === "speex") {
+      tasks.push(preloadNoiseWasm("speex"), context.audioWorklet.addModule(speexWorkletUrl));
+    }
+    if (cfg.noiseGate) {
+      tasks.push(context.audioWorklet.addModule(noiseGateWorkletUrl));
+    }
+
+    const results = await Promise.all(tasks);
+    const wasmBinary = results[0] as ArrayBuffer | undefined;
+
     const source = context.createMediaStreamSource(new MediaStream([track]));
-    const rnnoise = new RnnoiseWorkletNode(context, { maxChannels: 1, wasmBinary });
-    source.connect(rnnoise);
+    let current: AudioNode = source;
+
+    if (cfg.noise === "gtcrn" && wasmBinary) {
+      const node = new GtcrnWorkletNode(context, { maxChannels: 1, wasmBinary });
+      current.connect(node);
+      current = node;
+      destroyCallbacks.push(() => {
+        node.disconnect();
+        node.destroy();
+      });
+    } else if (cfg.noise === "rnnoise" && wasmBinary) {
+      const node = new RnnoiseWorkletNode(context, { maxChannels: 1, wasmBinary });
+      current.connect(node);
+      current = node;
+      destroyCallbacks.push(() => {
+        node.disconnect();
+        node.destroy();
+      });
+    } else if (cfg.noise === "speex" && wasmBinary) {
+      const node = new SpeexWorkletNode(context, { maxChannels: 1, wasmBinary });
+      current.connect(node);
+      current = node;
+      destroyCallbacks.push(() => {
+        node.disconnect();
+        node.destroy();
+      });
+    }
+
+    if (cfg.noiseGate) {
+      // Histerese de 6 dB entre abrir e fechar evita picotar o final das palavras.
+      const openThreshold = cfg.gateThreshold;
+      const closeThreshold = Math.max(-80, openThreshold - 6);
+      const gate = new NoiseGateWorkletNode(context, {
+        openThreshold,
+        closeThreshold,
+        holdMs: 180,
+        maxChannels: 1,
+      });
+      current.connect(gate);
+      current = gate;
+      destroyCallbacks.push(() => gate.disconnect());
+    }
+
+    const gainNode = context.createGain();
+    gainNode.gain.value = cfg.inputGain;
+    current.connect(gainNode);
+    current = gainNode;
+    destroyCallbacks.push(() => gainNode.disconnect());
+
     if (context.state === "suspended") await context.resume();
+
     return {
       context,
-      output: rnnoise,
+      source,
+      output: current,
+      setGain(g: number) {
+        gainNode.gain.setTargetAtTime(g, context.currentTime, 0.015);
+      },
       destroy() {
         source.disconnect();
-        rnnoise.disconnect();
-        rnnoise.destroy();
+        for (const fn of destroyCallbacks) fn();
         void context.close();
       },
     };
@@ -43,14 +143,21 @@ export async function createRnnoiseGraph(track: MediaStreamTrack): Promise<Rnnoi
   }
 }
 
-/** Processor do LiveKit: o que é publicado na sala é a saída do RNNoise. */
+/** Processor do LiveKit: publica na sala a saída filtrada (GTCRN/RNNoise/Speex + Noise Gate + Ganho). */
 export class RnnoiseProcessor implements TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
-  name = "turtle-rnnoise";
+  name = "turtle-audio-filter";
   processedTrack?: MediaStreamTrack;
   private graph?: RnnoiseGraph;
+  private cfg: AudioFilterConfig;
+  private lastOpts?: AudioProcessorOptions;
 
-  async init({ track }: AudioProcessorOptions) {
-    const graph = await createRnnoiseGraph(track);
+  constructor(cfg: AudioFilterConfig = { noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1 }) {
+    this.cfg = { ...cfg };
+  }
+
+  async init(opts: AudioProcessorOptions) {
+    this.lastOpts = opts;
+    const graph = await createRnnoiseGraph(opts.track, this.cfg);
     const dest = graph.context.createMediaStreamDestination();
     dest.channelCount = 1;
     graph.output.connect(dest);
@@ -61,6 +168,12 @@ export class RnnoiseProcessor implements TrackProcessor<Track.Kind.Audio, AudioP
   async restart(opts: AudioProcessorOptions) {
     await this.destroy();
     await this.init(opts);
+  }
+
+  /** Atualiza ganho sem recriar o grafo quando só o ganho mudou. */
+  setGain(gain: number) {
+    this.cfg.inputGain = gain;
+    this.graph?.setGain(gain);
   }
 
   async destroy() {

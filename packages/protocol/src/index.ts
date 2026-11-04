@@ -32,6 +32,9 @@ export const voiceStateSchema = z.object({
   channelId: z.string(),
   muted: z.boolean(),
   deafened: z.boolean(),
+  camera: z.boolean().default(false),
+  /** Compartilhando tela (mostra "AO VIVO" na barra lateral). */
+  screen: z.boolean().default(false),
 });
 export type VoiceState = z.infer<typeof voiceStateSchema>;
 
@@ -44,7 +47,10 @@ export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
   z.object({ t: z.literal("send"), channelId: z.string(), content: z.string().trim().min(1).max(4000) }),
   /** channelId null = saiu da voz. */
-  z.object({ t: z.literal("voice"), channelId: z.string().nullable(), muted: z.boolean(), deafened: z.boolean() }),
+  z.object({
+    t: z.literal("voice"), channelId: z.string().nullable(), muted: z.boolean(), deafened: z.boolean(),
+    camera: z.boolean().default(false), screen: z.boolean().default(false),
+  }),
 ]);
 export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),

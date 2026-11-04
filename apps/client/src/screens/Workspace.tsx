@@ -8,6 +8,7 @@ import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
 import { ChatView } from "../components/ChatView";
 import { CallView } from "../components/CallView";
+import { ShareModal } from "../components/ShareModal";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 
@@ -23,6 +24,7 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
   const [online, setOnline] = useState<string[]>([]);
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
   const [inviting, setInviting] = useState(false);
   const [membersOpen, setMembersOpen] = useState(() => {
@@ -38,8 +40,8 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
 
   const [voice] = useState(
     () =>
-      new VoiceClient((channelId, muted, deafened) => {
-        if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "voice", channelId, muted, deafened }));
+      new VoiceClient((state) => {
+        if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "voice", ...state }));
       }),
   );
   const snap = useSyncExternalStore(voice.subscribe, voice.getSnapshot);
@@ -117,7 +119,7 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
         onCreate={setCreating}
         onInvite={() => setInviting(true)}
         onLogout={logout}
-        footer={<UserPanel user={user} snap={snap} voice={voice} channels={channels} onSettings={() => setSettings(true)} onLogout={onLogout} />}
+        footer={<UserPanel user={user} snap={snap} voice={voice} channels={channels} onSettings={() => setSettings(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
       />
       <main className="stage">
         {view === "voice" ? (
@@ -135,6 +137,7 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
         )}
       </main>
       {showMembers && <MemberList online={online} />}
+      {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
       {settings && <VoiceSettings voice={voice} prefs={snap.prefs} onClose={() => setSettings(false)} />}
       {creating && <CreateChannelModal initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && <InviteModal onClose={() => setInviting(false)} />}

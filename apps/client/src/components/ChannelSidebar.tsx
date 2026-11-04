@@ -123,6 +123,10 @@ export function ChannelSidebar({
                       <li key={v.userId}>
                         <Avatar name={v.username} size={24} speaking={speaking.has(v.userId)} />
                         <span className="voice-member-name">{v.username}</span>
+                        {v.screen && <span className="live-badge small">AO VIVO</span>}
+                        {v.camera && (
+                          <span className="vm-flag" title="Câmera ligada"><Icon name="video" size={16} /><span className="sr">câmera ligada</span></span>
+                        )}
                         {v.deafened ? (
                           <span className="vm-flag" title="Surdo"><Icon name="headphones-off" size={16} /><span className="sr">surdo</span></span>
                         ) : v.muted ? (

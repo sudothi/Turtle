@@ -156,8 +156,7 @@ export async function buildApp({ db, bootstrapInvite, livekit }: AppOptions) {
         canSubscribe: true,
         canPublish: true,
         canPublishData: true,
-        // Marco 2 só voz; tela e câmera entram no marco 3.
-        canPublishSources: [TrackSource.MICROPHONE],
+        canPublishSources: [TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO],
       });
       return { url: livekit.url, token: await at.toJwt() } satisfies VoiceToken;
     });
@@ -216,7 +215,10 @@ export async function buildApp({ db, bootstrapInvite, livekit }: AppOptions) {
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
-          voice.set(socket, { userId: user.id, username: user.username, channelId: channel.id, muted: evt.muted, deafened: evt.deafened });
+          voice.set(socket, {
+            userId: user.id, username: user.username, channelId: channel.id,
+            muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
+          });
           broadcast(voiceStates());
           return;
         }

@@ -49,6 +49,10 @@ export interface ShareStats {
   limit: string;
   /** Mb/s enviados. */
   mbps: number;
+  /** O Chromium diz que o codificador é eficiente em energia, ou seja, de hardware. Indefinido se não informado. */
+  hardware?: boolean;
+  /** Sem quadros nem bytes saindo: o LiveKit pausa a transmissão quando ninguém está assistindo (ou a aba de quem assiste está oculta). */
+  idle: boolean;
 }
 
 export interface VoiceSnapshot {
@@ -119,6 +123,7 @@ export class VoiceClient {
   private asked = new Set<string>();
   private statsTimer?: ReturnType<typeof setInterval>;
   private lastBytes?: { bytes: number; at: number };
+  private lastDims = { width: 0, height: 0 };
 
   constructor(private report: VoiceReporter) {}
 
@@ -445,6 +450,7 @@ export class VoiceClient {
     clearInterval(this.statsTimer);
     this.statsTimer = undefined;
     this.lastBytes = undefined;
+    this.lastDims = { width: 0, height: 0 };
   }
 
   /** Lê do encoder resolução, fps, qual encoder está em uso e se a qualidade está caindo. */
@@ -460,12 +466,15 @@ export class VoiceClient {
       const bytes = (stat.bytesSent as number | undefined) ?? 0;
       const mbps = this.lastBytes ? ((bytes - this.lastBytes.bytes) * 8) / 1e6 / ((now - this.lastBytes.at) / 1000) : 0;
       this.lastBytes = { bytes, at: now };
+      if (stat.frameWidth) this.lastDims = { width: stat.frameWidth, height: stat.frameHeight ?? 0 };
       this.set({
         shareStats: {
-          width: stat.frameWidth ?? 0,
-          height: stat.frameHeight ?? 0,
+          width: stat.frameWidth || this.lastDims.width,
+          height: stat.frameHeight || this.lastDims.height,
           fps: Math.round(stat.framesPerSecond ?? 0),
+          idle: !stat.framesPerSecond && mbps < 0.05,
           encoder: stat.encoderImplementation ?? "desconhecido",
+          hardware: stat.powerEfficientEncoder as boolean | undefined,
           limit: stat.qualityLimitationReason ?? "none",
           mbps: Math.max(0, Math.round(mbps * 10) / 10),
         },

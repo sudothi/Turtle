@@ -19,7 +19,7 @@ O pacote exporta o código-fonte (sem build): o Vite do client compila direto.
 - Sem cor de destaque: estados usam inversão (papel sobre tinta), borda tracejada (erro) e anel de papel (falando).
 
 ## Linocut
-- `.lino`: o fundo/borda vai para um pseudo-elemento com o filtro `#lino-rough` (borda de goiva irregular); o texto continua nítido. As bordas "respiram": o ruído do filtro troca de semente algumas vezes por segundo (efeito de traço fervendo, como animação desenhada à mão). Com `prefers-reduced-motion` ficam paradas. Ajuste com `--lino-bg`, `--lino-border`, `--lino-radius`. `.lino-lg` usa um entalhe mais forte (cartões grandes).
+- `.lino`: o fundo/borda vai para um pseudo-elemento com o filtro `#lino-rough` (borda de goiva irregular); o texto continua nítido. Por padrão as bordas ficam paradas. Em qualquer container com a classe `.lino-live` (hoje só a tela de login) elas "fervem": o ruído do filtro (`#lino-boil`) troca de semente em passos, como traço desenhado à mão. Com `prefers-reduced-motion` ficam paradas. Ajuste com `--lino-bg`, `--lino-border`, `--lino-radius`. `.lino-lg` usa um entalhe mais forte (cartões grandes).
 - `.carve`: textura sutil de marcas de goiva (`assets/carve.svg`).
 - A textura sai de `scripts/gen-art.py` (determinístico).
 

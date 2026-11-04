@@ -110,6 +110,7 @@ describe("server", () => {
     expect(claims.name).toBe("amigo");
     expect(claims.video?.room).toBe(voiceRoomName(sala.id));
     expect(claims.video?.roomJoin).toBe(true);
+    expect(claims.video?.canPublishSources).toEqual(["microphone", "camera", "screen_share", "screen_share_audio"]);
   });
 
   it("estado de voz é compartilhado e some quando a conexão cai", async () => {
@@ -139,9 +140,9 @@ describe("server", () => {
     a.ws.send(JSON.stringify({ t: "voice", channelId: sala.id, muted: false, deafened: false }));
     let evt = await b.next((e) => e.t === "voiceStates" && e.states.length === 1);
     expect(evt.states[0]).toMatchObject({ username: "thiago", channelId: sala.id, muted: false });
-    a.ws.send(JSON.stringify({ t: "voice", channelId: sala.id, muted: true, deafened: true }));
+    a.ws.send(JSON.stringify({ t: "voice", channelId: sala.id, muted: true, deafened: true, screen: true }));
     evt = await b.next((e) => e.t === "voiceStates" && e.states[0]?.deafened);
-    expect(evt.states[0].muted).toBe(true);
+    expect(evt.states[0]).toMatchObject({ muted: true, screen: true, camera: false });
     a.ws.close();
     evt = await b.next((e) => e.t === "voiceStates" && e.states.length === 0);
     expect(evt.states).toEqual([]);

@@ -17,6 +17,7 @@ export function UserPanel({
   voice,
   channels,
   onSettings,
+  onShare,
   onLogout,
 }: {
   user: User;
@@ -24,6 +25,8 @@ export function UserPanel({
   voice: VoiceClient;
   channels: Channel[];
   onSettings: () => void;
+  /** Abre a escolha de qualidade antes de transmitir a tela. */
+  onShare: () => void;
   onLogout: () => void;
 }) {
   const channel = channels.find((c) => c.id === snap.channelId);
@@ -51,6 +54,21 @@ export function UserPanel({
               <Icon name="phone-off" size={20} />
             </IconButton>
           </div>
+          {snap.status === "connected" && (
+            <div className="voice-status-actions">
+              <IconButton label={snap.camera ? "Desligar câmera" : "Ligar câmera"} aria-pressed={snap.camera} className={snap.camera ? "is-on" : ""} onClick={() => void voice.toggleCamera()}>
+                <Icon name={snap.camera ? "video" : "video-off"} />
+              </IconButton>
+              <IconButton
+                label={snap.screen ? "Parar transmissão" : "Compartilhar tela"}
+                aria-pressed={snap.screen}
+                className={snap.screen ? "is-on" : ""}
+                onClick={() => (snap.screen ? void voice.stopScreen() : onShare())}
+              >
+                <Icon name={snap.screen ? "screen-off" : "screen"} />
+              </IconButton>
+            </div>
+          )}
           {snap.needsAudioUnlock && (
             <Button size="sm" block onClick={() => void voice.unlockAudio()}>
               Ativar som

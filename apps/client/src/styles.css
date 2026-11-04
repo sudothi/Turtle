@@ -410,3 +410,36 @@
 .meter div { height: 100%; background: repeating-linear-gradient(90deg, var(--paper) 0 6px, transparent 6px 8px); transition: width 60ms linear; }
 .err { font-size: var(--fs-sm); font-style: italic; border-left: 3px solid var(--paper); padding-left: 8px; }
 .dim { color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* ===================== Câmera e transmissão de tela ===================== */
+.video-view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; background: #000; }
+.video-view.contain { object-fit: contain; }
+.video-view.mirror { transform: scaleX(-1); }
+/* O vídeo fica 3px para dentro: a borda rugosa do cartão (e o destaque de quem fala) continua visível */
+.tile.has-video { --lino-bg: #000; }
+.tile.has-video .video-view { inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); border-radius: calc(var(--lino-radius) - 3px); }
+.tile.has-video .tile-name, .tile.has-video .tile-quality, .tile.has-video .tile-actions, .tile.has-video .tile-volume { z-index: 1; }
+.screen-tile { grid-column: span 2; aspect-ratio: 16 / 9; }
+.screen-tile.focused { grid-column: auto; }
+.screen-wait { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--paper); text-align: center; padding: 8px; }
+.live-badge { padding: 1px 6px; border-radius: 3px; background: var(--paper); color: var(--ink-0); font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.06em; }
+.live-badge.small { margin-left: auto; font-size: 10px; padding: 0 5px; }
+.tile-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; opacity: 0; transition: opacity var(--dur); }
+.tile:hover .tile-actions, .tile:focus-within .tile-actions { opacity: 1; }
+.tile-volume.visible { opacity: 1; }
+.tile-stats { position: absolute; top: 10px; left: 12px; right: 12px; padding: 3px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.7); font-size: var(--fs-xs); z-index: 1; }
+.tile:fullscreen { --lino-radius: 0; background: #000; }
+.focus-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 0; }
+.focus-main { flex: 1; min-height: 0; display: grid; }
+.focus-main .tile { aspect-ratio: auto; height: 100%; }
+.focus-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.focus-strip .tile { flex: 0 0 150px; min-height: 0; aspect-ratio: 16 / 10; }
+.focus-strip .tile.screen-tile { flex-basis: 190px; grid-column: auto; }
+.t-icon-btn.big.is-on { --lino-bg: var(--paper); color: var(--ink-0); --slash-gap: var(--paper); }
+.voice-status-actions { display: flex; gap: 6px; }
+.voice-status-actions .t-icon-btn.is-on { --lino-bg: var(--paper); color: var(--ink-0); --slash-gap: var(--paper); }
+.share-profiles { border: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.share-profiles legend { margin-bottom: 8px; padding: 0; }
+.share-option { --lino-bg: var(--ink-3); --lino-radius: 6px; display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; cursor: pointer; }
+.share-option input, .share-audio input { margin-top: 4px; accent-color: var(--paper); }
+.share-audio { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }

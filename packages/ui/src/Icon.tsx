@@ -93,6 +93,40 @@ const icons = {
       <rect x="17" y="4" width="4" height="17" rx="1" fill="currentColor" />
     </>
   ),
+  video: (
+    <>
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" fill="currentColor" />
+      <path d="M16.5 10.5 21.5 7v10l-5-3.5z" fill="currentColor" />
+    </>
+  ),
+  "video-off": (
+    <>
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" fill="currentColor" />
+      <path d="M16.5 10.5 21.5 7v10l-5-3.5z" fill="currentColor" />
+      <path d="M3.5 3.5l17 17" stroke="var(--slash-gap, #0a0a0a)" strokeWidth="5" />
+      {slash}
+    </>
+  ),
+  screen: (
+    <>
+      <rect x="2.5" y="4" width="19" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+      <path d="M12 7.5v6M9 10.2l3-3 3 3M8 21h8M12 17v4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  "screen-off": (
+    <>
+      <rect x="2.5" y="4" width="19" height="13" rx="2" fill="currentColor" />
+      <path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </>
+  ),
+  maximize: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />,
+  minimize: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />,
+  eye: (
+    <>
+      <path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3.3" fill="currentColor" />
+    </>
+  ),
   send: <path d="M3 20.5 21.5 12 3 3.5l2.5 8.5zM5.5 12H13" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />,
 } as const;
 

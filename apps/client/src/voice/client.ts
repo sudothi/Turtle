@@ -4,13 +4,16 @@ import {
   DisconnectReason,
   type LocalAudioTrack,
   type Participant,
+  type RemoteParticipant,
   RemoteTrack,
+  type RemoteTrackPublication,
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
 } from "livekit-client";
 import { api } from "../api";
-import { loadPrefs, micConstraints, savePrefs, type AudioPrefs, type NoiseMode } from "./prefs";
+import { loadPrefs, micConstraints, savePrefs, screenProfiles, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
 import { preloadRnnoise, RnnoiseProcessor } from "./rnnoise";
 
 export interface CallParticipant {
@@ -22,12 +25,42 @@ export interface CallParticipant {
   quality: "excellent" | "good" | "poor" | "lost" | "unknown";
 }
 
+/** Um vídeo na grade da chamada: a câmera ou a transmissão de tela de alguém. */
+export interface VideoTile {
+  key: string;
+  userId: string;
+  name: string;
+  source: "camera" | "screen";
+  isLocal: boolean;
+  /** Pronto para exibir. Ausente numa transmissão que você ainda não escolheu assistir. */
+  track?: Track;
+  watching: boolean;
+  speaking: boolean;
+}
+
+/** Diagnóstico da sua própria transmissão, lido do encoder. */
+export interface ShareStats {
+  width: number;
+  height: number;
+  fps: number;
+  /** Nome do encoder usado pelo Chromium (hardware ou software). */
+  encoder: string;
+  /** Por que a qualidade caiu: "cpu", "bandwidth" ou "none". */
+  limit: string;
+  /** Mb/s enviados. */
+  mbps: number;
+}
+
 export interface VoiceSnapshot {
   status: "idle" | "connecting" | "connected" | "reconnecting";
   channelId?: string;
   muted: boolean;
   deafened: boolean;
   participants: CallParticipant[];
+  camera: boolean;
+  screen: boolean;
+  videos: VideoTile[];
+  shareStats?: ShareStats;
   /** O navegador bloqueou o som até um clique (autoplay). */
   needsAudioUnlock: boolean;
   error?: string;
@@ -35,10 +68,21 @@ export interface VoiceSnapshot {
 }
 
 /** Avisa o gateway onde estamos, para a barra lateral de todo mundo. */
-export type VoiceReporter = (channelId: string | null, muted: boolean, deafened: boolean) => void;
+export interface VoiceReport {
+  channelId: string | null;
+  muted: boolean;
+  deafened: boolean;
+  camera: boolean;
+  screen: boolean;
+}
+export type VoiceReporter = (state: VoiceReport) => void;
 
 const qualityName = (q: ConnectionQuality): CallParticipant["quality"] =>
   q === ConnectionQuality.Excellent ? "excellent" : q === ConnectionQuality.Good ? "good" : q === ConnectionQuality.Poor ? "poor" : q === ConnectionQuality.Lost ? "lost" : "unknown";
+
+/** Navegadores sem H.264 no encoder (alguns Chromium de código aberto) caem para VP8. */
+const supportsH264 = () =>
+  typeof RTCRtpSender !== "undefined" && (RTCRtpSender.getCapabilities?.("video")?.codecs.some((c) => c.mimeType.toLowerCase() === "video/h264") ?? false);
 
 const disconnectMessage = (reason?: DisconnectReason) => {
   switch (reason) {
@@ -64,8 +108,17 @@ export class VoiceClient {
   private room?: Room;
   private mic?: LocalAudioTrack;
   private listeners = new Set<() => void>();
-  private snap: VoiceSnapshot = { status: "idle", muted: false, deafened: false, participants: [], needsAudioUnlock: false, prefs: loadPrefs() };
+  private snap: VoiceSnapshot = {
+    status: "idle", muted: false, deafened: false, participants: [], camera: false, screen: false, videos: [],
+    needsAudioUnlock: false, prefs: loadPrefs(),
+  };
   private joinSeq = 0;
+  /** Quem você escolheu assistir (transmissões de tela só chegam a quem pede). */
+  private watching = new Set<string>();
+  /** Publicações remotas para as quais já pedimos (ou cancelamos) a assinatura. */
+  private asked = new Set<string>();
+  private statsTimer?: ReturnType<typeof setInterval>;
+  private lastBytes?: { bytes: number; at: number };
 
   constructor(private report: VoiceReporter) {}
 
@@ -80,10 +133,14 @@ export class VoiceClient {
     for (const fn of this.listeners) fn();
   }
 
+  private reportState(channelId: string | null = this.snap.channelId ?? null) {
+    const { muted, deafened, camera, screen } = this.snap;
+    this.report({ channelId, muted, deafened, camera, screen });
+  }
+
   /** Reenvia o estado ao gateway (ex.: depois que o WebSocket reconecta). */
   resendState() {
-    const { channelId, status, muted, deafened } = this.snap;
-    if (channelId && status !== "idle") this.report(channelId, muted, deafened);
+    if (this.snap.channelId && this.snap.status !== "idle") this.reportState();
   }
 
   async join(channelId: string) {
@@ -91,7 +148,7 @@ export class VoiceClient {
     if (this.room) await this.leave();
     const seq = ++this.joinSeq;
     const prefs = this.snap.prefs;
-    this.set({ status: "connecting", channelId, error: undefined, participants: [] });
+    this.set({ status: "connecting", channelId, error: undefined, participants: [], videos: [], camera: false, screen: false });
     if (prefs.noise === "rnnoise") void preloadRnnoise().catch(() => {});
 
     const room = new Room({
@@ -107,7 +164,8 @@ export class VoiceClient {
 
     try {
       // Token + conexão e microfone em paralelo: entrar fica abaixo de ~1 s numa rede boa.
-      const connecting = api.voiceToken(channelId).then(({ url, token }) => room.connect(url, token));
+      // Sem assinatura automática: voz e câmera entram sozinhas, transmissões de tela só quando você clica em Assistir.
+      const connecting = api.voiceToken(channelId).then(({ url, token }) => room.connect(url, token, { autoSubscribe: false }));
       const micPromise = createLocalAudioTrack(micConstraints(prefs)).catch((err: Error) => err);
       await connecting;
       const mic = await micPromise;
@@ -115,13 +173,16 @@ export class VoiceClient {
         if (!(mic instanceof Error)) mic.stop();
         return;
       }
-      for (const p of room.remoteParticipants.values()) p.setVolume(this.volumeFor(p.identity));
+      for (const p of room.remoteParticipants.values()) {
+        this.applyVolume(p);
+        this.syncSubscriptions(p);
+      }
       this.set({ status: "connected" });
-      this.report(channelId, this.snap.muted, this.snap.deafened);
+      this.reportState(channelId);
 
       if (mic instanceof Error) {
         this.set({ muted: true, error: `Sem acesso ao microfone (${mic.message}). Confira a permissão e o dispositivo nas configurações.` });
-        this.report(channelId, true, this.snap.deafened);
+        this.reportState(channelId);
       } else {
         this.mic = mic;
         await room.localParticipant.publishTrack(mic, { source: Track.Source.Microphone });
@@ -135,8 +196,8 @@ export class VoiceClient {
       this.mic = undefined;
       this.room = undefined;
       await room.disconnect();
-      this.set({ status: "idle", channelId: undefined, participants: [], error: `Não deu para entrar na chamada: ${(err as Error).message}` });
-      this.report(null, this.snap.muted, this.snap.deafened);
+      this.resetCall({ error: `Não deu para entrar na chamada: ${(err as Error).message}` });
+      this.reportState(null);
     }
   }
 
@@ -146,8 +207,8 @@ export class VoiceClient {
     this.room = undefined;
     this.mic?.stop();
     this.mic = undefined;
-    this.set({ status: "idle", channelId: undefined, participants: [], needsAudioUnlock: false });
-    this.report(null, this.snap.muted, this.snap.deafened);
+    this.resetCall({});
+    this.reportState(null);
     await room?.disconnect();
   }
 
@@ -180,7 +241,117 @@ export class VoiceClient {
       }
     }
     this.applyVolumes();
-    if (this.snap.channelId) this.report(this.snap.channelId, this.snap.muted, this.snap.deafened);
+    if (this.snap.channelId) this.reportState();
+    this.refresh();
+  }
+
+  /** Volta ao estado "fora da chamada", mantendo mudo/ensurdecer e as preferências. */
+  private resetCall(extra: Partial<VoiceSnapshot>) {
+    this.stopStats();
+    this.watching.clear();
+    this.asked.clear();
+    this.set({ status: "idle", channelId: undefined, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false, ...extra });
+  }
+
+  async toggleCamera() {
+    const room = this.room;
+    if (!room || this.snap.status === "idle") return;
+    const on = !room.localParticipant.isCameraEnabled;
+    try {
+      const { cameraId } = this.snap.prefs;
+      await room.localParticipant.setCameraEnabled(
+        on,
+        on ? { deviceId: cameraId === "default" ? undefined : { exact: cameraId }, resolution: VideoPresets.h720.resolution } : undefined,
+        on ? { simulcast: true } : undefined,
+      );
+      this.set({ camera: room.localParticipant.isCameraEnabled, error: undefined });
+    } catch (err) {
+      this.set({ camera: false, error: `Não deu para ligar a câmera (${(err as Error).message}). Confira a permissão e o dispositivo.` });
+    }
+    this.reportState();
+    this.refresh();
+  }
+
+  /** Começa a transmitir a tela ou uma janela com o perfil e a opção de áudio salvos. */
+  async startScreen() {
+    const room = this.room;
+    if (!room || this.snap.status === "idle" || room.localParticipant.isScreenShareEnabled) return;
+    const { screenProfile, screenAudio } = this.snap.prefs;
+    const prof = screenProfiles[screenProfile];
+    try {
+      await room.localParticipant.setScreenShareEnabled(
+        true,
+        {
+          audio: screenAudio
+            ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, restrictOwnAudio: true }
+            : false,
+          resolution: { width: prof.width, height: prof.height, frameRate: prof.fps },
+          contentHint: prof.degradation === "maintain-framerate" ? "motion" : "detail",
+          systemAudio: "include",
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include",
+        },
+        {
+          // H.264: no Windows o Chromium usa o encoder da placa de vídeo (NVENC, QuickSync, AMF).
+          videoCodec: supportsH264() ? "h264" : "vp8",
+          simulcast: false,
+          screenShareEncoding: { maxBitrate: prof.bitrate, maxFramerate: prof.fps, priority: "high" },
+          degradationPreference: prof.degradation,
+          // Valem só para o áudio da tela: estéreo, sem DTX nem RED, 128 kb/s (música e jogo).
+          audioPreset: { maxBitrate: 128_000 },
+          forceStereo: true,
+          dtx: false,
+          red: false,
+        },
+      );
+      this.set({ screen: room.localParticipant.isScreenShareEnabled, error: undefined });
+      if (this.snap.screen) this.startStats();
+    } catch (err) {
+      const e = err as Error;
+      // Cancelar o seletor do navegador não é erro.
+      this.set({ screen: false, error: e.name === "NotAllowedError" || /Permission denied/i.test(e.message) ? undefined : `Não deu para transmitir a tela (${e.message}).` });
+    }
+    this.reportState();
+    this.refresh();
+  }
+
+  async stopScreen() {
+    const room = this.room;
+    if (!room) return;
+    try {
+      await room.localParticipant.setScreenShareEnabled(false);
+    } finally {
+      this.stopStats();
+      this.set({ screen: false, shareStats: undefined });
+      this.reportState();
+      this.refresh();
+    }
+  }
+
+  setScreenProfile(screenProfile: ScreenProfileId) {
+    this.savePrefs({ screenProfile });
+  }
+
+  setScreenAudio(screenAudio: boolean) {
+    this.savePrefs({ screenAudio });
+  }
+
+  async setCamera(cameraId: string) {
+    this.savePrefs({ cameraId });
+    if (this.room?.localParticipant.isCameraEnabled) {
+      await this.room.switchActiveDevice("videoinput", cameraId).catch(() => {});
+    }
+  }
+
+  watch(userId: string) {
+    this.watching.add(userId);
+    this.syncAll();
+    this.refresh();
+  }
+
+  unwatch(userId: string) {
+    this.watching.delete(userId);
+    this.syncAll();
     this.refresh();
   }
 
@@ -206,6 +377,12 @@ export class VoiceClient {
     this.applyVolumes();
   }
 
+  /** Volume do áudio da transmissão de tela de uma pessoa (separado da voz dela). */
+  setStreamVolume(userId: string, volume: number) {
+    this.savePrefs({ streamVolumes: { ...this.snap.prefs.streamVolumes, [userId]: volume } });
+    this.applyVolumes();
+  }
+
   async unlockAudio() {
     await this.room?.startAudio();
   }
@@ -220,9 +397,81 @@ export class VoiceClient {
     return this.snap.deafened ? 0 : (this.snap.prefs.volumes[userId] ?? 1);
   }
 
+  private streamVolumeFor(userId: string) {
+    return this.snap.deafened ? 0 : (this.snap.prefs.streamVolumes[userId] ?? 1);
+  }
+
+  private applyVolume(p: RemoteParticipant) {
+    p.setVolume(this.volumeFor(p.identity), Track.Source.Microphone);
+    p.setVolume(this.streamVolumeFor(p.identity), Track.Source.ScreenShareAudio);
+  }
+
   private applyVolumes() {
     if (!this.room) return;
-    for (const p of this.room.remoteParticipants.values()) p.setVolume(this.volumeFor(p.identity));
+    for (const p of this.room.remoteParticipants.values()) this.applyVolume(p);
+  }
+
+  /** Voz e câmera sempre; transmissão de tela (e o áudio dela) só de quem você escolheu assistir. */
+  private syncPub(pub: RemoteTrackPublication, userId: string) {
+    const isScreen = pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio;
+    const want = !isScreen || this.watching.has(userId);
+    const asked = this.asked.has(pub.trackSid);
+    if (want && !asked) {
+      this.asked.add(pub.trackSid);
+      pub.setSubscribed(true);
+    } else if (!want && asked) {
+      this.asked.delete(pub.trackSid);
+      pub.setSubscribed(false);
+    }
+  }
+
+  private syncSubscriptions(p: RemoteParticipant) {
+    for (const pub of p.trackPublications.values()) this.syncPub(pub as RemoteTrackPublication, p.identity);
+  }
+
+  private syncAll() {
+    if (!this.room) return;
+    for (const p of this.room.remoteParticipants.values()) this.syncSubscriptions(p);
+  }
+
+  private startStats() {
+    this.stopStats();
+    this.lastBytes = undefined;
+    void this.pollStats();
+    this.statsTimer = setInterval(() => void this.pollStats(), 2000);
+  }
+
+  private stopStats() {
+    clearInterval(this.statsTimer);
+    this.statsTimer = undefined;
+    this.lastBytes = undefined;
+  }
+
+  /** Lê do encoder resolução, fps, qual encoder está em uso e se a qualidade está caindo. */
+  private async pollStats() {
+    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    const sender = (pub?.track as { sender?: RTCRtpSender } | undefined)?.sender;
+    if (!sender) return;
+    const report = await sender.getStats().catch(() => undefined);
+    if (!report) return;
+    for (const stat of report.values()) {
+      if (stat.type !== "outbound-rtp" || stat.kind !== "video") continue;
+      const now = performance.now();
+      const bytes = (stat.bytesSent as number | undefined) ?? 0;
+      const mbps = this.lastBytes ? ((bytes - this.lastBytes.bytes) * 8) / 1e6 / ((now - this.lastBytes.at) / 1000) : 0;
+      this.lastBytes = { bytes, at: now };
+      this.set({
+        shareStats: {
+          width: stat.frameWidth ?? 0,
+          height: stat.frameHeight ?? 0,
+          fps: Math.round(stat.framesPerSecond ?? 0),
+          encoder: stat.encoderImplementation ?? "desconhecido",
+          limit: stat.qualityLimitationReason ?? "none",
+          mbps: Math.max(0, Math.round(mbps * 10) / 10),
+        },
+      });
+      return;
+    }
   }
 
   private async applyNoise(noise: NoiseMode) {
@@ -242,23 +491,52 @@ export class VoiceClient {
     const refresh = () => this.room === room && this.refresh();
     room
       .on(RoomEvent.ParticipantConnected, (p) => {
-        p.setVolume(this.volumeFor(p.identity));
+        this.applyVolume(p);
+        this.syncSubscriptions(p);
         refresh();
       })
-      .on(RoomEvent.ParticipantDisconnected, refresh)
+      .on(RoomEvent.ParticipantDisconnected, (p) => {
+        this.watching.delete(p.identity);
+        refresh();
+      })
       .on(RoomEvent.ActiveSpeakersChanged, refresh)
       .on(RoomEvent.TrackMuted, refresh)
       .on(RoomEvent.TrackUnmuted, refresh)
-      .on(RoomEvent.TrackPublished, refresh)
-      .on(RoomEvent.TrackUnpublished, refresh)
+      .on(RoomEvent.TrackPublished, (pub, p) => {
+        this.syncPub(pub, p.identity);
+        refresh();
+      })
+      .on(RoomEvent.TrackUnpublished, (pub, p) => {
+        this.asked.delete(pub.trackSid);
+        // A pessoa parou de transmitir: na próxima vez, o Assistir volta a ser uma escolha.
+        if (pub.source === Track.Source.ScreenShare) this.watching.delete(p.identity);
+        refresh();
+      })
       .on(RoomEvent.LocalTrackPublished, refresh)
+      .on(RoomEvent.LocalTrackUnpublished, () => {
+        // O botão "Parar compartilhamento" do navegador encerra a captura por fora do app.
+        if (this.room !== room) return;
+        const lp = room.localParticipant;
+        if (this.snap.screen && !lp.isScreenShareEnabled) {
+          this.stopStats();
+          this.set({ screen: false, shareStats: undefined });
+          this.reportState();
+        }
+        if (this.snap.camera && !lp.isCameraEnabled) {
+          this.set({ camera: false });
+          this.reportState();
+        }
+        refresh();
+      })
       .on(RoomEvent.ConnectionQualityChanged, refresh)
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub, p) => {
-        if (track.kind !== Track.Kind.Audio) return;
-        const el = track.attach();
-        el.dataset.turtleAudio = track.sid ?? p.identity;
-        document.body.appendChild(el);
-        p.setVolume(this.volumeFor(p.identity));
+        if (track.kind === Track.Kind.Audio) {
+          const el = track.attach();
+          el.dataset.turtleAudio = track.sid ?? p.identity;
+          document.body.appendChild(el);
+          this.applyVolume(p);
+        }
+        // Vídeo não vira elemento aqui: a grade da chamada anexa a track ao <video> de cada cartão.
         refresh();
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
@@ -274,6 +552,9 @@ export class VoiceClient {
       .on(RoomEvent.Reconnected, () => {
         if (this.room !== room) return;
         this.set({ status: "connected" });
+        // Depois de reconectar, as assinaturas podem ter sido perdidas: pede de novo.
+        this.asked.clear();
+        this.syncAll();
         this.resendState();
       })
       .on(RoomEvent.Disconnected, (reason) => {
@@ -282,8 +563,8 @@ export class VoiceClient {
         this.room = undefined;
         this.mic?.stop();
         this.mic = undefined;
-        this.set({ status: "idle", channelId: undefined, participants: [], needsAudioUnlock: false, error: disconnectMessage(reason) });
-        this.report(null, this.snap.muted, this.snap.deafened);
+        this.resetCall({ error: disconnectMessage(reason) });
+        this.reportState(null);
       });
   }
 
@@ -298,8 +579,23 @@ export class VoiceClient {
       muted: isLocal ? this.snap.muted : (p.getTrackPublication(Track.Source.Microphone)?.isMuted ?? true),
       quality: qualityName(p.connectionQuality),
     });
+    const everyone: [Participant, boolean][] = [[room.localParticipant, true], ...[...room.remoteParticipants.values()].map((p): [Participant, boolean] => [p, false])];
+    const videos: VideoTile[] = [];
+    for (const [p, isLocal] of everyone) {
+      const base = { userId: p.identity, name: p.name || p.identity, isLocal, speaking: p.isSpeaking };
+      const cam = p.getTrackPublication(Track.Source.Camera);
+      if (cam && !cam.isMuted) videos.push({ ...base, key: `${p.identity}:camera`, source: "camera", track: cam.track, watching: true });
+      const scr = p.getTrackPublication(Track.Source.ScreenShare);
+      if (scr) {
+        const watching = isLocal || this.watching.has(p.identity);
+        videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching });
+      }
+    }
     this.set({
-      participants: [toCall(room.localParticipant, true), ...[...room.remoteParticipants.values()].map((p) => toCall(p, false))],
+      participants: everyone.map(([p, isLocal]) => toCall(p, isLocal)),
+      videos,
+      camera: room.localParticipant.isCameraEnabled,
+      screen: room.localParticipant.isScreenShareEnabled,
     });
   }
 }

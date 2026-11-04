@@ -354,3 +354,29 @@ describe("servidores", () => {
     online.close();
   });
 });
+
+describe("site compilado", () => {
+  it("entrega o site e o index.html nas rotas do app, sem atrapalhar a API", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "turtle-site-"));
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "index.html"), "<title>Turtle</title>");
+    writeFileSync(join(dir, "assets", "app-abc.js"), "console.log(1)");
+    const h = await createDb();
+    const site = await buildApp({ db: h.db, clientDir: dir });
+    const url = await site.listen({ port: 0, host: "127.0.0.1" });
+    const root = await fetch(url + "/");
+    expect(await root.text()).toContain("<title>Turtle</title>");
+    expect(root.headers.get("cache-control")).toBe("no-cache");
+    const asset = await fetch(url + "/assets/app-abc.js");
+    expect(asset.headers.get("cache-control")).toContain("immutable");
+    expect((await fetch(url + "/qualquer/rota", { headers: { accept: "text/html" } })).status).toBe(200);
+    expect((await fetch(url + "/nada.json", { headers: { accept: "application/json" } })).status).toBe(404);
+    expect((await fetch(url + "/health")).status).toBe(200);
+    expect((await fetch(url + "/me")).status).toBe(401);
+    await site.close();
+    await h.close();
+  });
+});

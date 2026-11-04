@@ -1,0 +1,10 @@
+# HTTPS automático (Let's Encrypt). O WebSocket do chat (/ws) passa pelo mesmo proxy.
+app.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+# Sinalização do LiveKit (as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).
+lk.{$DOMAIN} {
+	reverse_proxy livekit:7880
+}

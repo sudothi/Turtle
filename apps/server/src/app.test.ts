@@ -596,6 +596,20 @@ describe("amigos e mensagens diretas", () => {
     for (const x of [A, B, C]) x.ws.close();
   });
 
+  it("perfil: amigo sem servidor em comum vê, com data da conta, amigos em comum e estado da amizade", async () => {
+    expect((await get(`/users/${cId}`, b)).status).toBe(404);
+    const p = (await get(`/users/${cId}`, a)).body;
+    expect(p).toMatchObject({ id: cId, username: "dm_caio", friendship: "friend", blocked: false, mutualServers: [], mutualFriends: [] });
+    expect(new Date(p.createdAt).getTime()).toBeGreaterThan(0);
+    expect(p.isAdmin).toBeUndefined();
+    // b vira amigo de a e de c: a vê b como amigo em comum com c.
+    await post(`/friends/${bId}`, {}, a); await post(`/friends/${aId}`, {}, b);
+    await post(`/friends/${bId}`, {}, c); await post(`/friends/${cId}`, {}, b);
+    expect((await get(`/users/${cId}`, a)).body.mutualFriends.map((f: any) => f.id)).toEqual([bId]);
+    await del(`/friends/${bId}`, a); await del(`/friends/${bId}`, c);
+    expect((await get(`/users/${aId}`, a)).body.friendship).toBe("none");
+  });
+
   it("bloqueio: desfaz amizade, impede pedido, DM nova, mensagem e chamada", async () => {
     const dm = (await post(`/dms/${cId}`, {}, a)).body;
     expect((await post(`/blocks/${aId}`, {}, c)).body.ok).toBe(true);

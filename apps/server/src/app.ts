@@ -17,6 +17,7 @@ import {
   createGroupBody,
   type Friend,
   type Person,
+  type ProfileView,
   canInviteAccounts,
   setInviterBody,
   type Account,
@@ -375,13 +376,42 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
 
     /** Cartão de perfil de outra pessoa (só quem divide um servidor com ela). */
     authed.get<{ Params: { id: string } }>("/users/:id", async (req, reply) => {
-      const mine = await loadMemberships(me(req).id);
-      const theirs = await loadMemberships(req.params.id);
-      if (req.params.id !== me(req).id && ![...theirs].some((id) => mine.has(id))) return reply.code(404).send({ error: "pessoa não encontrada" });
-      const u = await loadUser(req.params.id);
+      const myId = me(req).id;
+      const id = req.params.id;
+      const u = (await db.select({ ...userCols, createdAt: users.createdAt }).from(users).where(eq(users.id, id)).limit(1))[0];
       if (!u) return reply.code(404).send({ error: "pessoa não encontrada" });
-      const { isAdmin: _a, canInvite: _c, ...pub } = u;
-      return { ...pub, staff: canInviteAccounts(u) };
+      const mine = db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, myId));
+      const mutualServers = id === myId ? [] : await db
+        .select({ id: servers.id, name: servers.name })
+        .from(serverMembers)
+        .innerJoin(servers, eq(servers.id, serverMembers.serverId))
+        .where(and(eq(serverMembers.userId, id), inArray(serverMembers.serverId, mine)))
+        .orderBy(asc(servers.createdAt));
+      const friendship = id === myId ? undefined : await friendshipOf(myId, id);
+      const myDms = db.select({ id: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, myId));
+      const sharesDm = id !== myId && !!(await db.select({ id: dmMembers.userId }).from(dmMembers).where(and(eq(dmMembers.userId, id), inArray(dmMembers.channelId, myDms))).limit(1)).length;
+      // Só vê o perfil quem já tem algum laço com a pessoa: servidor, amizade (ou pedido) ou conversa.
+      if (id !== myId && !mutualServers.length && !friendship && !sharesDm) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const friendsOf = async (who: string) =>
+        (await db.select().from(friendships).where(and(eq(friendships.status, "accepted"), or(eq(friendships.userA, who), eq(friendships.userB, who)))))
+          .map((r) => (r.userA === who ? r.userB : r.userA));
+      const theirFriends = new Set(id === myId ? [] : await friendsOf(id));
+      const common = id === myId ? [] : (await friendsOf(myId)).filter((x) => theirFriends.has(x));
+      const mutualFriends = common.length
+        ? (await db.select({ id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey }).from(users).where(inArray(users.id, common)))
+            .map((r): Person => ({ id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey }))
+        : [];
+      const blocked = id !== myId && !!(await db.select({ x: blocks.blocker }).from(blocks).where(and(eq(blocks.blocker, myId), eq(blocks.blocked, id))).limit(1)).length;
+      const { isAdmin: _a, canInvite: _c, ...pub } = toUser(u);
+      return {
+        ...pub,
+        staff: canInviteAccounts(u),
+        createdAt: u.createdAt.toISOString(),
+        mutualServers,
+        mutualFriends,
+        friendship: !friendship ? "none" : friendship.status === "accepted" ? "friend" : friendship.requestedBy === myId ? "outgoing" : "incoming",
+        blocked,
+      } satisfies ProfileView;
     });
 
     // ---- Servidores ----

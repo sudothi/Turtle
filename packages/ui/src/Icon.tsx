@@ -134,6 +134,21 @@ const icons = {
     </>
   ),
   send: <path d="M3 20.5 21.5 12 3 3.5l2.5 8.5zM5.5 12H13" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />,
+  more: (
+    <>
+      <circle cx="5" cy="12" r="2.4" fill="currentColor" />
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
+      <circle cx="19" cy="12" r="2.4" fill="currentColor" />
+    </>
+  ),
+  chat: <path d="M4 4.5h16a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H10l-5 4v-4H4A1.5 1.5 0 0 1 2.5 16V6A1.5 1.5 0 0 1 4 4.5z" fill="currentColor" />,
+  profile: (
+    <>
+      <rect x="2.5" y="4" width="19" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+      <path d="M14.5 4v16" stroke="currentColor" strokeWidth="2.2" />
+      <circle cx="18" cy="9" r="1.6" fill="currentColor" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof icons;

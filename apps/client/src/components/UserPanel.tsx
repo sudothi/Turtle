@@ -108,7 +108,7 @@ export function UserPanel({
         {menu && (
           <div className="menu user-menu lino" role="menu">
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); onProfile(); }}>
-              <span>Configurações de perfil</span>
+              <span>Configurações</span>
               <Icon name="settings" size={18} />
             </button>
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); void voice.leave(); onLogout(); }}>

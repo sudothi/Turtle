@@ -3,7 +3,6 @@ import { serverEvent, type Channel, type ChannelKind, type Member, type Message,
 import { Button } from "@turtle/ui";
 import { api, getToken } from "../api";
 import { VoiceClient } from "../voice/client";
-import { VoiceSettings } from "../voice/VoiceSettings";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
@@ -11,7 +10,7 @@ import { ChatView } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
-import { ProfileModal } from "../components/ProfileModal";
+import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { ProfilePopup } from "../components/ProfilePopup";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
@@ -43,8 +42,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [messages, setMessages] = useState<Message[]>([]);
   const [online, setOnline] = useState<string[]>([]);
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
-  const [settings, setSettings] = useState(false);
-  const [editingProfile, setEditingProfile] = useState(false);
+  const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [viewProfile, setViewProfile] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
@@ -204,12 +202,12 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
           onLogout={logout}
-          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
+          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
           <div className="channels" />
-          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />
+          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />
         </aside>
       )}
       <main className="stage">
@@ -242,9 +240,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
-      {editingProfile && <ProfileModal user={user} onChanged={setUser} onClose={() => setEditingProfile(false)} />}
       {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} onClose={() => setViewProfile(undefined)} />}
-      {settings && <VoiceSettings voice={voice} prefs={snap.prefs} onClose={() => setSettings(false)} />}
+      {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}
       {creatingServer && (

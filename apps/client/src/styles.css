@@ -482,4 +482,12 @@
 .profile-bio-input { background: var(--ink-0); border: 2px solid var(--ink-4); border-radius: var(--radius-sm); padding: 8px 12px; resize: vertical; min-height: 72px; color: inherit; font: inherit; }
 .profile-bio-input:focus { outline: none; border-color: var(--paper); }
 @media (max-width: 720px) { .profile-editor { grid-template-columns: 1fr; } }
-.t-modal:has(.profile-editor) { width: min(780px, calc(100vw - 32px)); max-width: none; }
+.t-modal.t-modal-wide, .t-modal:has(.profile-editor) { width: min(780px, calc(100vw - 32px)); max-width: none; }
+
+/* Configurações em abas */
+.settings-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--ink-4); margin-bottom: 16px; }
+.settings-tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 8px 12px; color: var(--dim); font: inherit; font-weight: 600; cursor: pointer; }
+.settings-tab:hover { color: var(--fg); }
+.settings-tab.active { color: var(--fg); border-bottom-color: var(--paper); }
+.settings-voice .panel { width: auto; max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+.settings-voice .panel::before { display: none; }

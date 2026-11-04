@@ -66,11 +66,13 @@ describe("server", () => {
     const reg = await post("/auth/register", { inviteCode: inv.body.code, username: "amigo", password: "12345678" });
     expect(reg.body.user.isAdmin).toBe(false);
     friendToken = reg.body.token;
-    // convite de conta: o amigo entra no servidor mais antigo, "Turtle", como membro
-    const servers = (await get("/servers", friendToken)).body;
-    expect(servers.map((x: any) => `${x.name}:${x.role}`)).toEqual(["Turtle:member"]);
-    turtleId = servers[0].id;
-    expect((await get("/servers", adminToken)).body[0]).toMatchObject({ id: turtleId, role: "owner" });
+    // contas novas começam sem servidor (nem o admin ganha um automaticamente)
+    expect((await get("/servers", friendToken)).body).toEqual([]);
+    expect((await get("/servers", adminToken)).body).toEqual([]);
+    turtleId = (await post("/servers", { name: "Turtle" }, adminToken)).body.id;
+    const sInv = await post(`/servers/${turtleId}/invites`, {}, adminToken);
+    expect((await post(`/invites/${sInv.body.code}/join`, {}, friendToken)).status).toBe(200);
+    expect((await get("/servers", friendToken)).body.map((x: any) => `${x.name}:${x.role}`)).toEqual(["Turtle:member"]);
     expect((await post("/invites", {}, friendToken)).status).toBe(403);
     expect((await post(`/servers/${turtleId}/channels`, { name: "jogos" }, friendToken)).status).toBe(403);
     expect((await post(`/servers/${turtleId}/channels`, { name: "jogos" }, adminToken)).status).toBe(200);
@@ -204,7 +206,7 @@ describe("servidores", () => {
   let caioId = "";
   let lagoa = "";
 
-  it("registra pessoas por convite de conta (entram no Turtle) e cada uma cria seu servidor", async () => {
+  it("convite de conta cria a conta sem servidor; cada pessoa cria o seu", async () => {
     // thiago (primeiro admin) já existe; novos convites de conta
     const login = (await post("/auth/login", { username: "thiago", password: "12345678" })).body.token;
     const mk = async (name: string) => {
@@ -213,6 +215,7 @@ describe("servidores", () => {
       return { token: r.body.token as string, id: r.body.user.id as string };
     };
     ({ token: ana, id: anaId } = await mk("ana"));
+    expect((await get("/servers", ana)).body).toEqual([]);
     ({ token: bia, id: biaId } = await mk("bia"));
     ({ token: caio, id: caioId } = await mk("caio"));
     const created = await post("/servers", { name: "Lagoa dos Amigos" }, ana);

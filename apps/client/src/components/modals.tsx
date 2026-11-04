@@ -74,17 +74,18 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
     api.createInvite(serverId, days).then((r) => setCode(r.code), (e: Error) => setError(e.message));
   }, [serverId, days]);
 
+  const link = code ? `${location.origin}/convite/${code}` : "";
   const copy = async () => {
     if (!code) return;
-    await navigator.clipboard.writeText(code).catch(() => {});
+    await navigator.clipboard.writeText(link).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
 
   return (
-    <Modal title={`Convide amigos para ${serverName}`} subtitle="Mande este código. Quem ainda não tem conta cria uma ao usá-lo; quem já tem, entra pelo botão de convite." onClose={onClose}>
+    <Modal title={`Convide amigos para ${serverName}`} subtitle="Mande este link. Quem ainda não tem conta cria uma ao abri-lo; quem já tem, usa o código no botão de convite." onClose={onClose}>
       <div className="invite-box lino">
-        <code>{code ?? (error ? "—" : "gerando…")}</code>
+        <code>{link || (error ? "—" : "gerando…")}</code>
         <Button size="sm" onClick={copy} disabled={!code}>
           <Icon name={copied ? "check" : "copy"} size={16} />
           {copied ? "Copiado" : "Copiar"}

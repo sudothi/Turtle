@@ -293,9 +293,22 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     });
 
     const limits: Record<ImageKind, number> = { avatar: AVATAR_MAX_BYTES, banner: BANNER_MAX_BYTES };
+    // Limite de uploads por conta: no máximo UPLOAD_LIMIT envios a cada UPLOAD_WINDOW_MS (memória do processo).
+    const UPLOAD_LIMIT = 10;
+    const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+    const uploadsBy = new Map<string, number[]>();
+    const uploadAllowed = (userId: string) => {
+      const now = Date.now();
+      const recent = (uploadsBy.get(userId) ?? []).filter((t) => now - t < UPLOAD_WINDOW_MS);
+      if (recent.length >= UPLOAD_LIMIT) return (uploadsBy.set(userId, recent), false);
+      recent.push(now);
+      uploadsBy.set(userId, recent);
+      return true;
+    };
     for (const kind of ["avatar", "banner"] as const) {
       const col = kind === "avatar" ? "avatarKey" : "bannerKey";
       authed.put(`/me/${kind}`, async (req, reply) => {
+        if (!uploadAllowed(me(req).id)) return reply.code(429).send({ error: "muitos envios seguidos; espere alguns minutos" });
         const part = await req.file().catch(() => undefined);
         if (!part) return reply.code(400).send({ error: "envie uma imagem" });
         const raw = await part.toBuffer().catch(() => undefined);

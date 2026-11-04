@@ -218,6 +218,10 @@
 .voice-members { list-style: none; margin: 2px 0 6px; padding: 0 0 0 30px; display: flex; flex-direction: column; gap: 2px; }
 .voice-members li { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px; border-radius: 4px; color: var(--text-muted); font-size: var(--fs-sm); }
 .voice-members li:hover { background: var(--bg-hover); color: var(--paper-dim); }
+.voice-member-who, .tile-name-btn, .lobby-face { all: unset; cursor: pointer; }
+.voice-member-who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.tile-name-btn:hover, .voice-member-who:hover .voice-member-name { text-decoration: underline; }
+.voice-member-who:focus-visible, .tile-name-btn:focus-visible, .lobby-face:focus-visible { outline: 2px solid var(--paper-dim); outline-offset: 2px; }
 .voice-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vm-flag { display: inline-flex; color: var(--text-muted); --slash-gap: var(--bg-sidebar); }
 

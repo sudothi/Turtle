@@ -471,4 +471,11 @@ describe("perfil", () => {
     await send("DELETE", "/me/avatar", tok);
     expect((await get(`/users/${id}`, otherTok)).body.avatar).toBeNull();
   });
+
+  it("limita a frequência de envios por conta", async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 12; i++) codes.push((await send("PUT", "/me/banner", otherTok, { data: png, type: "image/png" })).status);
+    expect(codes.slice(0, 10).every((c) => c === 200)).toBe(true);
+    expect(codes[10]).toBe(429);
+  });
 });

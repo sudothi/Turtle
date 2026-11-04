@@ -201,16 +201,10 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
       await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, serverInvite.code));
       await db.insert(serverMembers).values({ serverId: serverInvite.serverId, userId: id, role: "member" });
     } else {
+      // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
       await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
-      if (isFirst) await createServer(user, "Turtle");
-      else {
-        // Convite de conta: entra no servidor mais antigo (o "Turtle" dos amigos).
-        const first = (await db.select({ id: servers.id }).from(servers).orderBy(asc(servers.createdAt)).limit(1))[0];
-        if (first) await db.insert(serverMembers).values({ serverId: first.id, userId: id, role: "member" }).onConflictDoNothing();
-      }
     }
-    const joined = serverInvite?.serverId ?? (await db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, id)))[0]?.id;
-    if (joined) toServer(joined, { t: "sync" });
+    if (serverInvite) toServer(serverInvite.serverId, { t: "sync" });
     return { token: await startSession(id), user };
   });
 

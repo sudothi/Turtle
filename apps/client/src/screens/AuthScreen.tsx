@@ -14,8 +14,12 @@ function errorField(mode: Mode, message: string): Field[] {
   return ["form"];
 }
 
+/** Código de convite vindo de um link /convite/<código>. */
+const inviteFromLink = () => decodeURIComponent(location.pathname.match(/^\/convite\/([^/]+)/)?.[1] ?? "");
+
 export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
-  const [mode, setMode] = useState<Mode>("login");
+  const linkCode = inviteFromLink();
+  const [mode, setMode] = useState<Mode>(linkCode ? "register" : "login");
   const [error, setError] = useState<{ fields: Field[]; message: string }>();
   const [busy, setBusy] = useState(false);
 
@@ -65,7 +69,7 @@ export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
           )}
 
           {mode === "register" && (
-            <TextField name="invite" label="Código de convite" required autoComplete="off" spellCheck={false} error={errFor("invite")} autoFocus />
+            <TextField name="invite" label="Código de convite" defaultValue={linkCode} required autoComplete="off" spellCheck={false} error={errFor("invite")} autoFocus={!linkCode} />
           )}
           <TextField
             name="username"
@@ -74,7 +78,7 @@ export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
             autoComplete="username"
             error={errFor("username")}
             hint={mode === "register" ? "Letras, números, ponto, traço e _. É como seus amigos vão te ver." : undefined}
-            autoFocus={mode === "login"}
+            autoFocus={mode === "login" || !!linkCode}
           />
           <TextField
             name="password"

@@ -7,7 +7,7 @@ import { fileUrl } from "../api";
 /** Tamanho da página de histórico do servidor: se veio menos, estamos no começo do canal. */
 const PAGE = 50;
 
-export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speaker"; name: string; children?: React.ReactNode }) {
+export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speaker" | "users"; name: string; children?: React.ReactNode }) {
   return (
     <header className="chat-head">
       <Icon name={icon} size={22} className="chat-head-icon" />
@@ -48,7 +48,10 @@ export function ChatView({
   canInvite,
   onInvite,
   onProfile,
+  dm,
 }: {
+  /** Conversa direta: `channel.name` é o nome da pessoa; sem convite nem lista de membros. */
+  dm?: boolean;
   channel?: Channel;
   messages: Message[];
   members: Member[];
@@ -126,25 +129,25 @@ export function ChatView({
   if (!channel) return <section className="chat" />;
   return (
     <section className="chat">
-      <ChannelHeader icon="hash" name={channel.name}>
-        {canInvite && (
+      <ChannelHeader icon={dm ? "users" : "hash"} name={channel.name}>
+        {!dm && canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />
           </IconButton>
         )}
-        <IconButton label={membersOpen ? "Ocultar lista de membros" : "Mostrar lista de membros"} active={membersOpen} onClick={onToggleMembers}>
+        {!dm && <IconButton label={membersOpen ? "Ocultar lista de membros" : "Mostrar lista de membros"} active={membersOpen} onClick={onToggleMembers}>
           <Icon name="users" />
-        </IconButton>
+        </IconButton>}
       </ChannelHeader>
 
-      <div className="messages" role="log" aria-label={`Mensagens em #${channel.name}`}>
+      <div className="messages" role="log" aria-label={dm ? `Conversa com ${channel.name}` : `Mensagens em #${channel.name}`}>
         {messages.length < PAGE && (
           <div className="channel-welcome">
             <div className="channel-welcome-icon lino lino-lg">
-              <Icon name="hash" size={44} />
+              <Icon name={dm ? "users" : "hash"} size={44} />
             </div>
-            <h2 className="t-display">Bem-vindo(a) a #{channel.name}!</h2>
-            <p className="t-muted">Este é o começo do canal #{channel.name}.</p>
+            <h2 className="t-display">{dm ? channel.name : `Bem-vindo(a) a #${channel.name}!`}</h2>
+            <p className="t-muted">{dm ? `Este é o começo da sua conversa com ${channel.name}.` : `Este é o começo do canal #${channel.name}.`}</p>
           </div>
         )}
         {rows.map((r) =>
@@ -209,9 +212,9 @@ export function ChatView({
             onChange={(e) => onType(e.target.value, e.target.selectionStart ?? e.target.value.length)}
             onKeyDown={onKey}
             onBlur={() => setQuery(undefined)}
-            placeholder={`Conversar em #${channel.name}`}
+            placeholder={dm ? `Conversar com ${channel.name}` : `Conversar em #${channel.name}`}
             autoComplete="off"
-            aria-label={`Mensagem para #${channel.name}`}
+            aria-label={dm ? `Mensagem para ${channel.name}` : `Mensagem para #${channel.name}`}
             maxLength={4000}
           />
           <button type="submit" className="composer-send" title="Enviar" aria-label="Enviar">

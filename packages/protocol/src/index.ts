@@ -146,6 +146,21 @@ export type InvitePreview = z.infer<typeof invitePreviewSchema>;
 
 export const createChannelBody = z.object({ name: z.string().trim().min(1).max(40), kind: channelKind.default("text") });
 
+/** Pessoa como aparece nas listas de amigos e de conversas. */
+export const personSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+});
+export type Person = z.infer<typeof personSchema>;
+/** friend = amigos; incoming = pediu amizade a você; outgoing = você pediu. */
+export const friendSchema = z.object({ user: personSchema, status: z.enum(["friend", "incoming", "outgoing"]) });
+export type Friend = z.infer<typeof friendSchema>;
+/** Conversa direta 1:1: `channelId` serve em /channels/:id/messages e no evento "send". */
+export const dmSchema = z.object({ channelId: z.string(), user: personSchema, lastMessageAt: z.string().nullable() });
+export type Dm = z.infer<typeof dmSchema>;
+
 /** Quem está em qual canal de voz (para a barra lateral, mesmo fora da chamada). */
 export const voiceStateSchema = z.object({
   userId: z.string(),
@@ -183,6 +198,8 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("channel"), channel: channelSchema }),
   /** Algo mudou nos servidores, canais ou membros: buscar de novo. */
   z.object({ t: z.literal("sync") }),
+  /** Amigos ou conversas diretas mudaram: buscar GET /friends e GET /dms de novo. */
+  z.object({ t: z.literal("friends") }),
   /** ids das pessoas conectadas. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),

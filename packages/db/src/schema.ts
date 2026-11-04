@@ -59,9 +59,9 @@ export const channels = pgTable(
   "channels",
   {
     id: text("id").primaryKey(),
-    serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+    serverId: text("server_id").references(() => servers.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["text", "voice"] }).notNull().default("text"),
+    kind: text("kind", { enum: ["text", "voice", "dm"] }).notNull().default("text"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("channels_server_name_idx").on(t.serverId, t.name)],
@@ -77,4 +77,26 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt)],
+);
+
+export const friendships = pgTable(
+  "friendships",
+  {
+    /** Sempre userA < userB (ordem de texto), para o par não duplicar. */
+    userA: text("user_a").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userB: text("user_b").notNull().references(() => users.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["pending", "accepted"] }).notNull().default("pending"),
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userA, t.userB] }), index("friendships_b_idx").on(t.userB)],
+);
+
+export const dmMembers = pgTable(
+  "dm_members",
+  {
+    channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.channelId, t.userId] }), index("dm_members_user_idx").on(t.userId)],
 );

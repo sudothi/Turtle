@@ -213,22 +213,18 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
     const { inviteCode, username, password } = body.data;
     const accountInvite = (await db.select().from(invites).where(eq(invites.code, inviteCode)).limit(1))[0];
-    const serverInvite = accountInvite ? undefined : await usableServerInvite(inviteCode);
-    if ((!accountInvite || accountInvite.usedBy) && !serverInvite) return reply.code(403).send({ error: "convite inválido" });
+    // Criar conta exige um convite do app (só admin gera). Convite de servidor só serve para quem já tem conta.
+    if (!accountInvite && (await usableServerInvite(inviteCode)))
+      return reply.code(403).send({ error: "convite inválido: esse é de servidor e só vale para quem já tem conta" });
+    if (!accountInvite || accountInvite.usedBy) return reply.code(403).send({ error: "convite inválido" });
     if ((await db.select().from(users).where(eq(users.username, username)).limit(1)).length)
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
     const user: User = { id, username, isAdmin: isFirst, displayName: null, bio: null, avatar: null, banner: null };
     await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
-    if (serverInvite) {
-      await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, serverInvite.code));
-      await db.insert(serverMembers).values({ serverId: serverInvite.serverId, userId: id, role: "member" });
-    } else {
-      // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
-      await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
-    }
-    if (serverInvite) toServer(serverInvite.serverId, { t: "sync" });
+    // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
+    await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
     return { token: await startSession(id), user };
   });
 

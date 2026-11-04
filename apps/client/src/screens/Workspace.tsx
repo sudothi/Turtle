@@ -14,7 +14,7 @@ import { ScreenPicker } from "../components/ScreenPicker";
 import { ProfileModal } from "../components/ProfileModal";
 import { ProfilePopup } from "../components/ProfilePopup";
 import { MemberList } from "../components/MemberList";
-import { CreateChannelModal, InviteModal } from "../components/modals";
+import { AppInviteModal, CreateChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
 
 const MEMBERS_KEY = "turtle.membersOpen";
@@ -45,6 +45,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [appInvite, setAppInvite] = useState(false);
   const [viewProfile, setViewProfile] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
@@ -204,12 +205,12 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
           onLogout={logout}
-          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
+          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onAppInvite={() => setAppInvite(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
           <div className="channels" />
-          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />
+          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onAppInvite={() => setAppInvite(true)} onShare={() => setSharing(true)} onLogout={onLogout} />
         </aside>
       )}
       <main className="stage">
@@ -242,6 +243,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
+      {appInvite && <AppInviteModal onClose={() => setAppInvite(false)} />}
       {editingProfile && <ProfileModal user={user} onChanged={setUser} onClose={() => setEditingProfile(false)} />}
       {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} onClose={() => setViewProfile(undefined)} />}
       {settings && <VoiceSettings voice={voice} prefs={snap.prefs} onClose={() => setSettings(false)} />}

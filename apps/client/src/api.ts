@@ -51,6 +51,7 @@ export const api = {
   members: (serverId: string) => req<Member[]>("GET", `/servers/${serverId}/members`),
   setRole: (serverId: string, userId: string, role: "admin" | "member") => req<{ ok: true }>("PATCH", `/servers/${serverId}/members/${userId}`, { role }),
   removeMember: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/members/${userId}`),
+  createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),
   joinInvite: (code: string) => req<Server>("POST", `/invites/${encodeURIComponent(code)}/join`, {}),

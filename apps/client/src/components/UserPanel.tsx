@@ -21,6 +21,7 @@ export function UserPanel({
   serverName,
   onSettings,
   onProfile,
+  onAppInvite,
   onShare,
   onLogout,
 }: {
@@ -32,6 +33,8 @@ export function UserPanel({
   serverName?: string;
   onSettings: () => void;
   onProfile: () => void;
+  /** Só admin: gerar convite para criar conta no app. */
+  onAppInvite: () => void;
   /** Abre a escolha de qualidade antes de transmitir a tela. */
   onShare: () => void;
   onLogout: () => void;
@@ -111,6 +114,12 @@ export function UserPanel({
               <span>Configurações de perfil</span>
               <Icon name="settings" size={18} />
             </button>
+            {user.isAdmin && (
+              <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); onAppInvite(); }}>
+                <span>Convidar para o Turtle</span>
+                <Icon name="user-plus" size={18} />
+              </button>
+            )}
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); void voice.leave(); onLogout(); }}>
               <span>Sair da conta</span>
               <Icon name="logout" size={18} />

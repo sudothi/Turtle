@@ -252,7 +252,7 @@ describe("servidores", () => {
     expect((await post(`/servers/${lagoa}/channels`, { name: "invasao" }, bia)).status).toBe(404);
   });
 
-  it("convite de servidor: prévia pública, entrar com conta existente, criar conta, validade e usos", async () => {
+  it("convite de servidor: prévia pública, entrar com conta existente, não cria conta, validade e usos", async () => {
     const inv = await post(`/servers/${lagoa}/invites`, {}, ana);
     expect(inv.status).toBe(200);
     expect(inv.body.expiresAt).toBeTruthy();
@@ -263,10 +263,11 @@ describe("servidores", () => {
     expect((await post(`/invites/${inv.body.code}/join`, {}, bia)).body).toMatchObject({ id: lagoa, role: "member" });
     expect((await post(`/invites/${inv.body.code}/join`, {}, bia)).status).toBe(200);
     expect((await get(`/servers/${lagoa}/members`, ana)).body).toHaveLength(2);
-    // o mesmo convite cria uma conta nova que entra só nesse servidor
+    // convite de servidor NÃO cria conta: isso só com convite do app (gerado por admin)
     const reg = await post("/auth/register", { inviteCode: inv.body.code, username: "duda", password: "12345678" });
-    expect(reg.status).toBe(200);
-    expect((await get("/servers", reg.body.token)).body.map((x: any) => x.name)).toEqual(["Lagoa dos Amigos"]);
+    expect(reg.status).toBe(403);
+    expect(reg.body.error).toContain("servidor");
+    expect((await post("/auth/login", { username: "duda", password: "12345678" })).status).toBe(401);
     // limite de usos: 1 uso só
     const once = await post(`/servers/${lagoa}/invites`, { maxUses: 1 }, ana);
     expect((await post(`/invites/${once.body.code}/join`, {}, caio)).status).toBe(200);
@@ -415,7 +416,9 @@ describe("perfil", () => {
     id = login.body.user.id;
     const code = (await post("/servers", { name: "Perfis" }, tok)).body.id;
     const inv = await post(`/servers/${code}/invites`, {}, tok);
-    otherTok = (await post("/auth/register", { inviteCode: inv.body.code, username: "amiga", password: "12345678" })).body.token;
+    const accInv = await post("/invites", {}, tok);
+    otherTok = (await post("/auth/register", { inviteCode: accInv.body.code, username: "amiga", password: "12345678" })).body.token;
+    await post(`/invites/${inv.body.code}/join`, {}, otherTok);
     const acc = await post("/invites", {}, tok);
     strangerTok = (await post("/auth/register", { inviteCode: acc.body.code, username: "ninguem", password: "12345678" })).body.token;
   });

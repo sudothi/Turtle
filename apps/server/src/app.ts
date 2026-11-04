@@ -7,10 +7,13 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, channels, count, desc, eq, invites, lt, messages, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, channels, count, desc, dmMembers, eq, friendships, inArray, invites, lt, messages, or, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   AVATAR_MAX_BYTES,
+  type Dm,
+  type Friend,
+  type Person,
   canInviteAccounts,
   setInviterBody,
   type Account,
@@ -169,6 +172,20 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   const ownedCount = async (userId: string) => (await db.select({ n: count() }).from(servers).where(eq(servers.ownerId, userId)))[0]!.n;
   const memberIds = async (serverId: string) =>
     (await db.select({ id: serverMembers.userId }).from(serverMembers).where(eq(serverMembers.serverId, serverId))).map((r) => r.id);
+
+  const pairOf = (a: string, b: string) => (a < b ? { userA: a, userB: b } : { userA: b, userB: a });
+  const friendshipOf = async (a: string, b: string) => {
+    const p = pairOf(a, b);
+    return (await db.select().from(friendships).where(and(eq(friendships.userA, p.userA), eq(friendships.userB, p.userB))).limit(1))[0];
+  };
+  const dmPeers = async (channelId: string) =>
+    (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channelId))).map((r) => r.id);
+  const isDmMember = async (channelId: string, userId: string) =>
+    (await db.select({ id: dmMembers.userId }).from(dmMembers).where(and(eq(dmMembers.channelId, channelId), eq(dmMembers.userId, userId))).limit(1)).length > 0;
+  const sharesServer = async (a: string, b: string) => {
+    const mine = db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, a));
+    return (await db.select({ id: serverMembers.serverId }).from(serverMembers).where(and(eq(serverMembers.userId, b), inArray(serverMembers.serverId, mine))).limit(1)).length > 0;
+  };
 
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
@@ -493,11 +510,107 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return { id: server.id, name: server.name, ownerId: server.ownerId, role } satisfies Server;
     });
 
+    // ---- Amigos ----
+    const personOf = (r: { id: string; username: string; displayName: string | null; avatarKey: string | null }): Person => ({
+      id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey,
+    });
+    authed.get("/friends", async (req) => {
+      const id = me(req).id;
+      const rows = await db.select().from(friendships).where(or(eq(friendships.userA, id), eq(friendships.userB, id)));
+      const others = rows.map((r) => (r.userA === id ? r.userB : r.userA));
+      const people = others.length
+        ? await db.select({ id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey }).from(users).where(inArray(users.id, others))
+        : [];
+      return rows.flatMap((r): Friend[] => {
+        const person = people.find((p) => p.id === (r.userA === id ? r.userB : r.userA));
+        if (!person) return [];
+        const status = r.status === "accepted" ? "friend" : r.requestedBy === id ? "outgoing" : "incoming";
+        return [{ user: personOf(person), status }];
+      });
+    });
+    /** Pede amizade; se a outra pessoa já tinha pedido, aceita. */
+    authed.post<{ Params: { userId: string } }>("/friends/:userId", async (req, reply) => {
+      const id = me(req).id;
+      const other = req.params.userId;
+      if (other === id) return reply.code(400).send({ error: "você não pode se adicionar" });
+      if (!(await loadUser(other))) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const current = await friendshipOf(id, other);
+      if (!current) {
+        await db.insert(friendships).values({ ...pairOf(id, other), status: "pending", requestedBy: id }).onConflictDoNothing();
+      } else if (current.status === "pending" && current.requestedBy !== id) {
+        await db.update(friendships).set({ status: "accepted" }).where(and(eq(friendships.userA, current.userA), eq(friendships.userB, current.userB)));
+      }
+      toUsers([id, other], { t: "friends" });
+      const now = await friendshipOf(id, other);
+      return { status: now?.status === "accepted" ? "friend" : "outgoing" };
+    });
+    /** Pede amizade pelo nome de usuário (aba "Adicionar"). */
+    authed.post("/friends", async (req, reply) => {
+      const name = typeof (req.body as any)?.username === "string" ? (req.body as any).username.trim() : "";
+      const row = name ? (await db.select({ id: users.id }).from(users).where(sql`lower(${users.username}) = lower(${name})`).limit(1))[0] : undefined;
+      if (!row) return reply.code(404).send({ error: "ninguém com esse nome de usuário" });
+      const res = await app.inject({ method: "POST", url: `/friends/${row.id}`, headers: { authorization: req.headers.authorization ?? "" } });
+      return reply.code(res.statusCode).send(res.json());
+    });
+    /** Recusa, cancela o pedido ou desfaz a amizade. */
+    authed.delete<{ Params: { userId: string } }>("/friends/:userId", async (req) => {
+      const p = pairOf(me(req).id, req.params.userId);
+      await db.delete(friendships).where(and(eq(friendships.userA, p.userA), eq(friendships.userB, p.userB)));
+      toUsers([me(req).id, req.params.userId], { t: "friends" });
+      return { ok: true };
+    });
+
+    // ---- Mensagens diretas ----
+    authed.get("/dms", async (req) => {
+      const id = me(req).id;
+      const mine = await db.select({ channelId: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, id));
+      if (!mine.length) return [] as Dm[];
+      const ids = mine.map((m) => m.channelId);
+      const peers = await db
+        .select({ channelId: dmMembers.channelId, id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey })
+        .from(dmMembers)
+        .innerJoin(users, eq(users.id, dmMembers.userId))
+        .where(and(inArray(dmMembers.channelId, ids), sql`${dmMembers.userId} <> ${id}`));
+      const last = await db
+        .select({ channelId: messages.channelId, at: sql<Date | string>`max(${messages.createdAt})` })
+        .from(messages)
+        .where(inArray(messages.channelId, ids))
+        .groupBy(messages.channelId);
+      const list = peers.map((p): Dm => {
+        const at = last.find((l) => l.channelId === p.channelId)?.at;
+        return { channelId: p.channelId, user: personOf(p), lastMessageAt: at ? new Date(at).toISOString() : null };
+      });
+      return list.sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""));
+    });
+    /** Abre (ou devolve) a conversa com alguém: precisa ser amigo ou dividir um servidor. */
+    authed.post<{ Params: { userId: string } }>("/dms/:userId", async (req, reply) => {
+      const id = me(req).id;
+      const other = req.params.userId;
+      const person = other === id ? undefined : await loadUser(other);
+      if (!person) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const f = await friendshipOf(id, other);
+      if (f?.status !== "accepted" && !(await sharesServer(id, other)))
+        return reply.code(403).send({ error: "só amigos ou quem está no mesmo servidor" });
+      const channelId = await db.transaction(async (tx) => {
+        const p = pairOf(id, other);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${p.userA + p.userB}))`);
+        const mineCh = tx.select({ id: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, id));
+        const found = (await tx.select({ id: dmMembers.channelId }).from(dmMembers).where(and(eq(dmMembers.userId, other), inArray(dmMembers.channelId, mineCh))).limit(1))[0];
+        if (found) return found.id;
+        const cid = newId();
+        await tx.insert(channels).values({ id: cid, serverId: null, name: "", kind: "dm" });
+        await tx.insert(dmMembers).values([{ channelId: cid, userId: id }, { channelId: cid, userId: other }]);
+        return cid;
+      });
+      toUsers([id, other], { t: "friends" });
+      return { channelId, user: { id: person.id, username: person.username, displayName: person.displayName, avatar: person.avatar }, lastMessageAt: null } satisfies Dm;
+    });
+
     // ---- Voz ----
     authed.post<{ Params: { id: string } }>("/voice/:id/token", async (req, reply) => {
       if (!livekit) return reply.code(503).send({ error: "voz não configurada no servidor" });
       const channel = await findChannel(req.params.id);
-      if (!channel || channel.kind !== "voice" || !(await roleIn(channel.serverId, me(req).id)))
+      if (!channel || channel.kind !== "voice" || !channel.serverId || !(await roleIn(channel.serverId, me(req).id)))
         return reply.code(404).send({ error: "canal de voz não existe" });
       const user = me(req);
       const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "6h" });
@@ -543,7 +656,8 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       "/channels/:id/messages",
       async (req, reply) => {
         const channel = await findChannel(req.params.id);
-        if (!channel || !(await roleIn(channel.serverId, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+        const allowed = channel && (channel.kind === "dm" ? await isDmMember(channel.id, me(req).id) : !!channel.serverId && !!(await roleIn(channel.serverId, me(req).id)));
+        if (!channel || !allowed) return reply.code(404).send({ error: "canal não existe" });
         const limit = Math.min(Number(req.query.limit ?? 50) || 50, 100);
         const before = req.query.before ? new Date(req.query.before) : undefined;
         const rows = await db
@@ -588,7 +702,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             return;
           }
           const channel = await findChannel(evt.channelId);
-          if (!channel || channel.kind !== "voice" || !memberships.get(socket)?.has(channel.serverId))
+          if (!channel || channel.kind !== "voice" || !channel.serverId || !memberships.get(socket)?.has(channel.serverId))
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
@@ -600,14 +714,21 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
           return;
         }
         const channel = await findChannel(evt.channelId);
-        if (!channel || channel.kind !== "text" || !memberships.get(socket)?.has(channel.serverId))
+        const isDm = channel?.kind === "dm";
+        const allowed = !channel
+          ? false
+          : isDm
+            ? await isDmMember(channel.id, user.id)
+            : channel.kind === "text" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
+        if (!channel || !allowed)
           return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar,
           content: evt.content, createdAt: new Date().toISOString(),
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });
-        toServer(channel.serverId, { t: "message", message });
+        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
+        else toServer(channel.serverId!, { t: "message", message });
       });
     });
   });

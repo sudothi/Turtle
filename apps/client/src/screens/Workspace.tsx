@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { serverEvent, type Channel, type ChannelKind, type Member, type Message, type Server, type User, type VoiceState } from "@turtle/protocol";
+import { serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type User, type VoiceState } from "@turtle/protocol";
 import { Button } from "@turtle/ui";
 import { api, getToken } from "../api";
 import { VoiceClient } from "../voice/client";
@@ -12,6 +12,7 @@ import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { ProfilePopup } from "../components/ProfilePopup";
+import { FriendsPanel, HomeSidebar } from "../components/Home";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
@@ -50,6 +51,12 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [creatingServer, setCreatingServer] = useState(false);
   const [joining, setJoining] = useState(false);
   const [serverSettings, setServerSettings] = useState(false);
+  // Início: mensagens diretas e amigos.
+  const [home, setHome] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [dms, setDms] = useState<Dm[]>([]);
+  const [dmId, setDmId] = useState<string>();
+  const [unread, setUnread] = useState<Set<string>>(new Set());
   const [membersOpen, setMembersOpen] = useState(() => {
     try {
       return localStorage.getItem(MEMBERS_KEY) !== "0";
@@ -59,7 +66,15 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   });
   const ws = useRef<WebSocket | undefined>(undefined);
   const currentRef = useRef<string | undefined>(undefined);
-  currentRef.current = current;
+  /** Canal aberto agora: a conversa direta no Início, senão o canal do servidor. */
+  const activeId = home ? dmId : current;
+  currentRef.current = activeId;
+  const meRef = useRef(user.id);
+  meRef.current = user.id;
+  /** Canais de servidor já conhecidos: mensagem de outro canal é de uma DM nova. */
+  const serverMessageIds = useRef<Set<string>>(new Set());
+  const dmsRef = useRef<Dm[]>([]);
+  dmsRef.current = dms;
   const serverRef = useRef<string | undefined>(undefined);
   serverRef.current = serverId;
 
@@ -73,6 +88,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   useEffect(() => () => void voice.leave(), [voice]);
 
   const chooseServer = useCallback((id: string | undefined) => {
+    setHome(false);
     setServerId(id);
     setView("text");
     try {
@@ -113,9 +129,21 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   }, [serverId, loadServer]);
 
   useEffect(() => {
-    if (!current) return;
-    api.messages(current).then(setMessages);
-  }, [current]);
+    setMessages([]);
+    if (!activeId) return;
+    let stale = false;
+    api.messages(activeId).then((m) => !stale && setMessages(m)).catch(() => {});
+    return () => { stale = true; };
+  }, [activeId]);
+
+  const loadHome = useCallback(async () => {
+    const [f, d] = await Promise.all([api.friends(), api.dms()]);
+    setFriends(f);
+    setDms(d);
+  }, []);
+  useEffect(() => {
+    void loadHome().catch(() => {});
+  }, [loadHome]);
 
   useEffect(() => {
     let closed = false;
@@ -130,6 +158,16 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         if (!parsed.success) return;
         const evt = parsed.data;
         if (evt.t === "message" && evt.message.channelId === currentRef.current) setMessages((m) => [...m, evt.message]);
+        if (evt.t === "message" && dmsRef.current.some((d) => d.channelId === evt.message.channelId)) {
+          const at = evt.message.createdAt;
+          setDms((l) => l.map((d) => (d.channelId === evt.message.channelId ? { ...d, lastMessageAt: at } : d)).sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? "")));
+          if (evt.message.channelId !== currentRef.current)
+            setUnread((u) => (u.has(evt.message.channelId) ? u : new Set(u).add(evt.message.channelId)));
+        } else if (evt.t === "message" && evt.message.userId !== meRef.current && !serverMessageIds.current.has(evt.message.channelId)) {
+          // Mensagem de uma conversa que ainda não conheço (primeira DM de alguém): busca a lista.
+          void loadHome().then(() => setUnread((u) => new Set(u).add(evt.message.channelId))).catch(() => {});
+        }
+        if (evt.t === "friends") void loadHome().catch(() => {});
         if (evt.t === "channel") {
           setKnown((k) => ({ ...k, [evt.channel.id]: evt.channel }));
           if (evt.channel.serverId === serverRef.current) setChannels((c) => (c.some((x) => x.id === evt.channel.id) ? c : [...c, evt.channel]));
@@ -138,6 +176,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           void loadServers().then(() => (serverRef.current ? loadServer(serverRef.current, false) : undefined)).catch(() => {});
           // Perfil de alguém mudou: atualiza o meu e as fotos/nomes nas mensagens.
           api.me().then(setUser).catch(() => {});
+          void loadHome().catch(() => {});
           if (currentRef.current) api.messages(currentRef.current).then(setMessages).catch(() => {});
         }
         if (evt.t === "presence") setOnline(evt.online);
@@ -150,12 +189,27 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     };
     connect();
     return () => { closed = true; clearTimeout(retry); ws.current?.close(); };
-  }, [onLogout, voice, loadServers, loadServer]);
+  }, [onLogout, voice, loadServers, loadServer, loadHome]);
 
   const send = useCallback((content: string) => {
-    if (!current) return;
-    ws.current?.send(JSON.stringify({ t: "send", channelId: current, content }));
-  }, [current]);
+    if (!activeId) return;
+    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content }));
+  }, [activeId]);
+
+  const openDm = useCallback((dm: Dm) => {
+    setHome(true);
+    setDmId(dm.channelId);
+    setUnread((u) => { if (!u.has(dm.channelId)) return u; const n = new Set(u); n.delete(dm.channelId); return n; });
+  }, []);
+  const messageUser = useCallback(async (userId: string) => {
+    try {
+      const dm = await api.openDm(userId);
+      setDms((l) => (l.some((d) => d.channelId === dm.channelId) ? l : [dm, ...l]));
+      openDm(dm);
+    } catch {
+      // sem permissão (nem amigos nem servidor em comum): o botão do perfil já avisa só pelo erro do servidor
+    }
+  }, [openDm]);
 
   const toggleMembers = () => {
     setMembersOpen((o) => {
@@ -171,11 +225,19 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const logout = () => { void voice.leave(); onLogout(); };
   const speaking = new Set(snap.channelId ? snap.participants.filter((p) => p.speaking && !p.muted).map((p) => p.id) : []);
   const textChannel = channels.find((c) => c.id === current);
-  const showMembers = membersOpen && view === "text" && !!serverId;
+  const showMembers = !home && membersOpen && view === "text" && !!serverId;
+  const dm = dms.find((d) => d.channelId === dmId);
+  const dmChannel: Channel | undefined = dm && { id: dm.channelId, serverId: "", name: shownName(dm.user), kind: "text" };
+  const dmMembers: Member[] = dm
+    ? [dm.user, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const }))
+    : [];
+  const pendingIn = friends.filter((f) => f.status === "incoming").length;
   const server = servers.find((s) => s.id === serverId);
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = Object.values(known);
+  serverMessageIds.current = new Set(Object.keys(known));
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />;
 
   return (
     <div className={`app ${showMembers ? "with-members" : ""}`}>
@@ -185,8 +247,24 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         onSelect={chooseServer}
         onCreate={() => setCreatingServer(true)}
         onJoin={() => setJoining(true)}
+        homeActive={home}
+        unread={unread.size}
+        onHome={() => setHome(true)}
       />
-      {server ? (
+      {home ? (
+        <HomeSidebar
+          dms={dms}
+          current={dmId}
+          unread={unread}
+          online={online}
+          friendsOpen={!dmId}
+          pending={pendingIn}
+          onFriends={() => setDmId(undefined)}
+          onDm={openDm}
+          onProfile={setViewProfile}
+          footer={footer}
+        />
+      ) : server ? (
         <ChannelSidebar
           serverName={server.name}
           canManage={server.role !== "member"}
@@ -203,16 +281,22 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onSettings={() => setServerSettings(true)}
           onLogout={logout}
           onProfile={setViewProfile}
-          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />}
+          footer={footer}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
           <div className="channels" />
-          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />
+          {footer}
         </aside>
       )}
       <main className="stage">
-        {!server ? (
+        {home ? (
+          dmChannel ? (
+            <ChatView dm channel={dmChannel} messages={messages} members={dmMembers} meId={user.id} onSend={send} membersOpen={false} onToggleMembers={() => {}} canInvite={false} onInvite={() => {}} onProfile={setViewProfile} />
+          ) : (
+            <FriendsPanel friends={friends} online={online} onMessage={(id) => void messageUser(id)} onProfile={setViewProfile} onChanged={() => void loadHome().catch(() => {})} />
+          )
+        ) : !server ? (
           serversLoaded && (
             <div className="no-server">
               <h2 className="t-display">Você ainda não está em nenhum servidor</h2>
@@ -243,7 +327,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
-      {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} onClose={() => setViewProfile(undefined)} />}
+      {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} meId={user.id} onMessage={(id) => void messageUser(id)} onChanged={() => void loadHome().catch(() => {})} onClose={() => setViewProfile(undefined)} />}
       {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}

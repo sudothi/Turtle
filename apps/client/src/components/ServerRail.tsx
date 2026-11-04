@@ -25,24 +25,33 @@ export function ServerRail({
   onSelect,
   onCreate,
   onJoin,
+  homeActive,
+  unread,
+  onHome,
 }: {
   servers: RailServer[];
   activeId?: string;
   onSelect?: (id: string) => void;
   onCreate?: () => void;
   onJoin?: () => void;
+  /** Início (mensagens diretas e amigos) aberto. */
+  homeActive?: boolean;
+  /** Quantas conversas diretas têm mensagens não lidas. */
+  unread?: number;
+  onHome?: () => void;
 }) {
   return (
     <nav className="rail" aria-label="Servidores">
-      <div className="rail-item">
+      <div className={`rail-item ${homeActive ? "active" : ""}`}>
         <span className="rail-pill" aria-hidden="true" />
-        <div className="rail-home" title="Turtle (mensagens diretas em breve)" aria-hidden="true">
+        <button className="rail-icon lino rail-home-btn" title="Mensagens diretas e amigos" aria-label="Mensagens diretas e amigos" aria-current={homeActive ? "true" : undefined} onClick={onHome}>
           <TurtleMark size={32} />
-        </div>
+        </button>
+        {!!unread && <span className="rail-badge" aria-label={`${unread} conversas não lidas`}>{unread}</span>}
       </div>
       <div className="rail-sep" />
       {servers.map((s) => {
-        const active = s.id === activeId;
+        const active = !homeActive && s.id === activeId;
         return (
           <div key={s.id} className={`rail-item ${active ? "active" : ""}`}>
             <span className="rail-pill" aria-hidden="true" />

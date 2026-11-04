@@ -515,3 +515,70 @@ describe("perfil", () => {
     expect(codes[10]).toBe(429);
   });
 });
+
+describe("amigos e mensagens diretas", () => {
+  let a = "", b = "", c = "", aId = "", bId = "", cId = "";
+  const del = async (url: string, token: string) => {
+    const res = await fetch(base + url, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  const wsOpen = (token: string) =>
+    new Promise<{ ws: WebSocket; events: any[] }>((resolve) => {
+      const ws = new WebSocket(base.replace("http", "ws") + `/ws?token=${token}`);
+      const events: any[] = [];
+      ws.on("message", (d) => events.push(JSON.parse(d.toString())));
+      ws.on("open", () => resolve({ ws, events }));
+    });
+
+  it("prepara contas", async () => {
+    const admin = (await post("/auth/login", { username: "thiago", password: "12345678" })).body.token;
+    const mk = async (username: string) => {
+      const inv = await post("/invites", {}, admin);
+      return (await post("/auth/register", { inviteCode: inv.body.code, username, password: "12345678" })).body;
+    };
+    const ra = await mk("dm_ana"), rb = await mk("dm_beto"), rc = await mk("dm_caio");
+    [a, b, c] = [ra.token, rb.token, rc.token];
+    [aId, bId, cId] = [ra.user.id, rb.user.id, rc.user.id];
+  });
+
+  it("pede, aceita, lista e desfaz amizade", async () => {
+    expect((await post(`/friends/${aId}`, {}, a)).status).toBe(400);
+    expect((await post("/friends", { username: "ninguem_existe" }, a)).status).toBe(404);
+    expect((await post("/friends", { username: "DM_BETO" }, a)).body.status).toBe("outgoing");
+    expect((await get("/friends", a)).body).toMatchObject([{ user: { id: bId }, status: "outgoing" }]);
+    expect((await get("/friends", b)).body).toMatchObject([{ user: { id: aId }, status: "incoming" }]);
+    expect((await post(`/friends/${aId}`, {}, b)).body.status).toBe("friend");
+    expect((await get("/friends", a)).body[0].status).toBe("friend");
+    expect((await del(`/friends/${bId}`, a)).status).toBe(200);
+    expect((await get("/friends", b)).body).toEqual([]);
+  });
+
+  it("DM exige amizade ou servidor em comum", async () => {
+    expect((await post(`/dms/${cId}`, {}, a)).status).toBe(403);
+    expect((await post(`/dms/${aId}`, {}, a)).status).toBe(404);
+    await post(`/friends/${cId}`, {}, a);
+    await post(`/friends/${aId}`, {}, c);
+    expect((await post(`/dms/${cId}`, {}, a)).status).toBe(200);
+  });
+
+  it("conversa 1:1: mesma conversa dos dois lados, só os dois recebem, histórico restrito", async () => {
+    const d1 = (await post(`/dms/${cId}`, {}, a)).body;
+    const d2 = (await post(`/dms/${aId}`, {}, c)).body;
+    expect(d1.channelId).toBe(d2.channelId);
+    const A = await wsOpen(a), C = await wsOpen(c), B = await wsOpen(b);
+    A.ws.send(JSON.stringify({ t: "send", channelId: d1.channelId, content: "oi caio" }));
+    await new Promise((r) => setTimeout(r, 300));
+    for (const x of [A, C]) expect(x.events.some((e) => e.t === "message" && e.message.content === "oi caio")).toBe(true);
+    expect(B.events.some((e) => e.t === "message")).toBe(false);
+    B.ws.send(JSON.stringify({ t: "send", channelId: d1.channelId, content: "intruso" }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(B.events.some((e) => e.t === "error")).toBe(true);
+    expect((await get(`/channels/${d1.channelId}/messages`, b)).status).toBe(404);
+    expect((await get(`/channels/${d1.channelId}/messages`, c)).body.map((m: any) => m.content)).toEqual(["oi caio"]);
+    const list = (await get("/dms", c)).body;
+    expect(list).toMatchObject([{ channelId: d1.channelId, user: { id: aId } }]);
+    expect(list[0].lastMessageAt).toBeTruthy();
+    expect((await post(`/voice/${d1.channelId}/token`, {}, a)).status).toBe(404);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+});

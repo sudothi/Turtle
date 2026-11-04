@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, inArray, lt, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -67,8 +67,24 @@ BEGIN
     UPDATE channels SET server_id = 'turtle' WHERE server_id IS NULL;
   END IF;
 END $$;
-DELETE FROM channels WHERE server_id IS NULL;
-ALTER TABLE channels ALTER COLUMN server_id SET NOT NULL;
+DELETE FROM channels WHERE server_id IS NULL AND kind <> 'dm';
+-- server_id fica nulo nas conversas diretas (kind = 'dm').
+ALTER TABLE channels ALTER COLUMN server_id DROP NOT NULL;
+
+-- Amigos: um par por linha, com user_a < user_b para não duplicar.
+CREATE TABLE IF NOT EXISTS friendships (
+  user_a text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_b text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending', requested_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_a, user_b));
+CREATE INDEX IF NOT EXISTS friendships_b_idx ON friendships (user_b);
+-- Mensagens diretas 1:1: o canal (kind = 'dm') tem exatamente dois membros.
+CREATE TABLE IF NOT EXISTS dm_members (
+  channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (channel_id, user_id));
+CREATE INDEX IF NOT EXISTS dm_members_user_idx ON dm_members (user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_id, name);
 `;
 

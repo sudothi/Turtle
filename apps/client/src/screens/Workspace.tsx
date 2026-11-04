@@ -202,6 +202,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
           onLogout={logout}
+          onProfile={setViewProfile}
           footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />}
         />
       ) : (
@@ -223,7 +224,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             </div>
           )
         ) : view === "voice" ? (
-          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={voiceStates} />
+          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} />
         ) : (
           <ChatView
             channel={textChannel}

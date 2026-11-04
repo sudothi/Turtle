@@ -218,6 +218,10 @@
 .voice-members { list-style: none; margin: 2px 0 6px; padding: 0 0 0 30px; display: flex; flex-direction: column; gap: 2px; }
 .voice-members li { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px; border-radius: 4px; color: var(--text-muted); font-size: var(--fs-sm); }
 .voice-members li:hover { background: var(--bg-hover); color: var(--paper-dim); }
+.voice-member-who, .tile-name-btn, .lobby-face { all: unset; cursor: pointer; }
+.voice-member-who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.tile-name-btn:hover, .voice-member-who:hover .voice-member-name { text-decoration: underline; }
+.voice-member-who:focus-visible, .tile-name-btn:focus-visible, .lobby-face:focus-visible { outline: 2px solid var(--paper-dim); outline-offset: 2px; }
 .voice-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vm-flag { display: inline-flex; color: var(--text-muted); --slash-gap: var(--bg-sidebar); }
 
@@ -491,3 +495,10 @@
 .settings-tab.active { color: var(--fg); border-bottom-color: var(--paper); }
 .settings-voice .panel { width: auto; max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
 .settings-voice .panel::before { display: none; }
+
+/* Recorte de foto/banner */
+.cropper { position: relative; overflow: hidden; margin: 0 auto; max-width: 100%; cursor: grab; touch-action: none; user-select: none; background: var(--ink-0); border: 2px solid var(--paper); border-radius: var(--radius-md); }
+.cropper:active { cursor: grabbing; }
+.cropper img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
+.cropper-round::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgb(0 0 0 / 0.55); pointer-events: none; }
+.cropper-zoom { display: block; width: 100%; max-width: 480px; margin: 16px auto 0; accent-color: var(--paper); }

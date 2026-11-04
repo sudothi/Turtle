@@ -102,7 +102,17 @@ function createWindow() {
       win?.webContents.toggleDevTools();
     }
   });
+  // Site fora do ar (o pnpm dev não está rodando): mostra um aviso e tenta de novo sozinho.
+  let retry: NodeJS.Timeout | undefined;
+  win.webContents.on("did-fail-load", (_e, code, _desc, url, isMainFrame) => {
+    if (!isMainFrame || code === -3 || !url.startsWith(clientOrigin)) return; // -3: navegação cancelada
+    const aviso = `<body style="margin:0;display:grid;place-items:center;height:100vh;background:#000;color:#f4f1ea;font:16px system-ui;text-align:center"><div><h2>Turtle não encontrou o site</h2><p>Deixe o <code>pnpm dev</code> rodando em outro terminal.<br>Tentando de novo a cada 2 segundos…</p></div></body>`;
+    void win?.webContents.executeJavaScript(`document.documentElement.innerHTML = ${JSON.stringify(aviso)}`).catch(() => {});
+    clearTimeout(retry);
+    retry = setTimeout(() => void win?.loadURL(clientUrl), 2000);
+  });
   win.on("closed", () => {
+    clearTimeout(retry);
     pending?.(null);
     win = undefined;
   });

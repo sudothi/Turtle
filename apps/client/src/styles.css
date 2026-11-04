@@ -562,3 +562,6 @@
 .msg-meta .t-staff-tag { margin: 0 4px 0 -2px; }
 .profile-name .t-staff-tag { width: 26px; height: 24px; margin-left: 4px; }
 .profile-name .t-staff-tag svg { width: 17px; height: 17px; }
+
+.security-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px !important; padding: 8px 12px; max-width: 520px; border: 1px dashed var(--ink-4); border-radius: 6px; font-size: 13px; color: var(--text-muted); }
+.security-note svg { flex: none; margin-top: 2px; }

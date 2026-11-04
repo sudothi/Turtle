@@ -148,6 +148,9 @@ export function ChatView({
             </div>
             <h2 className="t-display">{dm ? channel.name : `Bem-vindo(a) a #${channel.name}!`}</h2>
             <p className="t-muted">{dm ? `Este é o começo da sua conversa com ${channel.name}.` : `Este é o começo do canal #${channel.name}.`}</p>
+            <p className="security-note" role="note">
+              <Icon name="lock" size={14} /> As mensagens trafegam por uma conexão criptografada (HTTPS). Elas ficam guardadas no servidor do Turtle, que não usa criptografia de ponta a ponta.
+            </p>
           </div>
         )}
         {rows.map((r) =>

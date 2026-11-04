@@ -23,7 +23,7 @@ Plano de desenvolvimento: marcos 0 a 5 (fundação, chat, voz, tela/câmera, des
 
 ## Publicar (produção)
 
-Uma imagem só (`Dockerfile`) roda a API, o WebSocket e entrega o site compilado na mesma origem (`CLIENT_DIST`). `infra/docker-compose.prod.yml` sobe Postgres, LiveKit, o app e o Caddy (HTTPS automático) para `app.ogturtle.xyz` e `lk.ogturtle.xyz`:
+Uma imagem só (`Dockerfile`) roda a API, o WebSocket e entrega o site compilado na mesma origem (`CLIENT_DIST`). `infra/docker-compose.prod.yml` (espelho do compose do VPS) sobe Postgres, LiveKit, a API e o Caddy (HTTPS automático) para `app.ogturtle.xyz` e `lk.ogturtle.xyz`:
 
 ```bash
 cp infra/.env.prod.example infra/.env   # preencha as senhas e as chaves do LiveKit

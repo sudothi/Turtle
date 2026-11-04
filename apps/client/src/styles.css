@@ -531,4 +531,5 @@
 
 .member .t-staff-tag, .voice-member .t-staff-tag { margin-left: 2px; }
 .msg-meta .t-staff-tag { margin: 0 4px 0 -2px; }
-.profile-name .t-staff-tag { font-size: 11px; height: 18px; margin-left: 4px; }
+.profile-name .t-staff-tag { width: 26px; height: 24px; margin-left: 4px; }
+.profile-name .t-staff-tag svg { width: 17px; height: 17px; }

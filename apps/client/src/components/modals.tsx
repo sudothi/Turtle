@@ -162,7 +162,7 @@ export function InvitersPanel({ me }: { me: string }) {
   return (
     <div className="t-field inviters">
       <span className="t-field-label">Administradores</span>
-      <span className="t-field-hint">Quem estiver marcado vira administrador do Turtle: ganha a tag TURTLE ao lado do nome e pode gerar convites de conta.</span>
+      <span className="t-field-hint">Quem estiver marcado vira administrador do Turtle: ganha o selo da tartaruga roxa ao lado do nome e pode gerar convites de conta.</span>
       {people?.map((p) => (
         <label key={p.id} className="inviter-row">
           <Avatar name={shownName(p)} src={fileUrl(p.avatar)} size={28} />

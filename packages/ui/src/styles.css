@@ -136,6 +136,9 @@ button { cursor: pointer; }
 .t-input-wrap { --lino-bg: var(--ink-0); --lino-radius: var(--radius-sm); display: flex; }
 .t-input-wrap:focus-within { --lino-border: 2px solid var(--paper); }
 .t-field.has-error .t-input-wrap { --lino-border: 2px dashed var(--paper); }
+/* No login os campos ficam lisos, com borda branca fixa (sem o entalhe animado do cartão) */
+.lino-live .t-input-wrap { --lino-border: 2px solid var(--paper); }
+.lino-live .t-input-wrap::before { filter: none; }
 .t-input {
   flex: 1;
   min-width: 0;

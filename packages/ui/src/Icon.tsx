@@ -68,6 +68,12 @@ const icons = {
       <path d="M17.5 20.5h4.5a5 5 0 0 0-7.3-4.4 8.5 8.5 0 0 1 2.8 4.4z" fill="currentColor" />
     </>
   ),
+  lock: (
+    <>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2" fill="currentColor" />
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </>
+  ),
   "user-plus": (
     <>
       <circle cx="9" cy="8" r="3.8" fill="currentColor" />

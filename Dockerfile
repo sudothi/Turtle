@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . .
 # Só o servidor e o site (sem o Electron, que baixaria centenas de MB à toa).
 RUN pnpm install --frozen-lockfile --filter "@turtle/server..." --filter "@turtle/client..."
-RUN pnpm --filter @turtle/client build && pnpm --filter "@turtle/server..." build
+RUN pnpm --filter "@turtle/server..." --filter "@turtle/client..." build
 RUN pnpm --filter @turtle/server deploy --legacy --prod /out && cp -r apps/client/dist /out/client
 
 FROM node:22-slim

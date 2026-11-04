@@ -528,3 +528,8 @@
 .cropper img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
 .cropper-round::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgb(0 0 0 / 0.55); pointer-events: none; }
 .cropper-zoom { display: block; width: 100%; max-width: 480px; margin: 16px auto 0; accent-color: var(--paper); }
+
+.member .t-staff-tag, .voice-member .t-staff-tag { margin-left: 2px; }
+.msg-meta .t-staff-tag { margin: 0 4px 0 -2px; }
+.profile-name .t-staff-tag { width: 26px; height: 24px; margin-left: 4px; }
+.profile-name .t-staff-tag svg { width: 17px; height: 17px; }

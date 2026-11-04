@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
-import { Avatar, Icon, type IconName } from "@turtle/ui";
+import { Avatar, Icon, StaffTag, type IconName } from "@turtle/ui";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -134,6 +134,7 @@ export function ChannelSidebar({
                         <button className="voice-member-who" title="Ver perfil" onClick={() => onProfile(v.userId)}>
                           <Avatar name={shownName(v)} src={fileUrl(v.avatar)} size={24} speaking={speaking.has(v.userId)} />
                           <span className="voice-member-name">{shownName(v)}</span>
+                          {v.staff && <StaffTag />}
                         </button>
                         {v.screen && <span className="live-badge small">AO VIVO</span>}
                         {v.camera && (

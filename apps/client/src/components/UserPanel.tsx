@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Channel, User } from "@turtle/protocol";
+import { shownName } from "@turtle/protocol";
+import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 
@@ -18,6 +20,7 @@ export function UserPanel({
   channels,
   serverName,
   onSettings,
+  onProfile,
   onShare,
   onLogout,
 }: {
@@ -28,6 +31,7 @@ export function UserPanel({
   /** Nome do servidor da chamada em andamento. */
   serverName?: string;
   onSettings: () => void;
+  onProfile: () => void;
   /** Abre a escolha de qualidade antes de transmitir a tela. */
   onShare: () => void;
   onLogout: () => void;
@@ -86,9 +90,9 @@ export function UserPanel({
       )}
       <div className="user-bar" ref={ref}>
         <button className="user-chip" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}>
-          <Avatar name={user.username} size={32} status="online" statusRing="var(--bg-panel)" />
+          <Avatar name={shownName(user)} src={fileUrl(user.avatar)} size={32} status="online" statusRing="var(--bg-panel)" />
           <span className="user-chip-text">
-            <b>{user.username}</b>
+            <b>{shownName(user)}</b>
             <span className="t-muted">{user.isAdmin ? "Admin" : "Online"}</span>
           </span>
         </button>
@@ -103,6 +107,10 @@ export function UserPanel({
         </IconButton>
         {menu && (
           <div className="menu user-menu lino" role="menu">
+            <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); onProfile(); }}>
+              <span>Configurações de perfil</span>
+              <Icon name="settings" size={18} />
+            </button>
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); void voice.leave(); onLogout(); }}>
               <span>Sair da conta</span>
               <Icon name="logout" size={18} />

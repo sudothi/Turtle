@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Channel, ChannelKind, VoiceState } from "@turtle/protocol";
+import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
+import { fileUrl } from "../api";
 import { Avatar, Icon, type IconName } from "@turtle/ui";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
@@ -76,6 +77,7 @@ export function ChannelSidebar({
   onInvite,
   onSettings,
   onLogout,
+  onProfile,
   footer,
 }: {
   serverName: string;
@@ -94,6 +96,8 @@ export function ChannelSidebar({
   onInvite: () => void;
   onSettings: () => void;
   onLogout: () => void;
+  /** Abre o cartão de perfil de quem está na chamada. */
+  onProfile: (userId: string) => void;
   footer: ReactNode;
 }) {
   const text = channels.filter((c) => c.kind === "text");
@@ -127,8 +131,10 @@ export function ChannelSidebar({
                   <ul className="voice-members">
                     {members.map((v) => (
                       <li key={v.userId}>
-                        <Avatar name={v.username} size={24} speaking={speaking.has(v.userId)} />
-                        <span className="voice-member-name">{v.username}</span>
+                        <button className="voice-member-who" title="Ver perfil" onClick={() => onProfile(v.userId)}>
+                          <Avatar name={shownName(v)} src={fileUrl(v.avatar)} size={24} speaking={speaking.has(v.userId)} />
+                          <span className="voice-member-name">{shownName(v)}</span>
+                        </button>
                         {v.screen && <span className="live-badge small">AO VIVO</span>}
                         {v.camera && (
                           <span className="vm-flag" title="Câmera ligada"><Icon name="video" size={16} /><span className="sr">câmera ligada</span></span>

@@ -5,6 +5,8 @@ export const messageSchema = z.object({
   channelId: z.string(),
   userId: z.string(),
   username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
   content: z.string(),
   createdAt: z.string(),
 });
@@ -15,8 +17,29 @@ export type ChannelKind = z.infer<typeof channelKind>;
 export const channelSchema = z.object({ id: z.string(), serverId: z.string(), name: z.string(), kind: channelKind });
 export type Channel = z.infer<typeof channelSchema>;
 
-export const userSchema = z.object({ id: z.string(), username: z.string(), isAdmin: z.boolean() });
+/** Perfil público: `avatar` e `banner` são chaves de arquivo (GET /files/:key). */
+export const BIO_MAX = 190;
+export const displayNameSchema = z.string().trim().min(1).max(32);
+export const userSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  isAdmin: z.boolean(),
+  displayName: z.string().nullable().default(null),
+  bio: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  banner: z.string().nullable().default(null),
+});
 export type User = z.infer<typeof userSchema>;
+export const updateProfileBody = z.object({
+  /** null/vazio volta a usar o nome de usuário. */
+  displayName: displayNameSchema.nullable().optional().or(z.literal("").transform(() => null)),
+  bio: z.string().trim().max(BIO_MAX).nullable().optional(),
+});
+/** Limites de upload (bytes) e tamanho final das imagens. */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+export const BANNER_MAX_BYTES = 4 * 1024 * 1024;
+/** Nome a mostrar: o de exibição, se houver, senão o de usuário. */
+export const shownName = (u: { username: string; displayName?: string | null }) => u.displayName || u.username;
 
 export const usernameSchema = z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_.-]+$/u);
 export const passwordSchema = z.string().min(8).max(200);
@@ -31,7 +54,13 @@ export type ServerRole = z.infer<typeof serverRole>;
 /** Um servidor visto por quem é membro dele. */
 export const serverSchema = z.object({ id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole });
 export type Server = z.infer<typeof serverSchema>;
-export const memberSchema = z.object({ userId: z.string(), username: z.string(), role: serverRole });
+export const memberSchema = z.object({
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  role: serverRole,
+});
 export type Member = z.infer<typeof memberSchema>;
 
 export const serverNameSchema = z.string().trim().min(2).max(40);
@@ -55,6 +84,8 @@ export const createChannelBody = z.object({ name: z.string().trim().min(1).max(4
 export const voiceStateSchema = z.object({
   userId: z.string(),
   username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
   channelId: z.string(),
   serverId: z.string(),
   muted: z.boolean(),

@@ -1,11 +1,17 @@
 import Fastify, { type FastifyRequest } from "fastify";
 import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
 import fastifyStatic from "@fastify/static";
+import multipart from "@fastify/multipart";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
   and, asc, channels, count, desc, eq, invites, lt, messages, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
+  AVATAR_MAX_BYTES,
+  BANNER_MAX_BYTES,
   MAX_OWNED_SERVERS,
   clientEvent,
   createChannelBody,
@@ -17,6 +23,7 @@ import {
   renameServerBody,
   roleBody,
   transferBody,
+  updateProfileBody,
   type InvitePreview,
   type Member,
   type Message,
@@ -27,6 +34,7 @@ import {
   type VoiceState,
   type VoiceToken,
 } from "@turtle/protocol";
+import { fileStore, isFileKey, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
 
 export interface AppOptions {
@@ -37,6 +45,8 @@ export interface AppOptions {
   livekit?: LiveKitConfig;
   /** Pasta do site já compilado (apps/client/dist). Em produção o servidor entrega o site e a API na mesma origem. */
   clientDir?: string;
+  /** Pasta das fotos e banners enviados (precisa de volume em produção). Padrão: ./data/uploads. */
+  uploadDir?: string;
 }
 
 export interface LiveKitConfig {
@@ -58,9 +68,11 @@ interface Socket {
 /** Cargos que podem gerir canais e expulsar membros. */
 const canManage = (role: ServerRole | undefined) => role === "owner" || role === "admin";
 
-export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppOptions) {
+export async function buildApp({ db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads" }: AppOptions) {
   const app = Fastify({ logger: false });
   await app.register(websocket);
+  await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
+  const files = fileStore(uploadDir);
   if (clientDir) {
     // Arquivos com hash no nome (assets/) nunca mudam; o index.html sempre é revalidado.
     await app.register(fastifyStatic, {
@@ -155,15 +167,27 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
   const memberIds = async (serverId: string) =>
     (await db.select({ id: serverMembers.userId }).from(serverMembers).where(eq(serverMembers.serverId, serverId))).map((r) => r.id);
 
+  const userCols = {
+    id: users.id, username: users.username, isAdmin: users.isAdmin,
+    displayName: users.displayName, bio: users.bio, avatarKey: users.avatarKey, bannerKey: users.bannerKey,
+  };
+  const toUser = (r: { id: string; username: string; isAdmin: boolean; displayName: string | null; bio: string | null; avatarKey: string | null; bannerKey: string | null }): User => ({
+    id: r.id, username: r.username, isAdmin: r.isAdmin, displayName: r.displayName, bio: r.bio, avatar: r.avatarKey, banner: r.bannerKey,
+  });
+  const loadUser = async (id: string) => {
+    const r = (await db.select(userCols).from(users).where(eq(users.id, id)).limit(1))[0];
+    return r ? toUser(r) : undefined;
+  };
+
   async function userFromToken(token: string | undefined): Promise<User | null> {
     if (!token) return null;
     const rows = await db
-      .select({ id: users.id, username: users.username, isAdmin: users.isAdmin })
+      .select(userCols)
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(eq(sessions.tokenHash, hashToken(token)))
       .limit(1);
-    return rows[0] ?? null;
+    return rows[0] ? toUser(rows[0]) : null;
   }
   const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer /, "");
 
@@ -189,22 +213,18 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
     const { inviteCode, username, password } = body.data;
     const accountInvite = (await db.select().from(invites).where(eq(invites.code, inviteCode)).limit(1))[0];
-    const serverInvite = accountInvite ? undefined : await usableServerInvite(inviteCode);
-    if ((!accountInvite || accountInvite.usedBy) && !serverInvite) return reply.code(403).send({ error: "convite inválido" });
+    // Criar conta exige um convite do app (só admin gera). Convite de servidor só serve para quem já tem conta.
+    if (!accountInvite && (await usableServerInvite(inviteCode)))
+      return reply.code(403).send({ error: "convite inválido: esse é de servidor e só vale para quem já tem conta" });
+    if (!accountInvite || accountInvite.usedBy) return reply.code(403).send({ error: "convite inválido" });
     if ((await db.select().from(users).where(eq(users.username, username)).limit(1)).length)
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
-    const user: User = { id, username, isAdmin: isFirst };
+    const user: User = { id, username, isAdmin: isFirst, displayName: null, bio: null, avatar: null, banner: null };
     await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
-    if (serverInvite) {
-      await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, serverInvite.code));
-      await db.insert(serverMembers).values({ serverId: serverInvite.serverId, userId: id, role: "member" });
-    } else {
-      // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
-      await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
-    }
-    if (serverInvite) toServer(serverInvite.serverId, { t: "sync" });
+    // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
+    await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
     return { token: await startSession(id), user };
   });
 
@@ -214,7 +234,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
     const row = (await db.select().from(users).where(eq(users.username, body.data.username)).limit(1))[0];
     if (!row || !(await verifyPassword(body.data.password, row.passwordHash)))
       return reply.code(401).send({ error: "usuário ou senha incorretos" });
-    return { token: await startSession(row.id), user: { id: row.id, username: row.username, isAdmin: row.isAdmin } satisfies User };
+    return { token: await startSession(row.id), user: toUser(row) };
   });
 
   // Prévia pública de um convite de servidor (para a tela "entrar com convite").
@@ -224,6 +244,18 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
     const server = await findServer(inv.serverId);
     const n = (await db.select({ n: count() }).from(serverMembers).where(eq(serverMembers.serverId, inv.serverId)))[0]!.n;
     return { serverName: server!.name, members: n } satisfies InvitePreview;
+  });
+
+  // Fotos e banners. Públicos de propósito (um <img> não manda token); a chave é aleatória e muda a cada troca.
+  app.get<{ Params: { key: string } }>("/files/:key", async (req, reply) => {
+    if (!isFileKey(req.params.key)) return reply.code(404).send({ error: "não encontrado" });
+    const path = join(files.dir, req.params.key);
+    if (!(await stat(path).catch(() => null))) return reply.code(404).send({ error: "não encontrado" });
+    return reply
+      .header("content-type", "image/webp")
+      .header("cache-control", "public, max-age=31536000, immutable")
+      .header("x-content-type-options", "nosniff")
+      .send(createReadStream(path));
   });
 
   // Rotas autenticadas
@@ -236,7 +268,78 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
     });
     const me = (req: FastifyRequest) => (req as any).user as User;
 
-    authed.get("/me", async (req) => me(req));
+    authed.get("/me", async (req) => (await loadUser(me(req).id)) ?? me(req));
+
+    // ---- Perfil ----
+    /** Propaga o perfil novo: conexões abertas, estado de voz e todo mundo rebusca membros/mensagens. */
+    async function profileChanged(userId: string) {
+      const fresh = await loadUser(userId);
+      if (!fresh) return;
+      for (const [s, u] of online) if (u.id === userId) online.set(s, fresh);
+      for (const [s, v] of voice) if (v.userId === userId) voice.set(s, { ...v, displayName: fresh.displayName, avatar: fresh.avatar });
+      broadcastVoice();
+      broadcast({ t: "sync" });
+      return fresh;
+    }
+
+    authed.patch("/me", async (req, reply) => {
+      const body = updateProfileBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "nome de exibição de 1 a 32 letras e bio de até 190" });
+      const set: { displayName?: string | null; bio?: string | null } = {};
+      if (body.data.displayName !== undefined) set.displayName = body.data.displayName || null;
+      if (body.data.bio !== undefined) set.bio = body.data.bio || null;
+      if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, me(req).id));
+      return profileChanged(me(req).id);
+    });
+
+    const limits: Record<ImageKind, number> = { avatar: AVATAR_MAX_BYTES, banner: BANNER_MAX_BYTES };
+    // Limite de uploads por conta: no máximo UPLOAD_LIMIT envios a cada UPLOAD_WINDOW_MS (memória do processo).
+    const UPLOAD_LIMIT = 10;
+    const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+    const uploadsBy = new Map<string, number[]>();
+    const uploadAllowed = (userId: string) => {
+      const now = Date.now();
+      const recent = (uploadsBy.get(userId) ?? []).filter((t) => now - t < UPLOAD_WINDOW_MS);
+      if (recent.length >= UPLOAD_LIMIT) return (uploadsBy.set(userId, recent), false);
+      recent.push(now);
+      uploadsBy.set(userId, recent);
+      return true;
+    };
+    for (const kind of ["avatar", "banner"] as const) {
+      const col = kind === "avatar" ? "avatarKey" : "bannerKey";
+      authed.put(`/me/${kind}`, async (req, reply) => {
+        if (!uploadAllowed(me(req).id)) return reply.code(429).send({ error: "muitos envios seguidos; espere alguns minutos" });
+        const part = await req.file().catch(() => undefined);
+        if (!part) return reply.code(400).send({ error: "envie uma imagem" });
+        const raw = await part.toBuffer().catch(() => undefined);
+        if (!raw || part.file.truncated || raw.length > limits[kind])
+          return reply.code(413).send({ error: `imagem grande demais (máximo ${limits[kind] / 1024 / 1024} MB)` });
+        const out = await processImage(raw, kind);
+        if (!out) return reply.code(415).send({ error: "use uma imagem PNG, JPEG, WebP ou GIF" });
+        const key = await files.save(out);
+        const old = (await loadUser(me(req).id))?.[kind];
+        await db.update(users).set({ [col]: key }).where(eq(users.id, me(req).id));
+        await files.remove(old);
+        return profileChanged(me(req).id);
+      });
+      authed.delete(`/me/${kind}`, async (req) => {
+        const old = (await loadUser(me(req).id))?.[kind];
+        await db.update(users).set({ [col]: null }).where(eq(users.id, me(req).id));
+        await files.remove(old);
+        return profileChanged(me(req).id);
+      });
+    }
+
+    /** Cartão de perfil de outra pessoa (só quem divide um servidor com ela). */
+    authed.get<{ Params: { id: string } }>("/users/:id", async (req, reply) => {
+      const mine = await loadMemberships(me(req).id);
+      const theirs = await loadMemberships(req.params.id);
+      if (req.params.id !== me(req).id && ![...theirs].some((id) => mine.has(id))) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const u = await loadUser(req.params.id);
+      if (!u) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const { isAdmin: _a, ...pub } = u;
+      return pub;
+    });
 
     // ---- Servidores ----
     authed.get("/servers", async (req) =>
@@ -328,7 +431,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
     authed.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const rows = await db
-        .select({ userId: users.id, username: users.username, role: serverMembers.role })
+        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, role: serverMembers.role })
         .from(serverMembers)
         .innerJoin(users, eq(users.id, serverMembers.userId))
         .where(eq(serverMembers.serverId, req.params.id));
@@ -422,7 +525,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
         const limit = Math.min(Number(req.query.limit ?? 50) || 50, 100);
         const before = req.query.before ? new Date(req.query.before) : undefined;
         const rows = await db
-          .select({ id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, content: messages.content, createdAt: messages.createdAt })
+          .select({ id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, content: messages.content, createdAt: messages.createdAt })
           .from(messages)
           .innerJoin(users, eq(users.id, messages.userId))
           .where(and(eq(messages.channelId, req.params.id), before ? lt(messages.createdAt, before) : undefined))
@@ -435,10 +538,10 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
 
   app.register(async (instance) => {
     instance.get<{ Querystring: { token?: string } }>("/ws", { websocket: true }, async (socket: Socket, req) => {
-      const user = await userFromToken(req.query.token);
-      if (!user) return socket.close(4401, "unauthorized");
-      online.set(socket, user);
-      memberships.set(socket, await loadMemberships(user.id));
+      const connected = await userFromToken(req.query.token);
+      if (!connected) return socket.close(4401, "unauthorized");
+      online.set(socket, connected);
+      memberships.set(socket, await loadMemberships(connected.id));
       presence();
       socket.send(JSON.stringify(voiceStatesFor(socket)));
       socket.on("close", () => {
@@ -454,6 +557,8 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
         } catch {
           return socket.send(JSON.stringify({ t: "error", error: "evento inválido" } satisfies ServerEvent));
         }
+        // O perfil pode ter mudado desde que a conexão abriu.
+        const user = online.get(socket) ?? connected;
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
         if (evt.t === "voice") {
           if (evt.channelId === null) {
@@ -466,7 +571,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
           voice.set(socket, {
-            userId: user.id, username: user.username, channelId: channel.id, serverId: channel.serverId,
+            userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, channelId: channel.id, serverId: channel.serverId,
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
           broadcastVoice();
@@ -476,7 +581,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir }: AppO
         if (!channel || channel.kind !== "text" || !memberships.get(socket)?.has(channel.serverId))
           return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
         const message: Message = {
-          id: newId(), channelId: evt.channelId, userId: user.id, username: user.username,
+          id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar,
           content: evt.content, createdAt: new Date().toISOString(),
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });

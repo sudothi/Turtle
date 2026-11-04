@@ -190,6 +190,8 @@ select.t-select {
   color: var(--ink-0);
   font-size: calc(var(--size, 40px) * 0.34);
 }
+.t-avatar.photo { --lino-bg: var(--ink-0); overflow: hidden; border-radius: 50%; }
+.t-avatar.photo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 /* Falando: anel grosso de papel, como no Discord (verde lá, branco aqui) */
 .t-avatar.speaking { box-shadow: 0 0 0 2px var(--ink-1), 0 0 0 5px var(--paper); border-radius: 50%; }
 

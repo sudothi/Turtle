@@ -74,7 +74,7 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
     api.createInvite(serverId, days).then((r) => setCode(r.code), (e: Error) => setError(e.message));
   }, [serverId, days]);
 
-  const link = code ? `${location.origin}/convite/${code}` : "";
+  const link = code ?? "";
   const copy = async () => {
     if (!code) return;
     await navigator.clipboard.writeText(link).catch(() => {});
@@ -83,7 +83,7 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
   };
 
   return (
-    <Modal title={`Convide amigos para ${serverName}`} subtitle="Mande este link. Quem ainda não tem conta cria uma ao abri-lo; quem já tem, usa o código no botão de convite." onClose={onClose}>
+    <Modal title={`Convide amigos para ${serverName}`} subtitle="Este convite só serve para entrar neste servidor, e só para quem já tem conta. Peça que a pessoa use o código no botão de convite (+ na lateral)." onClose={onClose}>
       <div className="invite-box lino">
         <code>{link || (error ? "—" : "gerando…")}</code>
         <Button size="sm" onClick={copy} disabled={!code}>
@@ -102,5 +102,44 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
       </label>
       {error && <p className="t-muted">{error}</p>}
     </Modal>
+  );
+}
+
+/** Só admin do app (nas Configurações): gera um convite para criar conta no Turtle, de uso único. */
+export function AppInvitePanel() {
+  const [code, setCode] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [copied, setCopied] = useState(false);
+  const generate = () => {
+    setCode(undefined);
+    setError(undefined);
+    api.createAccountInvite().then((r) => setCode(r.code), (e: Error) => setError(e.message));
+  };
+  const link = code ? `${location.origin}/convite/${code}` : "";
+  const copy = async () => {
+    await navigator.clipboard.writeText(link).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <div className="t-field app-invite">
+      <span className="t-field-label">Convidar para o Turtle (só admin)</span>
+      {code ? (
+        <div className="invite-box lino">
+          <code>{link}</code>
+          <Button size="sm" onClick={copy}>
+            <Icon name={copied ? "check" : "copy"} size={16} />
+            {copied ? "Copiado" : "Copiar"}
+          </Button>
+        </div>
+      ) : (
+        <div className="profile-actions">
+          <Button size="sm" onClick={generate}>Gerar convite de conta</Button>
+        </div>
+      )}
+      <span className="t-field-hint">Link de uso único para uma pessoa criar a conta. Depois ela entra nos servidores com convites de servidor.</span>
+      {code && <div className="profile-actions"><Button size="sm" variant="ghost" onClick={generate}>Gerar outro</Button></div>}
+      {error && <div className="err" role="alert">{error}</div>}
+    </div>
   );
 }

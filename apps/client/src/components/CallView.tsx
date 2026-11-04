@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import type { Channel, VoiceState } from "@turtle/protocol";
+import { shownName, type Channel, type VoiceState } from "@turtle/protocol";
+import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import type { CallParticipant, ShareStats, VideoTile, VoiceClient, VoiceSnapshot } from "../voice/client";
 import { ChannelHeader } from "./ChatView";
@@ -37,18 +38,18 @@ function StatsLine({ stats }: { stats?: ShareStats }) {
 }
 
 /** Cartão de uma pessoa: câmera se estiver ligada, senão o avatar. */
-function PersonTile({ p, camera, voice, snap, onFocus, strip }: { p: CallParticipant; camera?: VideoTile; voice: VoiceClient; snap: VoiceSnapshot; onFocus: () => void; strip?: boolean }) {
+function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, strip }: { p: CallParticipant; onProfile?: (userId: string) => void; profile?: VoiceState; camera?: VideoTile; voice: VoiceClient; snap: VoiceSnapshot; onFocus: () => void; strip?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const speaking = p.speaking && !p.muted;
   return (
     <div ref={ref} className={`tile lino lino-lg ${speaking ? "speaking" : ""} ${camera?.track ? "has-video" : ""}`} onDoubleClick={() => (camera ? toggleFullscreen(ref.current) : onFocus())}>
-      {camera?.track ? <VideoView track={camera.track} className={p.isLocal ? "mirror" : ""} /> : <Avatar name={p.name} size={strip ? 48 : 88} speaking={speaking} />}
+      {camera?.track ? <VideoView track={camera.track} className={p.isLocal ? "mirror" : ""} /> : <Avatar name={profile ? shownName(profile) : p.name} src={fileUrl(profile?.avatar)} size={strip ? 48 : 88} speaking={speaking} />}
       <div className="tile-name">
         {p.muted && <Icon name="mic-off" size={16} />}
-        <span>
-          {p.name}
+        <button className="tile-name-btn" title="Ver perfil" onClick={() => onProfile?.(p.id)} onDoubleClick={(e) => e.stopPropagation()}>
+          {profile ? shownName(profile) : p.name}
           {p.isLocal && " (você)"}
-        </span>
+        </button>
       </div>
       {!strip && qualityLabel[p.quality] && <div className="tile-quality t-muted">{qualityLabel[p.quality]}</div>}
       {!strip && (
@@ -122,7 +123,7 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
 }
 
 /** Palco da chamada, no estilo do Discord: grade de cartões e barra de controles embaixo. */
-export function CallView({ channel, snap, voice, members = [] }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[] }) {
+export function CallView({ channel, snap, voice, members = [], onProfile }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[]; onProfile?: (userId: string) => void }) {
   const [focus, setFocus] = useState<string>();
   const [sharing, setSharing] = useState(false);
   if (!channel) return null;
@@ -134,7 +135,7 @@ export function CallView({ channel, snap, voice, members = [] }: { channel?: Cha
   const focusedScreen = screens.find((v) => v.key === focus && v.track);
 
   const person = (p: CallParticipant, strip?: boolean) => (
-    <PersonTile key={p.id} p={p} camera={cameras.get(p.id)} voice={voice} snap={snap} strip={strip} onFocus={() => {}} />
+    <PersonTile key={p.id} p={p} profile={members.find((m) => m.userId === p.id)} camera={cameras.get(p.id)} voice={voice} snap={snap} strip={strip} onFocus={() => {}} onProfile={onProfile} />
   );
   const screen = (v: VideoTile, strip?: boolean) => (
     <ScreenTile key={v.key} v={v} voice={voice} snap={snap} strip={strip} focused={focusedScreen?.key === v.key} onFocus={() => setFocus(focusedScreen?.key === v.key ? undefined : v.key)} />
@@ -149,10 +150,10 @@ export function CallView({ channel, snap, voice, members = [] }: { channel?: Cha
       {!inThis ? (
         <div className="call-lobby">
           <div className="call-lobby-faces">
-            {here.length ? here.map((m) => <Avatar key={m.userId} name={m.username} size={72} />) : <Icon name="speaker" size={56} />}
+            {here.length ? here.map((m) => <button key={m.userId} className="lobby-face" title={`Perfil de ${shownName(m)}`} onClick={() => onProfile?.(m.userId)}><Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={72} /></button>) : <Icon name="speaker" size={56} />}
           </div>
           <h2 className="t-display">{channel.name}</h2>
-          <p className="t-muted">{here.length ? `${here.map((m) => m.username).join(", ")} ${here.length > 1 ? "estão" : "está"} na chamada.` : "Ninguém na chamada ainda."}</p>
+          <p className="t-muted">{here.length ? `${here.map((m) => shownName(m)).join(", ")} ${here.length > 1 ? "estão" : "está"} na chamada.` : "Ninguém na chamada ainda."}</p>
           <Button size="lg" onClick={() => void voice.join(channel.id)}>
             Entrar na chamada
           </Button>

@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS messages_channel_created_idx ON messages (channel_id, created_at);
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
 
+-- Perfil (nome de exibição, bio, foto e banner).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_key text;
+
 -- Servidores (marco 3.5). Tudo idempotente: roda a cada inicialização.
 CREATE TABLE IF NOT EXISTS servers (
   id text PRIMARY KEY, name text NOT NULL, owner_id text NOT NULL REFERENCES users(id),

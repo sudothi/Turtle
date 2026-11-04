@@ -16,7 +16,27 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
+/** URL de uma foto/banner a partir da chave guardada no perfil. */
+export const fileUrl = (key: string | null | undefined) => (key ? `/files/${key}` : null);
+
+/** Perfil público de alguém (cartão de perfil). */
+export type Profile = Pick<User, "id" | "username" | "displayName" | "bio" | "avatar" | "banner">;
+
+async function upload(kind: "avatar" | "banner", file: File): Promise<User> {
+  const form = new FormData();
+  form.append("file", file);
+  const token = getToken();
+  const res = await fetch(`/me/${kind}`, { method: "PUT", headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
+  return data as User;
+}
+
 export const api = {
+  updateProfile: (p: { displayName?: string | null; bio?: string | null }) => req<User>("PATCH", "/me", p),
+  uploadImage: upload,
+  removeImage: (kind: "avatar" | "banner") => req<User>("DELETE", `/me/${kind}`),
+  profile: (id: string) => req<Profile>("GET", `/users/${id}`),
   login: (username: string, password: string) => req<{ token: string; user: User }>("POST", "/auth/login", { username, password }),
   register: (inviteCode: string, username: string, password: string) =>
     req<{ token: string; user: User }>("POST", "/auth/register", { inviteCode, username, password }),
@@ -31,6 +51,7 @@ export const api = {
   members: (serverId: string) => req<Member[]>("GET", `/servers/${serverId}/members`),
   setRole: (serverId: string, userId: string, role: "admin" | "member") => req<{ ok: true }>("PATCH", `/servers/${serverId}/members/${userId}`, { role }),
   removeMember: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/members/${userId}`),
+  createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),
   joinInvite: (code: string) => req<Server>("POST", `/invites/${encodeURIComponent(code)}/join`, {}),

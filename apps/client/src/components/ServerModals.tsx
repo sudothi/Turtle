@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { MAX_OWNED_SERVERS, type InvitePreview, type Member, type Server, type User } from "@turtle/protocol";
+import { MAX_OWNED_SERVERS, shownName, type InvitePreview, type Member, type Server, type User } from "@turtle/protocol";
 import { Avatar, Button, Modal, TextField } from "@turtle/ui";
-import { api } from "../api";
+import { api, fileUrl } from "../api";
 
 export function CreateServerModal({ ownedCount, onClose, onCreated }: { ownedCount: number; onClose: () => void; onCreated: (s: Server) => void }) {
   const [name, setName] = useState("");
@@ -159,9 +159,9 @@ export function ServerSettingsModal({
             const canKick = !isMe && m.role !== "owner" && (isOwner || (server.role === "admin" && m.role === "member"));
             return (
               <li key={m.userId}>
-                <Avatar name={m.username} size={28} />
+                <Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={28} />
                 <span className="settings-name">
-                  {m.username}
+                  {shownName(m)}
                   {isMe && " (você)"}
                 </span>
                 {isOwner && m.role !== "owner" ? (

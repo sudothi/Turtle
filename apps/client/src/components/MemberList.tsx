@@ -1,18 +1,19 @@
-import type { Member } from "@turtle/protocol";
+import { shownName, type Member } from "@turtle/protocol";
 import { Avatar } from "@turtle/ui";
+import { fileUrl } from "../api";
 
-const byName = (a: Member, b: Member) => a.username.localeCompare(b.username, "pt-BR");
+const byName = (a: Member, b: Member) => shownName(a).localeCompare(shownName(b), "pt-BR");
 const badge = { owner: "Dono", admin: "Admin", member: "" } as const;
 
 /** Membros do servidor atual, separados entre online e offline (presença vem do gateway). */
-export function MemberList({ members, online }: { members: Member[]; online: string[] }) {
+export function MemberList({ members, online, onProfile }: { members: Member[]; online: string[]; onProfile: (m: Member) => void }) {
   const on = new Set(online);
   const here = members.filter((m) => on.has(m.username)).sort(byName);
   const away = members.filter((m) => !on.has(m.username)).sort(byName);
   const row = (m: Member, isOnline: boolean) => (
-    <div key={m.userId} className={`member ${isOnline ? "" : "offline"}`}>
-      <Avatar name={m.username} size={32} status={isOnline ? "online" : undefined} statusRing="var(--bg-sidebar)" />
-      <span className="member-name">{m.username}</span>
+    <div key={m.userId} className={`member ${isOnline ? "" : "offline"}`} role="button" tabIndex={0} onClick={() => onProfile(m)} onKeyDown={(e) => e.key === "Enter" && onProfile(m)}>
+      <Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={32} status={isOnline ? "online" : undefined} statusRing="var(--bg-sidebar)" />
+      <span className="member-name">{shownName(m)}</span>
       {badge[m.role] && <span className="role-badge t-muted">{badge[m.role]}</span>}
     </div>
   );

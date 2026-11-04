@@ -80,7 +80,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       wildcard: false,
       cacheControl: false,
       setHeaders: (res, path) => {
-        res.setHeader("cache-control", path.includes("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
+        res.setHeader("cache-control", /[\\/]assets[\\/]/.test(path) ? "public, max-age=31536000, immutable" : "no-cache");
       },
     });
     // Rotas do app (SPA) que não são arquivos nem API caem no index.html.

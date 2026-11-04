@@ -8,8 +8,8 @@ const badge = { owner: "Dono", admin: "Admin", member: "" } as const;
 /** Membros do servidor atual, separados entre online e offline (presença vem do gateway). */
 export function MemberList({ members, online, onProfile }: { members: Member[]; online: string[]; onProfile: (m: Member) => void }) {
   const on = new Set(online);
-  const here = members.filter((m) => on.has(m.username)).sort(byName);
-  const away = members.filter((m) => !on.has(m.username)).sort(byName);
+  const here = members.filter((m) => on.has(m.userId)).sort(byName);
+  const away = members.filter((m) => !on.has(m.userId)).sort(byName);
   const row = (m: Member, isOnline: boolean) => (
     <div key={m.userId} className={`member ${isOnline ? "" : "offline"}`} role="button" tabIndex={0} onClick={() => onProfile(m)} onKeyDown={(e) => e.key === "Enter" && onProfile(m)}>
       <Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={32} status={isOnline ? "online" : undefined} statusRing="var(--bg-sidebar)" />

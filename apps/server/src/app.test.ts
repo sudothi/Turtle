@@ -83,6 +83,42 @@ describe("server", () => {
     expect((await post(`/servers/${turtleId}/channels`, { name: "Lobby", kind: "voice" }, adminToken)).body.kind).toBe("voice");
   });
 
+  it("admin dá o cargo Convidador e a pessoa passa a gerar convites de conta", async () => {
+    const patch = async (url: string, body: unknown, token: string) => {
+      const res = await fetch(base + url, { method: "PATCH", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    expect((await get("/admin/users", friendToken)).status).toBe(403);
+    const list = (await get("/admin/users", adminToken)).body;
+    const amigo = list.find((u: any) => u.username === "amigo");
+    expect(amigo).toMatchObject({ isAdmin: false, canInvite: false });
+    expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, friendToken)).status).toBe(403);
+    expect((await patch(`/admin/users/${amigo.id}`, { canInvite: true }, adminToken)).status).toBe(200);
+    expect((await get("/me", friendToken)).body.canInvite).toBe(true);
+    // o cartão público não expõe o cargo
+    expect((await get(`/users/${amigo.id}`, adminToken)).body.canInvite).toBeUndefined();
+    const inv = await post("/invites", {}, friendToken);
+    expect(inv.status).toBe(200);
+    expect((await post("/auth/register", { inviteCode: inv.body.code, username: "convidado", password: "12345678" })).status).toBe(200);
+    // ainda não é admin
+    expect((await get("/admin/users", friendToken)).status).toBe(403);
+    await patch(`/admin/users/${amigo.id}`, { canInvite: false }, adminToken);
+    expect((await post("/invites", {}, friendToken)).status).toBe(403);
+    expect((await patch("/admin/users/ninguem", { canInvite: true }, adminToken)).status).toBe(404);
+  });
+
+  it("presença manda ids, não nomes de usuário", async () => {
+    const meId = (await get("/me", friendToken)).body.id;
+    const ws = new WebSocket(base.replace("http", "ws") + `/ws?token=${friendToken}`);
+    const online = await new Promise<string[]>((resolve) => ws.on("message", (raw) => {
+      const evt = JSON.parse(raw.toString());
+      if (evt.t === "presence") resolve(evt.online);
+    }));
+    ws.close();
+    expect(online).toContain(meId);
+    expect(online).not.toContain("amigo");
+  });
+
   it("mensagens trafegam em tempo real e ficam no histórico", async () => {
     const channels = await channelsOf(turtleId, adminToken);
     const geral = channels[0].id;

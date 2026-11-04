@@ -24,6 +24,8 @@ export const userSchema = z.object({
   id: z.string(),
   username: z.string(),
   isAdmin: z.boolean(),
+  /** Cargo "Convidador": pode gerar convites de conta (o admin sempre pode). */
+  canInvite: z.boolean().default(false),
   displayName: z.string().nullable().default(null),
   bio: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
@@ -39,6 +41,67 @@ export const updateProfileBody = z.object({
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 export const BANNER_MAX_BYTES = 4 * 1024 * 1024;
 /** Nome a mostrar: o de exibição, se houver, senão o de usuário. */
+/** Quem pode gerar convites de conta. */
+export const canInviteAccounts = (u: { isAdmin: boolean; canInvite?: boolean }) => u.isAdmin || !!u.canInvite;
+/** Conta vista pelo admin na aba Administração. */
+export const accountSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  isAdmin: z.boolean(),
+  canInvite: z.boolean(),
+});
+export type Account = z.infer<typeof accountSchema>;
+export const setInviterBody = z.object({ canInvite: z.boolean() });
+
+/** Menção no texto da mensagem: `<@id>`. O cliente mostra o nome de exibição atual da pessoa. */
+export const mentionToken = (userId: string) => `<@${userId}>`;
+export const MENTION_RE = /<@([A-Za-z0-9_-]+)>/g;
+export const mentionedIds = (content: string) => [...content.matchAll(MENTION_RE)].map((m) => m[1]!);
+type Named = { userId: string; username: string; displayName?: string | null };
+/**
+ * Troca `@Nome` (de exibição ou de usuário) pelo token `<@id>` antes de enviar.
+ * Nomes mais longos primeiro, e só quando o nome termina numa fronteira (espaço, pontuação ou fim).
+ */
+export function encodeMentions(text: string, people: Named[]): string {
+  const names = people
+    .flatMap((p) => [...new Set([shownName(p), p.username])].map((name) => ({ name, id: p.userId })))
+    .sort((a, b) => b.name.length - a.name.length);
+  let out = "";
+  for (let i = 0; i < text.length; ) {
+    const before = i === 0 ? " " : text[i - 1]!;
+    if (text[i] === "@" && /[\s([{]/u.test(before)) {
+      const rest = text.slice(i + 1).toLocaleLowerCase("pt-BR");
+      const hit = names.find(({ name }) => {
+        if (!rest.startsWith(name.toLocaleLowerCase("pt-BR"))) return false;
+        const next = rest[name.length];
+        return next === undefined || !/[\p{L}\p{N}_]/u.test(next);
+      });
+      if (hit) {
+        out += mentionToken(hit.id);
+        i += 1 + hit.name.length;
+        continue;
+      }
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
+/** Quebra o texto em pedaços de texto puro e menções (para desenhar). */
+export function splitMentions(content: string): ({ text: string } | { userId: string })[] {
+  const parts: ({ text: string } | { userId: string })[] = [];
+  let last = 0;
+  for (const m of content.matchAll(MENTION_RE)) {
+    if (m.index! > last) parts.push({ text: content.slice(last, m.index) });
+    parts.push({ userId: m[1]! });
+    last = m.index! + m[0].length;
+  }
+  if (last < content.length) parts.push({ text: content.slice(last) });
+  return parts;
+}
+
 export const shownName = (u: { username: string; displayName?: string | null }) => u.displayName || u.username;
 
 export const usernameSchema = z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_.-]+$/u);
@@ -116,6 +179,7 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("channel"), channel: channelSchema }),
   /** Algo mudou nos servidores, canais ou membros: buscar de novo. */
   z.object({ t: z.literal("sync") }),
+  /** ids das pessoas conectadas. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
   z.object({ t: z.literal("error"), error: z.string() }),

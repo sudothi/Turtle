@@ -1,8 +1,8 @@
-import type { User } from "@turtle/protocol";
+import { canInviteAccounts, type User } from "@turtle/protocol";
 import { Modal } from "@turtle/ui";
 import type { VoiceClient } from "../voice/client";
 import { VoiceSettings } from "../voice/VoiceSettings";
-import { AppInvitePanel } from "./modals";
+import { AppInvitePanel, InvitersPanel } from "./modals";
 import { ProfileSettings } from "./ProfileSettings";
 
 export type SettingsTab = "profile" | "voice" | "admin";
@@ -23,7 +23,10 @@ export function SettingsModal({ user, voice, prefs, tab, onTab, onChanged, onClo
   onChanged: (u: User) => void;
   onClose: () => void;
 }) {
-  const visible = tabs.filter((t) => t.id !== "admin" || user.isAdmin);
+  // Quem só tem o cargo Convidador vê a aba como "Convites".
+  const visible = tabs
+    .filter((t) => t.id !== "admin" || canInviteAccounts(user))
+    .map((t) => (t.id === "admin" && !user.isAdmin ? { ...t, label: "Convites" } : t));
   const current = visible.find((t) => t.id === tab) ?? tabs[0]!;
   return (
     <Modal wide title="Configurações" subtitle={current.subtitle} label={current.id === "voice" ? "Configurações de voz" : `Configurações: ${current.label}`} onClose={onClose}>
@@ -37,7 +40,12 @@ export function SettingsModal({ user, voice, prefs, tab, onTab, onChanged, onClo
       <div role="tabpanel" className="settings-panel">
         {current.id === "profile" && <ProfileSettings user={user} onChanged={onChanged} />}
         {current.id === "voice" && <VoiceSettings voice={voice} prefs={prefs} />}
-        {current.id === "admin" && <AppInvitePanel />}
+        {current.id === "admin" && (
+          <>
+            <AppInvitePanel />
+            {user.isAdmin && <InvitersPanel me={user.id} />}
+          </>
+        )}
       </div>
     </Modal>
   );

@@ -229,6 +229,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           <ChatView
             channel={textChannel}
             messages={messages}
+            members={members}
+            meId={user.id}
             onSend={send}
             membersOpen={membersOpen}
             onToggleMembers={toggleMembers}

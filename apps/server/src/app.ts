@@ -11,6 +11,9 @@ import {
 } from "@turtle/db";
 import {
   AVATAR_MAX_BYTES,
+  canInviteAccounts,
+  setInviterBody,
+  type Account,
   BANNER_MAX_BYTES,
   MAX_OWNED_SERVERS,
   clientEvent,
@@ -114,7 +117,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     const set = new Set(ids);
     sendWhere(evt, (s) => set.has(online.get(s)!.id));
   };
-  const presence = () => broadcast({ t: "presence", online: [...new Set([...online.values()].map((u) => u.username))] });
+  const presence = () => broadcast({ t: "presence", online: [...new Set([...online.values()].map((u) => u.id))] });
 
   // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
   const voice = new Map<Socket, VoiceState>();
@@ -168,11 +171,11 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     (await db.select({ id: serverMembers.userId }).from(serverMembers).where(eq(serverMembers.serverId, serverId))).map((r) => r.id);
 
   const userCols = {
-    id: users.id, username: users.username, isAdmin: users.isAdmin,
+    id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
     displayName: users.displayName, bio: users.bio, avatarKey: users.avatarKey, bannerKey: users.bannerKey,
   };
-  const toUser = (r: { id: string; username: string; isAdmin: boolean; displayName: string | null; bio: string | null; avatarKey: string | null; bannerKey: string | null }): User => ({
-    id: r.id, username: r.username, isAdmin: r.isAdmin, displayName: r.displayName, bio: r.bio, avatar: r.avatarKey, banner: r.bannerKey,
+  const toUser = (r: { id: string; username: string; isAdmin: boolean; canInvite: boolean; displayName: string | null; bio: string | null; avatarKey: string | null; bannerKey: string | null }): User => ({
+    id: r.id, username: r.username, isAdmin: r.isAdmin, canInvite: r.canInvite, displayName: r.displayName, bio: r.bio, avatar: r.avatarKey, banner: r.bannerKey,
   });
   const loadUser = async (id: string) => {
     const r = (await db.select(userCols).from(users).where(eq(users.id, id)).limit(1))[0];
@@ -221,7 +224,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
-    const user: User = { id, username, isAdmin: isFirst, displayName: null, bio: null, avatar: null, banner: null };
+    const user: User = { id, username, isAdmin: isFirst, canInvite: false, displayName: null, bio: null, avatar: null, banner: null };
     await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
@@ -337,7 +340,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (req.params.id !== me(req).id && ![...theirs].some((id) => mine.has(id))) return reply.code(404).send({ error: "pessoa não encontrada" });
       const u = await loadUser(req.params.id);
       if (!u) return reply.code(404).send({ error: "pessoa não encontrada" });
-      const { isAdmin: _a, ...pub } = u;
+      const { isAdmin: _a, canInvite: _c, ...pub } = u;
       return pub;
     });
 
@@ -509,12 +512,31 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return { url: livekit.url, token: await at.toJwt() } satisfies VoiceToken;
     });
 
-    // Convites de conta (só admin do app): criam uma conta que entra no servidor mais antigo.
+    // Convites de conta (admin do app ou cargo Convidador): criam uma conta que entra no servidor mais antigo.
     authed.post("/invites", async (req, reply) => {
-      if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
+      if (!canInviteAccounts(me(req))) return reply.code(403).send({ error: "só admin ou convidador" });
       const code = newInviteCode();
       await db.insert(invites).values({ code, createdBy: me(req).id });
       return { code };
+    });
+
+    // ---- Administração do app (só admin) ----
+    authed.get("/admin/users", async (req, reply) => {
+      if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
+      const rows = await db.select(userCols).from(users).orderBy(asc(users.createdAt));
+      return rows.map((r): Account => ({ id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey, isAdmin: r.isAdmin, canInvite: r.canInvite }));
+    });
+    /** Dá ou tira o cargo Convidador. */
+    authed.patch<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
+      if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
+      const body = setInviterBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const done = await db.update(users).set({ canInvite: body.data.canInvite }).where(eq(users.id, req.params.id)).returning({ id: users.id });
+      if (!done.length) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const fresh = await loadUser(req.params.id);
+      if (fresh) for (const [s, u] of online) if (u.id === fresh.id) online.set(s, fresh);
+      toUsers([req.params.id], { t: "sync" });
+      return { ok: true };
     });
 
     authed.get<{ Params: { id: string }; Querystring: { before?: string; limit?: string } }>(

@@ -155,7 +155,8 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
   );
 }
 
-export function VoiceSettings({ voice, prefs, onClose }: { voice: VoiceClient; prefs: AudioPrefs; onClose: () => void }) {
+/** Configurações > Voz: dispositivos, supressão de ruído, ganho e teste do microfone. */
+export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: AudioPrefs }) {
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] });
 
   useEffect(() => {
@@ -169,9 +170,8 @@ export function VoiceSettings({ voice, prefs, onClose }: { voice: VoiceClient; p
   const gainPct = Math.round(prefs.inputGain * 100);
 
   return (
-    <div className="modal" role="dialog" aria-label="Configurações de voz" onClick={onClose}>
-      <div className="panel" onClick={(e) => e.stopPropagation()}>
-        <h2>Voz</h2>
+    <div className="settings-voice">
+      <div className="panel">
         <label>
           Microfone
           <select value={prefs.inputId} onChange={(e) => void voice.setInput(e.target.value)}>
@@ -226,7 +226,6 @@ export function VoiceSettings({ voice, prefs, onClose }: { voice: VoiceClient; p
         </label>
         <MicTest prefs={prefs} />
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>
-        <button type="button" onClick={onClose}>Fechar</button>
       </div>
     </div>
   );

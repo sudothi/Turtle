@@ -11,7 +11,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down"
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "desktop": "pnpm --filter @turtle/desktop start"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

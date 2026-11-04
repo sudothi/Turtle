@@ -443,3 +443,14 @@
 .share-option { --lino-bg: var(--ink-3); --lino-radius: 6px; display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; cursor: pointer; }
 .share-option input, .share-audio input { margin-top: 4px; accent-color: var(--paper); }
 .share-audio { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+
+/* Seletor de tela do app desktop */
+.picker { display: flex; flex-direction: column; gap: 16px; max-height: 60vh; overflow: auto; padding: 4px; }
+.picker-title { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.picker-item { --lino-bg: var(--ink-3); --lino-radius: 6px; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.picker-item > img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; }
+.picker-item.is-chosen { outline: 2px solid var(--paper); outline-offset: 2px; }
+.picker-name { display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0; }
+.picker-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-icon { width: 16px; height: 16px; }

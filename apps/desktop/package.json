@@ -1,6 +1,18 @@
 {
-  "name": "@turtle/desktop", "version": "0.0.0", "private": true, "type": "module",
+  "name": "@turtle/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
   "main": "dist/main.js",
-  "scripts": { "dev": "echo 'desktop dev entra no marco 3 (spike de captura)'", "build": "tsc", "typecheck": "tsc --noEmit", "test": "echo no tests" },
-  "devDependencies": { "electron": "^37.0.0", "@types/node": "^22.0.0" }
+  "scripts": {
+    "dev": "echo 'use: pnpm desktop (na raiz) com o pnpm dev rodando'",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "echo no tests",
+    "start": "tsc && electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "@types/node": "^22.0.0"
+  }
 }

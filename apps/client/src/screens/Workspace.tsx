@@ -9,6 +9,7 @@ import { UserPanel } from "../components/UserPanel";
 import { ChatView } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
+import { ScreenPicker } from "../components/ScreenPicker";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 
@@ -137,6 +138,7 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
         )}
       </main>
       {showMembers && <MemberList online={online} />}
+      <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
       {settings && <VoiceSettings voice={voice} prefs={snap.prefs} onClose={() => setSettings(false)} />}
       {creating && <CreateChannelModal initialKind={creating} onClose={() => setCreating(undefined)} />}

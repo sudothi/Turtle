@@ -1,9 +1,6 @@
-# Produção (VPS): espelho do ~/turtle/docker-compose.yml do servidor (Postgres, LiveKit, API+site e Caddy com HTTPS).
-# No VPS os arquivos ficam todos em ~/turtle (compose, .env, Caddyfile, livekit.yaml, backup.sh) e a imagem é
-# construída antes com `docker build -t turtle-app:<commit> .`; aqui o `build` faz o mesmo a partir do repositório.
-# Uso a partir de infra/: cp .env.prod.example .env (preencher) && docker compose -f docker-compose.prod.yml up -d --build
-# O LiveKit usa a rede do host (recomendado para WebRTC); o Postgres não publica porta (o Docker ignora o UFW).
-name: turtle
+# Produção (VPS), espelho de ~/turtle/docker-compose.yml. No VPS o código fica em ~/turtle/src, a imagem
+# é construída à mão (docker build -t turtle-app:<commit> src) e o tag abaixo é atualizado a cada deploy.
+# Backup: backup.sh (cron do usuário kyo, 07:00 UTC) guarda o dump do Postgres e o volume uploads.
 services:
   caddy:
     image: caddy:2
@@ -21,15 +18,16 @@ services:
   livekit:
     image: livekit/livekit-server:v1.13.11
     restart: unless-stopped
-    network_mode: host
+    network_mode: host          # recomendado para WebRTC
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
-    volumes: ["./livekit.prod.yaml:/etc/livekit.yaml:ro"]
+    volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
 
   postgres:
     image: postgres:17
     restart: unless-stopped
+    # sem "ports:" de propósito: portas publicadas pelo Docker ignoram o UFW
     environment:
       POSTGRES_USER: kyo
       POSTGRES_DB: turtle
@@ -42,8 +40,7 @@ services:
       retries: 5
 
   api:
-    image: turtle-app:${APP_TAG:-local}
-    build: { context: .., dockerfile: Dockerfile }
+    image: turtle-app:c13c10d
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -54,7 +51,6 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE}
-      # Fotos de perfil e banners (volume abaixo; entra no backup junto com o Postgres).
       UPLOAD_DIR: /data/uploads
     volumes: ["uploads:/data/uploads"]
 

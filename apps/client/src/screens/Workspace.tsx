@@ -11,6 +11,8 @@ import { ChatView } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
+import { ProfileModal } from "../components/ProfileModal";
+import { ProfilePopup } from "../components/ProfilePopup";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
@@ -26,7 +28,8 @@ const remembered = () => {
 };
 
 /** Tela principal: servidores | canais | chat ou chamada | membros. */
-export function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
+export function Workspace({ user: initialUser, onLogout }: { user: User; onLogout: () => void }) {
+  const [user, setUser] = useState(initialUser);
   const [servers, setServers] = useState<Server[]>([]);
   const [serversLoaded, setServersLoaded] = useState(false);
   const [serverId, setServerId] = useState<string | undefined>(remembered);
@@ -41,6 +44,8 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
   const [online, setOnline] = useState<string[]>([]);
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [viewProfile, setViewProfile] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
   const [inviting, setInviting] = useState(false);
@@ -133,6 +138,9 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
         }
         if (evt.t === "sync") {
           void loadServers().then(() => (serverRef.current ? loadServer(serverRef.current, false) : undefined)).catch(() => {});
+          // Perfil de alguém mudou: atualiza o meu e as fotos/nomes nas mensagens.
+          api.me().then(setUser).catch(() => {});
+          if (currentRef.current) api.messages(currentRef.current).then(setMessages).catch(() => {});
         }
         if (evt.t === "presence") setOnline(evt.online);
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
@@ -196,12 +204,12 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
           onLogout={logout}
-          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
+          footer={<UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
           <div className="channels" />
-          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onShare={() => setSharing(true)} onLogout={onLogout} />
+          <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings(true)} onProfile={() => setEditingProfile(true)} onShare={() => setSharing(true)} onLogout={onLogout} />
         </aside>
       )}
       <main className="stage">
@@ -227,12 +235,15 @@ export function Workspace({ user, onLogout }: { user: User; onLogout: () => void
             onToggleMembers={toggleMembers}
             canInvite
             onInvite={() => setInviting(true)}
+            onProfile={setViewProfile}
           />
         )}
       </main>
-      {showMembers && <MemberList members={members} online={online} />}
+      {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
+      {editingProfile && <ProfileModal user={user} onChanged={setUser} onClose={() => setEditingProfile(false)} />}
+      {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} onClose={() => setViewProfile(undefined)} />}
       {settings && <VoiceSettings voice={voice} prefs={snap.prefs} onClose={() => setSettings(false)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}

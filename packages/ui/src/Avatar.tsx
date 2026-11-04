@@ -11,6 +11,7 @@ export function Avatar({
   speaking,
   status,
   statusRing,
+  src,
 }: {
   name: string;
   size?: number;
@@ -19,12 +20,14 @@ export function Avatar({
   status?: "online" | "offline";
   /** Cor do fundo atrás da bolinha (para o recorte). */
   statusRing?: string;
+  /** Foto de perfil (URL). Sem ela, mostra a inicial. */
+  src?: string | null;
 }) {
   const initial = [...name.trim()][0]?.toUpperCase() ?? "?";
   const v = avatarVariant(name);
   const avatar = (
-    <span className={`t-avatar lino v${v} ${speaking ? "speaking" : ""}`} style={{ ["--size" as string]: `${size}px` }} aria-hidden="true">
-      <span>{initial}</span>
+    <span className={`t-avatar lino v${v} ${src ? "photo" : ""} ${speaking ? "speaking" : ""}`} style={{ ["--size" as string]: `${size}px` }} aria-hidden="true">
+      {src ? <img src={src} alt="" draggable={false} /> : <span>{initial}</span>}
     </span>
   );
   if (!status) return avatar;

@@ -460,3 +460,26 @@
 .picker-name { display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0; }
 .picker-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-icon { width: 16px; height: 16px; }
+
+/* ---------- Perfil ---------- */
+.plain-btn { background: none; border: none; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.plain-btn.msg-author:hover b { text-decoration: underline; }
+.member { cursor: pointer; }
+.profile-card { --lino-bg: var(--ink-2); --lino-border: 2px solid var(--paper); --lino-radius: var(--radius-md); width: 100%; overflow: hidden; }
+.profile-banner { height: 110px; background: repeating-linear-gradient(-45deg, var(--ink-0) 0 3px, var(--ink-3) 3px 7px); border-radius: var(--radius-md) var(--radius-md) 0 0; overflow: hidden; }
+.profile-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-avatar { margin: -42px 0 0 16px; width: 88px; height: 88px; display: grid; place-items: center; border-radius: 50%; background: var(--ink-2); position: relative; }
+.profile-info { padding: 8px 16px 16px; }
+.profile-name { font-size: 22px; overflow-wrap: anywhere; }
+.profile-user { font-size: var(--fs-sm); }
+.profile-sec { margin-top: 12px; }
+.profile-bio { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-popup { width: min(340px, calc(100vw - 32px)); }
+.profile-editor { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.profile-form { display: flex; flex-direction: column; gap: 14px; }
+.profile-preview { display: flex; flex-direction: column; gap: 8px; }
+.profile-actions { display: flex; gap: 8px; }
+.profile-bio-input { background: var(--ink-0); border: 2px solid var(--ink-4); border-radius: var(--radius-sm); padding: 8px 12px; resize: vertical; min-height: 72px; color: inherit; font: inherit; }
+.profile-bio-input:focus { outline: none; border-color: var(--paper); }
+@media (max-width: 720px) { .profile-editor { grid-template-columns: 1fr; } }
+.t-modal:has(.profile-editor) { width: min(780px, calc(100vw - 32px)); max-width: none; }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, type FormEvent } from "react";
-import type { Channel, Message } from "@turtle/protocol";
+import { shownName, type Channel, type Message } from "@turtle/protocol";
 import { Avatar, Icon, IconButton } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
+import { fileUrl } from "../api";
 
 /** Tamanho da página de histórico do servidor: se veio menos, estamos no começo do canal. */
 const PAGE = 50;
@@ -24,6 +25,7 @@ export function ChatView({
   onToggleMembers,
   canInvite,
   onInvite,
+  onProfile,
 }: {
   channel?: Channel;
   messages: Message[];
@@ -32,6 +34,7 @@ export function ChatView({
   onToggleMembers: () => void;
   canInvite: boolean;
   onInvite: () => void;
+  onProfile: (userId: string) => void;
 }) {
   const bottom = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => toRows(messages), [messages]);
@@ -78,10 +81,14 @@ export function ChatView({
             </div>
           ) : r.head ? (
             <article key={r.key} className="msg head">
-              <Avatar name={r.message.username} size={40} />
+              <button type="button" className="plain-btn" aria-label={`Perfil de ${shownName(r.message)}`} onClick={() => onProfile(r.message.userId)}>
+                <Avatar name={shownName(r.message)} src={fileUrl(r.message.avatar)} size={40} />
+              </button>
               <div className="msg-body">
                 <div className="msg-meta">
-                  <b className="msg-author">{r.message.username}</b>
+                  <button type="button" className="plain-btn msg-author" onClick={() => onProfile(r.message.userId)}>
+                    <b>{shownName(r.message)}</b>
+                  </button>
                   <time dateTime={r.message.createdAt}>{stamp(r.message.createdAt)}</time>
                 </div>
                 <div className="msg-text">{r.message.content}</div>

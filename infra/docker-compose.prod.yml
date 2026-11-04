@@ -28,6 +28,9 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET}
       # Código do primeiro cadastro (o primeiro usuário vira admin e dono do servidor "Turtle").
       BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE:?defina BOOTSTRAP_INVITE}
+      # Fotos de perfil e banners (volume abaixo; entra no backup junto com o Postgres).
+      UPLOAD_DIR: /data/uploads
+    volumes: ["uploads:/data/uploads"]
 
   livekit:
     image: livekit/livekit-server:v1.13.11
@@ -54,4 +57,5 @@ services:
 
 volumes:
   pgdata:
+  uploads:
   caddy_data:

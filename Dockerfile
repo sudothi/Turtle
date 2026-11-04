@@ -13,6 +13,8 @@ FROM node:22-slim
 ENV NODE_ENV=production PORT=3000 CLIENT_DIST=/app/client
 WORKDIR /app
 COPY --from=build /out ./
+# Pasta dos uploads (fotos/banners): o volume nomeado herda esse dono na primeira montagem.
+RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"

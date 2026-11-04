@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Channel, ChannelKind, VoiceState } from "@turtle/protocol";
+import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
+import { fileUrl } from "../api";
 import { Avatar, Icon, type IconName } from "@turtle/ui";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
@@ -127,8 +128,8 @@ export function ChannelSidebar({
                   <ul className="voice-members">
                     {members.map((v) => (
                       <li key={v.userId}>
-                        <Avatar name={v.username} size={24} speaking={speaking.has(v.userId)} />
-                        <span className="voice-member-name">{v.username}</span>
+                        <Avatar name={shownName(v)} src={fileUrl(v.avatar)} size={24} speaking={speaking.has(v.userId)} />
+                        <span className="voice-member-name">{shownName(v)}</span>
                         {v.screen && <span className="live-badge small">AO VIVO</span>}
                         {v.camera && (
                           <span className="vm-flag" title="Câmera ligada"><Icon name="video" size={16} /><span className="sr">câmera ligada</span></span>

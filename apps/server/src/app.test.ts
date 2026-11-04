@@ -24,7 +24,10 @@ const get = async (url: string, token: string) => {
 
 beforeAll(async () => {
   handle = await createDb();
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK });
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")) });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -381,5 +384,88 @@ describe("site compilado", () => {
     expect((await fetch(url + "/me")).status).toBe(401);
     await site.close();
     await h.close();
+  });
+});
+
+describe("perfil", () => {
+  let tok = "";
+  let otherTok = "";
+  let strangerTok = "";
+  let id = "";
+  const send = async (method: string, url: string, token: string, file?: { data: Uint8Array; type: string }) => {
+    const form = new FormData();
+    if (file) form.append("file", new Blob([file.data as BlobPart], { type: file.type }), "x");
+    const res = await fetch(base + url, { method, headers: { authorization: `Bearer ${token}` }, body: file ? form : undefined });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+  };
+  const patch = async (body: unknown, token: string) => {
+    const res = await fetch(base + "/me", { method: "PATCH", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+
+  beforeAll(async () => {
+    const sharp = (await import("sharp")).default;
+    png = new Uint8Array(await sharp({ create: { width: 600, height: 300, channels: 3, background: "#888" } }).png().toBuffer());
+  });
+  let png: Uint8Array;
+
+  it("prepara contas", async () => {
+    const login = await post("/auth/login", { username: "thiago", password: "12345678" });
+    tok = login.body.token;
+    id = login.body.user.id;
+    const code = (await post("/servers", { name: "Perfis" }, tok)).body.id;
+    const inv = await post(`/servers/${code}/invites`, {}, tok);
+    otherTok = (await post("/auth/register", { inviteCode: inv.body.code, username: "amiga", password: "12345678" })).body.token;
+    const acc = await post("/invites", {}, tok);
+    strangerTok = (await post("/auth/register", { inviteCode: acc.body.code, username: "ninguem", password: "12345678" })).body.token;
+  });
+
+  it("edita nome de exibição e bio, e limpa", async () => {
+    const r = await patch({ displayName: "Thi", bio: "oi, sou o thi" }, tok);
+    expect(r.body.displayName).toBe("Thi");
+    expect(r.body.bio).toBe("oi, sou o thi");
+    expect((await patch({ displayName: "x".repeat(40) }, tok)).status).toBe(400);
+    expect((await patch({ bio: "x".repeat(191) }, tok)).status).toBe(400);
+    expect((await patch({ displayName: "" }, tok)).body.displayName).toBeNull();
+  });
+
+  it("envia pfp e banner, serve como WebP e troca apagando o antigo", async () => {
+    const a = await send("PUT", "/me/avatar", tok, { data: png, type: "image/png" });
+    expect(a.status).toBe(200);
+    const key = a.body.avatar as string;
+    const file = await fetch(base + `/files/${key}`);
+    expect(file.headers.get("content-type")).toBe("image/webp");
+    expect(file.headers.get("cache-control")).toContain("immutable");
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(Buffer.from(await file.arrayBuffer())).metadata();
+    expect([meta.width, meta.height]).toEqual([256, 256]);
+    const b = await send("PUT", "/me/banner", tok, { data: png, type: "image/png" });
+    const bm = await sharp(Buffer.from(await (await fetch(base + `/files/${b.body.banner}`)).arrayBuffer())).metadata();
+    expect([bm.width, bm.height]).toEqual([960, 320]);
+    const again = await send("PUT", "/me/avatar", tok, { data: png, type: "image/png" });
+    expect(again.body.avatar).not.toBe(key);
+    expect((await fetch(base + `/files/${key}`)).status).toBe(404);
+  });
+
+  it("rejeita arquivo que não é imagem (mesmo com tipo mentiroso) e imagem grande demais", async () => {
+    const fake = await send("PUT", "/me/avatar", tok, { data: new TextEncoder().encode("<svg onload=alert(1)>"), type: "image/png" });
+    expect(fake.status).toBe(415);
+    const big = await send("PUT", "/me/avatar", tok, { data: new Uint8Array(3 * 1024 * 1024), type: "image/png" });
+    expect(big.status).toBe(413);
+    expect((await send("PUT", "/me/avatar", tok)).status).toBe(400);
+    expect((await fetch(base + "/files/..%2Fapp.ts")).status).toBe(404);
+  });
+
+  it("aparece nos membros, no cartão de perfil e some ao remover", async () => {
+    const servers = (await get("/servers", tok)).body;
+    const sid = servers.find((s: any) => s.name === "Perfis").id;
+    const m = (await get(`/servers/${sid}/members`, otherTok)).body.find((x: any) => x.userId === id);
+    expect(m.avatar).toBeTruthy();
+    const card = await get(`/users/${id}`, otherTok);
+    expect(card.body.banner).toBeTruthy();
+    expect(card.body.isAdmin).toBeUndefined();
+    expect((await get(`/users/${id}`, strangerTok)).status).toBe(404);
+    await send("DELETE", "/me/avatar", tok);
+    expect((await get(`/users/${id}`, otherTok)).body.avatar).toBeNull();
   });
 });

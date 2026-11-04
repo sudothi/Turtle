@@ -1,11 +1,15 @@
-# LiveKit de produção. As chaves vêm do .env (LIVEKIT_KEYS="chave: segredo") e nunca ficam no repositório.
+# As chaves vêm da variável LIVEKIT_KEYS (definida no compose a partir do .env)
 port: 7880
-log_level: info
 rtc:
   tcp_port: 7881
   udp_port: 7882
   use_external_ip: true
 turn:
   enabled: true
-  udp_port: 3478
   domain: lk.ogturtle.xyz
+  udp_port: 3478
+  # TURN TLS (porta 5349) ainda desligado: falta definir o certificado
+  # (reaproveitar o do Caddy ou usar certbot). Ao resolver, adicionar:
+  # tls_port: 5349
+  # cert_file: ...
+  # key_file: ...

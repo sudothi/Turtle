@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Backup diário do Turtle: dump do Postgres + volume de uploads (fotos e banners).
-# Rode a partir de infra/ (onde está o docker-compose.prod.yml), por exemplo via cron às 04:00 BRT.
-# Mantém 14 dias. O envio ao R2 (issue #14) fica para depois: precisa de credenciais.
+# Backup diário do Turtle no VPS: dump do Postgres + volume de uploads (fotos e banners).
+# Fica em ~/turtle/backup.sh, roda pelo cron do usuário kyo (07:00 UTC = 04:00 BRT).
+# Retenção local de 14 dias.
+# TODO: enviar ao Cloudflare R2 com rclone quando houver credenciais (issue #14).
 set -euo pipefail
+cd "$(dirname "$0")"
+umask 077
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
-DEST="${BACKUP_DIR:-$HOME/backups}"
-KEEP_DAYS="${KEEP_DAYS:-14}"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-COMPOSE=(docker compose -f docker-compose.prod.yml)
+db="backups/turtle-$stamp.sql.gz"
+docker compose exec -T postgres pg_dump -U kyo turtle | gzip > "$db.tmp"
+mv "$db.tmp" "$db"
 
-mkdir -p "$DEST"
+# O volume `uploads` é montado em /data/uploads no serviço api.
+up="backups/uploads-$stamp.tar.gz"
+docker compose exec -T api tar -C /data/uploads -czf - . > "$up.tmp"
+mv "$up.tmp" "$up"
 
-"${COMPOSE[@]}" exec -T postgres pg_dump -U turtle turtle | gzip > "$DEST/db-$STAMP.sql.gz"
-
-# O volume `uploads` é montado em /data/uploads no serviço app.
-"${COMPOSE[@]}" exec -T app tar -C /data/uploads -czf - . > "$DEST/uploads-$STAMP.tar.gz"
-
-find "$DEST" -maxdepth 1 \( -name 'db-*.sql.gz' -o -name 'uploads-*.tar.gz' \) -mtime +"$KEEP_DAYS" -delete
-echo "backup ok: $DEST (db-$STAMP, uploads-$STAMP)"
+find backups \( -name 'turtle-*.sql.gz' -o -name 'uploads-*.tar.gz' \) -mtime +14 -delete

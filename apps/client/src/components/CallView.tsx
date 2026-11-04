@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { shownName, type Channel, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
-import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
+import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import type { CallParticipant, ShareStats, VideoTile, VoiceClient, VoiceSnapshot } from "../voice/client";
 import { ChannelHeader } from "./ChatView";
 import { ShareModal } from "./ShareModal";
@@ -48,6 +48,7 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, strip
         {p.muted && <Icon name="mic-off" size={16} />}
         <button className="tile-name-btn" title="Ver perfil" onClick={() => onProfile?.(p.id)} onDoubleClick={(e) => e.stopPropagation()}>
           {profile ? shownName(profile) : p.name}
+          {profile?.staff && <> <StaffTag /></>}
           {p.isLocal && " (você)"}
         </button>
       </div>

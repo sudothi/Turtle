@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Channel, User } from "@turtle/protocol";
-import { shownName } from "@turtle/protocol";
+import { canInviteAccounts, shownName } from "@turtle/protocol";
 import { fileUrl } from "../api";
-import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
+import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
@@ -93,7 +93,7 @@ export function UserPanel({
           <Avatar name={shownName(user)} src={fileUrl(user.avatar)} size={32} status="online" statusRing="var(--bg-panel)" />
           <span className="user-chip-text">
             <b>{shownName(user)}</b>
-            <span className="t-muted">{user.isAdmin ? "Admin" : "Online"}</span>
+            <span className="t-muted">{canInviteAccounts(user) ? <StaffTag /> : "Online"}</span>
           </span>
         </button>
         <IconButton label="Mudo" aria-pressed={snap.muted} className={snap.muted ? "is-off" : ""} onClick={() => void voice.toggleMute()}>

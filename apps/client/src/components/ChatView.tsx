@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { encodeMentions, mentionedIds, shownName, splitMentions, type Channel, type Member, type Message } from "@turtle/protocol";
-import { Avatar, Icon, IconButton } from "@turtle/ui";
+import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { fileUrl } from "../api";
 
@@ -162,6 +162,7 @@ export function ChatView({
                   <button type="button" className="plain-btn msg-author" onClick={() => onProfile(r.message.userId)}>
                     <b>{shownName(r.message)}</b>
                   </button>
+                  {r.message.staff && <StaffTag />}
                   <time dateTime={r.message.createdAt}>{stamp(r.message.createdAt)}</time>
                 </div>
                 <MessageText content={r.message.content} names={names} onProfile={onProfile} />

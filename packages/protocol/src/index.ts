@@ -7,6 +7,8 @@ export const messageSchema = z.object({
   username: z.string(),
   displayName: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
+  /** Admin do app (ou convidador): mostra a tag TURTLE ao lado do nome. */
+  staff: z.boolean().default(false),
   content: z.string(),
   createdAt: z.string(),
 });
@@ -122,6 +124,7 @@ export const memberSchema = z.object({
   username: z.string(),
   displayName: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
+  staff: z.boolean().default(false),
   role: serverRole,
 });
 export type Member = z.infer<typeof memberSchema>;
@@ -149,6 +152,7 @@ export const voiceStateSchema = z.object({
   username: z.string(),
   displayName: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
+  staff: z.boolean().default(false),
   channelId: z.string(),
   serverId: z.string(),
   muted: z.boolean(),

@@ -1,13 +1,13 @@
 import { useState, type ReactNode } from "react";
-import { shownName, type Dm, type Friend, type Person } from "@turtle/protocol";
-import { Avatar, Button, Icon } from "@turtle/ui";
+import { dmTitle, shownName, type Dm, type Friend, type Person, type VoiceState } from "@turtle/protocol";
+import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
 
 const byName = (a: { user: Person }, b: { user: Person }) => shownName(a.user).localeCompare(shownName(b.user), "pt-BR");
 
 /** Barra lateral do Início: botão de amigos e a lista de conversas diretas. */
 export function HomeSidebar({
-  dms, current, unread, online, friendsOpen, pending, onFriends, onDm, onProfile, footer,
+  dms, current, unread, online, friendsOpen, pending, calls, onFriends, onDm, onNewGroup, footer,
 }: {
   dms: Dm[];
   current?: string;
@@ -18,7 +18,9 @@ export function HomeSidebar({
   pending: number;
   onFriends: () => void;
   onDm: (dm: Dm) => void;
-  onProfile: (userId: string) => void;
+  onNewGroup: () => void;
+  /** Quem está em chamada (para mostrar o aviso na conversa). */
+  calls: VoiceState[];
   footer: ReactNode;
 }) {
   return (
@@ -32,14 +34,22 @@ export function HomeSidebar({
           <span className="channel-name">Amigos</span>
           {pending > 0 && <span className="dm-badge" aria-label={`${pending} pedidos de amizade`}>{pending}</span>}
         </button>
-        <div className="t-eyebrow dm-title">Conversas</div>
+        <div className="dm-title-row">
+          <span className="t-eyebrow">Conversas</span>
+          <button className="category-add" title="Novo grupo" aria-label="Novo grupo" onClick={onNewGroup}><Icon name="plus" size={16} /></button>
+        </div>
         {dms.length === 0 && <p className="t-muted dm-empty">Nenhuma conversa ainda. Abra o perfil de alguém e toque em "Mandar mensagem".</p>}
         {dms.map((d) => {
           const on = !friendsOpen && d.channelId === current;
           return (
-            <button key={d.channelId} className={`channel dm ${on ? "on" : ""} ${unread.has(d.channelId) ? "unread" : ""}`} aria-current={on ? "page" : undefined} onClick={() => onDm(d)} onAuxClick={() => onProfile(d.user.id)}>
-              <Avatar name={shownName(d.user)} src={fileUrl(d.user.avatar)} size={28} status={online.includes(d.user.id) ? "online" : undefined} statusRing="var(--bg-sidebar)" />
-              <span className="channel-name">{shownName(d.user)}</span>
+            <button key={d.channelId} className={`channel dm ${on ? "on" : ""} ${unread.has(d.channelId) ? "unread" : ""}`} aria-current={on ? "page" : undefined} onClick={() => onDm(d)}>
+              {d.group ? (
+                <span className="dm-group-icon" aria-hidden="true"><Icon name="users" size={16} /></span>
+              ) : (
+                <Avatar name={dmTitle(d)} src={fileUrl(d.users[0]?.avatar)} size={28} status={d.users[0] && online.includes(d.users[0].id) ? "online" : undefined} statusRing="var(--bg-sidebar)" />
+              )}
+              <span className="channel-name">{dmTitle(d)}</span>
+              {calls.some((v) => v.channelId === d.channelId) && <span className="live-badge small" title="Chamada em andamento">CHAMADA</span>}
               {unread.has(d.channelId) && <span className="dm-dot" aria-label="não lida" />}
             </button>
           );
@@ -153,5 +163,75 @@ export function FriendsPanel({
         </div>
       )}
     </section>
+  );
+}
+
+/** Novo grupo: escolhe 2 ou mais amigos e, se quiser, dá um nome. */
+export function NewGroupModal({ friends, onClose, onCreated }: { friends: Friend[]; onClose: () => void; onCreated: (dm: Dm) => void }) {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const list = friends.filter((f) => f.status === "friend").sort(byName);
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      onCreated(await api.createGroup([...picked], name.trim()));
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Novo grupo" subtitle="Escolha de 2 a 9 amigos." onClose={onClose}>
+      <form className="new-group" onSubmit={submit}>
+        <TextField label="Nome do grupo (opcional)" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="new-group-list" role="group" aria-label="Amigos">
+          {list.length === 0 && <p className="t-muted">Você ainda não tem amigos para adicionar.</p>}
+          {list.map((f) => (
+            <label key={f.user.id} className="new-group-row">
+              <input type="checkbox" checked={picked.has(f.user.id)} onChange={() => toggle(f.user.id)} />
+              <Avatar name={shownName(f.user)} src={fileUrl(f.user.avatar)} size={28} />
+              <span>{shownName(f.user)}</span>
+            </label>
+          ))}
+        </div>
+        {error && <p className="friends-error" role="alert">{error}</p>}
+        <Button type="submit" disabled={busy || picked.size < 2 || picked.size > 9}>Criar grupo</Button>
+      </form>
+    </Modal>
+  );
+}
+
+/** Adiciona um amigo a um grupo que já existe. */
+export function AddToGroupModal({ dm, friends, onClose, onChanged }: { dm: Dm; friends: Friend[]; onClose: () => void; onChanged: () => void }) {
+  const inside = new Set(dm.users.map((u) => u.id));
+  const list = friends.filter((f) => f.status === "friend" && !inside.has(f.user.id)).sort(byName);
+  const [error, setError] = useState<string>();
+  const add = async (id: string) => {
+    try {
+      await api.addToGroup(dm.channelId, id);
+      onChanged();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <Modal title="Adicionar ao grupo" onClose={onClose}>
+      <div className="new-group-list">
+        {list.length === 0 && <p className="t-muted">Todos os seus amigos já estão no grupo.</p>}
+        {list.map((f) => (
+          <button key={f.user.id} className="new-group-row plain-btn" onClick={() => void add(f.user.id)}>
+            <Avatar name={shownName(f.user)} src={fileUrl(f.user.avatar)} size={28} />
+            <span>{shownName(f.user)}</span>
+          </button>
+        ))}
+      </div>
+      {error && <p className="friends-error" role="alert">{error}</p>}
+    </Modal>
   );
 }

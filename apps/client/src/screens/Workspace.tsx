@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type User, type VoiceState } from "@turtle/protocol";
-import { Button } from "@turtle/ui";
+import { dmTitle, serverEvent, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type User, type VoiceState } from "@turtle/protocol";
+import { Button, Icon, IconButton } from "@turtle/ui";
 import { api, getToken } from "../api";
 import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
@@ -12,7 +12,7 @@ import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { ProfilePopup } from "../components/ProfilePopup";
-import { FriendsPanel, HomeSidebar } from "../components/Home";
+import { AddToGroupModal, FriendsPanel, HomeSidebar, NewGroupModal } from "../components/Home";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
@@ -56,6 +56,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [friends, setFriends] = useState<Friend[]>([]);
   const [dms, setDms] = useState<Dm[]>([]);
   const [dmId, setDmId] = useState<string>();
+  const [dmCall, setDmCall] = useState(false);
+  const [newGroup, setNewGroup] = useState(false);
+  const [addToGroup, setAddToGroup] = useState(false);
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [membersOpen, setMembersOpen] = useState(() => {
     try {
@@ -198,6 +201,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
 
   const openDm = useCallback((dm: Dm) => {
     setHome(true);
+    setDmCall(false);
     setDmId(dm.channelId);
     setUnread((u) => { if (!u.has(dm.channelId)) return u; const n = new Set(u); n.delete(dm.channelId); return n; });
   }, []);
@@ -227,15 +231,16 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const textChannel = channels.find((c) => c.id === current);
   const showMembers = !home && membersOpen && view === "text" && !!serverId;
   const dm = dms.find((d) => d.channelId === dmId);
-  const dmChannel: Channel | undefined = dm && { id: dm.channelId, serverId: "", name: shownName(dm.user), kind: "text" };
+  const asChannel = (d: Dm): Channel => ({ id: d.channelId, serverId: "", name: dmTitle(d), kind: "text" });
+  const dmChannel: Channel | undefined = dm && asChannel(dm);
   const dmMembers: Member[] = dm
-    ? [dm.user, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const, staff: false }))
+    ? [...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const, staff: false }))
     : [];
   const pendingIn = friends.filter((f) => f.status === "incoming").length;
   const server = servers.find((s) => s.id === serverId);
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
-  const allKnown = Object.values(known);
+  const allKnown = [...Object.values(known), ...dms.map(asChannel)];
   serverMessageIds.current = new Set(Object.keys(known));
   const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />;
 
@@ -261,7 +266,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           pending={pendingIn}
           onFriends={() => setDmId(undefined)}
           onDm={openDm}
-          onProfile={setViewProfile}
+          onNewGroup={() => setNewGroup(true)}
+          calls={voiceStates}
           footer={footer}
         />
       ) : server ? (
@@ -291,8 +297,40 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       )}
       <main className="stage">
         {home ? (
-          dmChannel ? (
-            <ChatView dm channel={dmChannel} messages={messages} members={dmMembers} meId={user.id} onSend={send} membersOpen={false} onToggleMembers={() => {}} canInvite={false} onInvite={() => {}} onProfile={setViewProfile} />
+          dmChannel && dm && dmCall ? (
+            <div className="dm-call">
+              <button className="plain-btn dm-call-back" onClick={() => setDmCall(false)}>← Voltar ao chat</button>
+              <CallView channel={dmChannel} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} />
+            </div>
+          ) : dmChannel && dm ? (
+            <ChatView
+              dm
+              channel={dmChannel}
+              messages={messages}
+              members={dmMembers}
+              meId={user.id}
+              onSend={send}
+              membersOpen={false}
+              onToggleMembers={() => {}}
+              canInvite={false}
+              onInvite={() => {}}
+              onProfile={setViewProfile}
+              headerExtra={
+                <>
+                  <IconButton label={snap.channelId === dm.channelId ? "Voltar à chamada" : voiceStates.some((v) => v.channelId === dm.channelId) ? "Entrar na chamada" : "Ligar"} onClick={() => { setDmCall(true); if (snap.channelId !== dm.channelId) void voice.join(dm.channelId); }}>
+                    <Icon name="speaker" />
+                  </IconButton>
+                  {dm.group ? (
+                    <>
+                      <IconButton label="Adicionar ao grupo" onClick={() => setAddToGroup(true)}><Icon name="user-plus" /></IconButton>
+                      <IconButton label="Sair do grupo" onClick={() => { if (window.confirm("Sair deste grupo?")) { const id = dm.channelId; if (snap.channelId === id) void voice.leave(); setDmId(undefined); void api.leaveGroup(id).then(() => loadHome()).catch(() => {}); } }}><Icon name="logout" /></IconButton>
+                    </>
+                  ) : (
+                    <IconButton label="Perfil e bloqueio" onClick={() => dm.users[0] && setViewProfile(dm.users[0].id)}><Icon name="users" /></IconButton>
+                  )}
+                </>
+              }
+            />
           ) : (
             <FriendsPanel friends={friends} online={online} onMessage={(id) => void messageUser(id)} onProfile={setViewProfile} onChanged={() => void loadHome().catch(() => {})} />
           )
@@ -327,6 +365,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
+      {newGroup && <NewGroupModal friends={friends} onClose={() => setNewGroup(false)} onCreated={(d) => { setDms((l) => [d, ...l.filter((x) => x.channelId !== d.channelId)]); openDm(d); }} />}
+      {addToGroup && dm && <AddToGroupModal dm={dm} friends={friends} onClose={() => setAddToGroup(false)} onChanged={() => void loadHome().catch(() => {})} />}
       {viewProfile && <ProfilePopup userId={viewProfile} role={members.find((m) => m.userId === viewProfile)?.role} meId={user.id} onMessage={(id) => void messageUser(id)} onChanged={() => void loadHome().catch(() => {})} onClose={() => setViewProfile(undefined)} />}
       {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}

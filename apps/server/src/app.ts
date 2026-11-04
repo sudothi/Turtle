@@ -7,11 +7,14 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, channels, count, desc, dmMembers, eq, friendships, inArray, invites, lt, messages, or, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, lt, messages, or, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   AVATAR_MAX_BYTES,
   type Dm,
+  GROUP_MAX_MEMBERS,
+  addGroupMemberBody,
+  createGroupBody,
   type Friend,
   type Person,
   canInviteAccounts,
@@ -104,6 +107,16 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   /** Servidores de que cada conexão faz parte: define o que ela pode receber. */
   const memberships = new Map<Socket, Set<string>>();
 
+  /** Conversas diretas de cada conexão: define quem vê a chamada de uma DM. */
+  const dmSets = new Map<Socket, Set<string>>();
+  const loadDmSet = async (userId: string) =>
+    new Set((await db.select({ id: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, userId))).map((r) => r.id));
+  const refreshDmSets = async (userIds: Iterable<string>) => {
+    for (const id of new Set(userIds)) {
+      const set = await loadDmSet(id);
+      for (const [s, u] of online) if (u.id === id) dmSets.set(s, set);
+    }
+  };
   const loadMemberships = async (userId: string) =>
     new Set((await db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, userId))).map((r) => r.id));
   const refreshMemberships = async (userId: string) => {
@@ -127,7 +140,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   const voiceStatesFor = (socket: Socket): ServerEvent => {
     const mine = memberships.get(socket);
     const seen = new Set<string>();
-    const states = [...voice.values()].filter((v) => mine?.has(v.serverId) && !seen.has(v.userId) && seen.add(v.userId));
+    const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
   const broadcastVoice = () => {
@@ -182,6 +195,16 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channelId))).map((r) => r.id);
   const isDmMember = async (channelId: string, userId: string) =>
     (await db.select({ id: dmMembers.userId }).from(dmMembers).where(and(eq(dmMembers.channelId, channelId), eq(dmMembers.userId, userId))).limit(1)).length > 0;
+  /** Bloqueio em qualquer direção entre duas contas. */
+  const isBlocked = async (a: string, b: string) =>
+    (await db.select({ x: blocks.blocker }).from(blocks).where(or(and(eq(blocks.blocker, a), eq(blocks.blocked, b)), and(eq(blocks.blocker, b), eq(blocks.blocked, a)))).limit(1)).length > 0;
+  /** Em conversa 1:1 com bloqueio entre as duas pessoas, ninguém envia nem liga. */
+  const dmBlocked = async (channelId: string) => {
+    const ch = (await db.select({ g: channels.isGroup }).from(channels).where(eq(channels.id, channelId)).limit(1))[0];
+    if (!ch || ch.g) return false;
+    const [a, b] = await dmPeers(channelId);
+    return !!a && !!b && (await isBlocked(a, b));
+  };
   const sharesServer = async (a: string, b: string) => {
     const mine = db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, a));
     return (await db.select({ id: serverMembers.serverId }).from(serverMembers).where(and(eq(serverMembers.userId, b), inArray(serverMembers.serverId, mine))).limit(1)).length > 0;
@@ -534,6 +557,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const other = req.params.userId;
       if (other === id) return reply.code(400).send({ error: "você não pode se adicionar" });
       if (!(await loadUser(other))) return reply.code(404).send({ error: "pessoa não encontrada" });
+      if (await isBlocked(id, other)) return reply.code(403).send({ error: "não é possível adicionar essa pessoa" });
       const current = await friendshipOf(id, other);
       if (!current) {
         await db.insert(friendships).values({ ...pairOf(id, other), status: "pending", requestedBy: id }).onConflictDoNothing();
@@ -560,34 +584,69 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return { ok: true };
     });
 
-    // ---- Mensagens diretas ----
+    // ---- Bloqueios ----
+    authed.get("/blocks", async (req) => {
+      const rows = await db
+        .select({ id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey })
+        .from(blocks)
+        .innerJoin(users, eq(users.id, blocks.blocked))
+        .where(eq(blocks.blocker, me(req).id));
+      return rows.map(personOf);
+    });
+    /** Bloqueia: desfaz a amizade e impede pedidos, DMs 1:1 e chamadas entre as duas contas. */
+    authed.post<{ Params: { userId: string } }>("/blocks/:userId", async (req, reply) => {
+      const id = me(req).id;
+      const other = req.params.userId;
+      if (other === id) return reply.code(400).send({ error: "você não pode se bloquear" });
+      if (!(await loadUser(other))) return reply.code(404).send({ error: "pessoa não encontrada" });
+      await db.insert(blocks).values({ blocker: id, blocked: other }).onConflictDoNothing();
+      const p = pairOf(id, other);
+      await db.delete(friendships).where(and(eq(friendships.userA, p.userA), eq(friendships.userB, p.userB)));
+      // Derruba a chamada 1:1 que estiver rolando entre os dois.
+      for (const [sock, v] of voice) {
+        if ((v.userId === id || v.userId === other) && !v.serverId && (await dmBlocked(v.channelId))) {
+          voice.delete(sock);
+          if (room) await room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {});
+        }
+      }
+      broadcastVoice();
+      toUsers([id, other], { t: "friends" });
+      return { ok: true };
+    });
+    authed.delete<{ Params: { userId: string } }>("/blocks/:userId", async (req) => {
+      await db.delete(blocks).where(and(eq(blocks.blocker, me(req).id), eq(blocks.blocked, req.params.userId)));
+      toUsers([me(req).id, req.params.userId], { t: "friends" });
+      return { ok: true };
+    });
+
+    // ---- Mensagens diretas (1:1 e em grupo) ----
+    const loadDm = async (channelId: string, meId: string): Promise<Dm | undefined> => {
+      const ch = (await db.select({ id: channels.id, name: channels.name, g: channels.isGroup }).from(channels).where(and(eq(channels.id, channelId), eq(channels.kind, "dm"))).limit(1))[0];
+      if (!ch) return undefined;
+      const people = await db
+        .select({ id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey })
+        .from(dmMembers)
+        .innerJoin(users, eq(users.id, dmMembers.userId))
+        .where(eq(dmMembers.channelId, channelId));
+      const last = (await db.select({ at: sql<Date | string>`max(${messages.createdAt})` }).from(messages).where(eq(messages.channelId, channelId)))[0]?.at;
+      return {
+        channelId, users: people.filter((p) => p.id !== meId).map(personOf), group: ch.g, name: ch.g && ch.name ? ch.name : null,
+        lastMessageAt: last ? new Date(last).toISOString() : null,
+      };
+    };
     authed.get("/dms", async (req) => {
       const id = me(req).id;
       const mine = await db.select({ channelId: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, id));
-      if (!mine.length) return [] as Dm[];
-      const ids = mine.map((m) => m.channelId);
-      const peers = await db
-        .select({ channelId: dmMembers.channelId, id: users.id, username: users.username, displayName: users.displayName, avatarKey: users.avatarKey })
-        .from(dmMembers)
-        .innerJoin(users, eq(users.id, dmMembers.userId))
-        .where(and(inArray(dmMembers.channelId, ids), sql`${dmMembers.userId} <> ${id}`));
-      const last = await db
-        .select({ channelId: messages.channelId, at: sql<Date | string>`max(${messages.createdAt})` })
-        .from(messages)
-        .where(inArray(messages.channelId, ids))
-        .groupBy(messages.channelId);
-      const list = peers.map((p): Dm => {
-        const at = last.find((l) => l.channelId === p.channelId)?.at;
-        return { channelId: p.channelId, user: personOf(p), lastMessageAt: at ? new Date(at).toISOString() : null };
-      });
+      const list = (await Promise.all(mine.map((m) => loadDm(m.channelId, id)))).filter((d): d is Dm => !!d);
       return list.sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""));
     });
-    /** Abre (ou devolve) a conversa com alguém: precisa ser amigo ou dividir um servidor. */
+    /** Abre (ou devolve) a conversa 1:1: precisa ser amigo ou dividir um servidor, e sem bloqueio. */
     authed.post<{ Params: { userId: string } }>("/dms/:userId", async (req, reply) => {
       const id = me(req).id;
       const other = req.params.userId;
       const person = other === id ? undefined : await loadUser(other);
       if (!person) return reply.code(404).send({ error: "pessoa não encontrada" });
+      if (await isBlocked(id, other)) return reply.code(403).send({ error: "não é possível conversar com essa pessoa" });
       const f = await friendshipOf(id, other);
       if (f?.status !== "accepted" && !(await sharesServer(id, other)))
         return reply.code(403).send({ error: "só amigos ou quem está no mesmo servidor" });
@@ -595,23 +654,90 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         const p = pairOf(id, other);
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${p.userA + p.userB}))`);
         const mineCh = tx.select({ id: dmMembers.channelId }).from(dmMembers).where(eq(dmMembers.userId, id));
-        const found = (await tx.select({ id: dmMembers.channelId }).from(dmMembers).where(and(eq(dmMembers.userId, other), inArray(dmMembers.channelId, mineCh))).limit(1))[0];
+        const found = (
+          await tx
+            .select({ id: dmMembers.channelId })
+            .from(dmMembers)
+            .innerJoin(channels, eq(channels.id, dmMembers.channelId))
+            .where(and(eq(dmMembers.userId, other), inArray(dmMembers.channelId, mineCh), eq(channels.isGroup, false)))
+            .limit(1)
+        )[0];
         if (found) return found.id;
         const cid = newId();
         await tx.insert(channels).values({ id: cid, serverId: null, name: "", kind: "dm" });
         await tx.insert(dmMembers).values([{ channelId: cid, userId: id }, { channelId: cid, userId: other }]);
         return cid;
       });
+      await refreshDmSets([id, other]);
       toUsers([id, other], { t: "friends" });
-      return { channelId, user: { id: person.id, username: person.username, displayName: person.displayName, avatar: person.avatar }, lastMessageAt: null } satisfies Dm;
+      return (await loadDm(channelId, id))!;
+    });
+    /** Cria um grupo: só com amigos seus (sem bloqueio), de 3 a GROUP_MAX_MEMBERS pessoas. */
+    authed.post("/dms", async (req, reply) => {
+      const body = createGroupBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "escolha de 2 a 9 amigos" });
+      const id = me(req).id;
+      const others = [...new Set(body.data.userIds)].filter((u) => u !== id);
+      if (others.length < 2) return reply.code(400).send({ error: "escolha pelo menos 2 amigos" });
+      for (const o of others) {
+        if ((await friendshipOf(id, o))?.status !== "accepted" || (await isBlocked(id, o)))
+          return reply.code(403).send({ error: "grupos só com amigos" });
+      }
+      const cid = newId();
+      await db.transaction(async (tx) => {
+        await tx.insert(channels).values({ id: cid, serverId: null, name: body.data.name ?? "", kind: "dm", isGroup: true });
+        await tx.insert(dmMembers).values([id, ...others].map((userId) => ({ channelId: cid, userId })));
+      });
+      await refreshDmSets([id, ...others]);
+      toUsers([id, ...others], { t: "friends" });
+      return (await loadDm(cid, id))!;
+    });
+    authed.post<{ Params: { channelId: string } }>("/dms/:channelId/members", async (req, reply) => {
+      const body = addGroupMemberBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const id = me(req).id;
+      const cid = req.params.channelId;
+      const ch = (await db.select({ g: channels.isGroup }).from(channels).where(and(eq(channels.id, cid), eq(channels.kind, "dm"))).limit(1))[0];
+      if (!ch?.g || !(await isDmMember(cid, id))) return reply.code(404).send({ error: "grupo não existe" });
+      const target = body.data.userId;
+      if ((await friendshipOf(id, target))?.status !== "accepted" || (await isBlocked(id, target))) return reply.code(403).send({ error: "só amigos seus" });
+      const members = await dmPeers(cid);
+      if (members.includes(target)) return reply.code(409).send({ error: "já está no grupo" });
+      if (members.length >= GROUP_MAX_MEMBERS) return reply.code(409).send({ error: `grupo cheio (${GROUP_MAX_MEMBERS} pessoas)` });
+      await db.insert(dmMembers).values({ channelId: cid, userId: target });
+      await refreshDmSets([target]);
+      toUsers([...members, target], { t: "friends" });
+      return (await loadDm(cid, id))!;
+    });
+    /** Sair do grupo (o último a sair apaga a conversa). */
+    authed.delete<{ Params: { channelId: string } }>("/dms/:channelId/members/me", async (req, reply) => {
+      const id = me(req).id;
+      const cid = req.params.channelId;
+      const ch = (await db.select({ g: channels.isGroup }).from(channels).where(and(eq(channels.id, cid), eq(channels.kind, "dm"))).limit(1))[0];
+      if (!ch?.g || !(await isDmMember(cid, id))) return reply.code(404).send({ error: "grupo não existe" });
+      const members = await dmPeers(cid);
+      await db.delete(dmMembers).where(and(eq(dmMembers.channelId, cid), eq(dmMembers.userId, id)));
+      if (members.length <= 1) await db.delete(channels).where(eq(channels.id, cid));
+      for (const [sock, v] of voice) if (v.userId === id && v.channelId === cid) {
+        voice.delete(sock);
+        if (room) await room.removeParticipant(voiceRoomName(cid), id).catch(() => {});
+      }
+      broadcastVoice();
+      await refreshDmSets([id]);
+      toUsers(members, { t: "friends" });
+      return { ok: true };
     });
 
     // ---- Voz ----
     authed.post<{ Params: { id: string } }>("/voice/:id/token", async (req, reply) => {
       if (!livekit) return reply.code(503).send({ error: "voz não configurada no servidor" });
       const channel = await findChannel(req.params.id);
-      if (!channel || channel.kind !== "voice" || !channel.serverId || !(await roleIn(channel.serverId, me(req).id)))
-        return reply.code(404).send({ error: "canal de voz não existe" });
+      const okChannel = !channel
+        ? false
+        : channel.kind === "dm"
+          ? (await isDmMember(channel.id, me(req).id)) && !(await dmBlocked(channel.id))
+          : channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, me(req).id));
+      if (!channel || !okChannel) return reply.code(404).send({ error: "canal de voz não existe" });
       const user = me(req);
       const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "6h" });
       at.addGrant({
@@ -676,11 +802,13 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (!connected) return socket.close(4401, "unauthorized");
       online.set(socket, connected);
       memberships.set(socket, await loadMemberships(connected.id));
+      dmSets.set(socket, await loadDmSet(connected.id));
       presence();
       socket.send(JSON.stringify(voiceStatesFor(socket)));
       socket.on("close", () => {
         online.delete(socket);
         memberships.delete(socket);
+        dmSets.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
       });
@@ -700,12 +828,17 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             return;
           }
           const channel = await findChannel(evt.channelId);
-          if (!channel || channel.kind !== "voice" || !channel.serverId || !memberships.get(socket)?.has(channel.serverId))
+          const okVoice = !channel
+            ? false
+            : channel.kind === "dm"
+              ? (await isDmMember(channel.id, user.id)) && !(await dmBlocked(channel.id))
+              : channel.kind === "voice" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
+          if (!channel || !okVoice)
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
           voice.set(socket, {
-            userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId,
+            userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId ?? "",
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
           broadcastVoice();
@@ -720,6 +853,8 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             : channel.kind === "text" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
         if (!channel || !allowed)
           return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
+        if (isDm && (await dmBlocked(channel.id)))
+          return socket.send(JSON.stringify({ t: "error", error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(),

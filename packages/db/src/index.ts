@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS dm_members (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (channel_id, user_id));
 CREATE INDEX IF NOT EXISTS dm_members_user_idx ON dm_members (user_id);
+-- Conversa em grupo (3+ pessoas) e bloqueios entre contas.
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_group boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS blocks (
+  blocker text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  blocked text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (blocker, blocked));
+CREATE INDEX IF NOT EXISTS blocks_blocked_idx ON blocks (blocked);
 CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_id, name);
 `;
 

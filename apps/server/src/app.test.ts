@@ -579,9 +579,64 @@ describe("amigos e mensagens diretas", () => {
     expect((await get(`/channels/${d1.channelId}/messages`, b)).status).toBe(404);
     expect((await get(`/channels/${d1.channelId}/messages`, c)).body.map((m: any) => m.content)).toEqual(["oi caio"]);
     const list = (await get("/dms", c)).body;
-    expect(list).toMatchObject([{ channelId: d1.channelId, user: { id: aId } }]);
+    expect(list).toMatchObject([{ channelId: d1.channelId, group: false, users: [{ id: aId }] }]);
     expect(list[0].lastMessageAt).toBeTruthy();
-    expect((await post(`/voice/${d1.channelId}/token`, {}, a)).status).toBe(404);
+    // Chamada na DM: os dois pegam token da sala da conversa; quem não é da DM, não.
+    const tk = await post(`/voice/${d1.channelId}/token`, {}, a);
+    expect(tk.status).toBe(200);
+    await expect(new TokenVerifier(LK.apiKey, LK.apiSecret).verify(tk.body.token)).resolves.toMatchObject({ video: { room: voiceRoomName(d1.channelId) } });
+    expect((await post(`/voice/${d1.channelId}/token`, {}, c)).status).toBe(200);
+    expect((await post(`/voice/${d1.channelId}/token`, {}, b)).status).toBe(404);
+    // Estado da chamada chega só a quem está na DM.
+    A.ws.send(JSON.stringify({ t: "voice", channelId: d1.channelId, muted: false, deafened: false, camera: false, screen: false }));
+    await new Promise((r) => setTimeout(r, 300));
+    const last = (x: typeof A) => [...x.events].reverse().find((e) => e.t === "voiceStates");
+    expect(last(C).states.map((v: any) => v.channelId)).toEqual([d1.channelId]);
+    expect(last(B).states).toEqual([]);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
+  it("bloqueio: desfaz amizade, impede pedido, DM nova, mensagem e chamada", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body;
+    expect((await post(`/blocks/${aId}`, {}, c)).body.ok).toBe(true);
+    expect((await get("/blocks", c)).body.map((p: any) => p.id)).toEqual([aId]);
+    expect((await get("/friends", a)).body.some((f: any) => f.user.id === cId)).toBe(false);
+    expect((await post(`/friends/${cId}`, {}, a)).status).toBe(403);
+    expect((await post(`/friends/${aId}`, {}, c)).status).toBe(403);
+    expect((await post(`/dms/${aId}`, {}, c)).status).toBe(403);
+    expect((await post(`/voice/${dm.channelId}/token`, {}, a)).status).toBe(404);
+    const A = await wsOpen(a);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm.channelId, content: "oi?" }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(A.events.some((e) => e.t === "error")).toBe(true);
+    A.ws.close();
+    expect((await del(`/blocks/${aId}`, c)).status).toBe(200);
+    expect((await get("/blocks", c)).body).toEqual([]);
+    // volta a ser amigo para os próximos testes
+    await post(`/friends/${cId}`, {}, a);
+    await post(`/friends/${aId}`, {}, c);
+  });
+
+  it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
+    await post(`/friends/${bId}`, {}, a);
+    await post(`/friends/${aId}`, {}, b);
+    expect((await post("/dms", { userIds: [bId] }, a)).status).toBe(400);
+    expect((await post("/dms", { userIds: [bId, "ninguem"] }, a)).status).toBe(403);
+    const g = await post("/dms", { userIds: [bId, cId], name: "Trio" }, a);
+    expect(g.status).toBe(200);
+    expect(g.body).toMatchObject({ group: true, name: "Trio" });
+    expect(g.body.users.map((u: any) => u.id).sort()).toEqual([bId, cId].sort());
+    const [A, B, C] = await Promise.all([wsOpen(a), wsOpen(b), wsOpen(c)]);
+    A.ws.send(JSON.stringify({ t: "send", channelId: g.body.channelId, content: "oi trio" }));
+    await new Promise((r) => setTimeout(r, 300));
+    for (const x of [A, B, C]) expect(x.events.some((e) => e.t === "message" && e.message.content === "oi trio")).toBe(true);
+    expect((await post(`/voice/${g.body.channelId}/token`, {}, b)).status).toBe(200);
+    expect((await post(`/dms/${g.body.channelId}/members`, { userId: bId }, a)).status).toBe(409);
+    const admin = (await post("/auth/login", { username: "thiago", password: "12345678" })).body;
+    expect((await post(`/dms/${g.body.channelId}/members`, { userId: admin.user.id }, a)).status).toBe(403);
+    expect((await del(`/dms/${g.body.channelId}/members/me`, b)).status).toBe(200);
+    expect((await get(`/channels/${g.body.channelId}/messages`, b)).status).toBe(404);
+    expect((await get("/dms", b)).body.some((d: any) => d.channelId === g.body.channelId)).toBe(false);
     for (const x of [A, B, C]) x.ws.close();
   });
 });

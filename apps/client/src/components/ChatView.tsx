@@ -49,9 +49,12 @@ export function ChatView({
   onInvite,
   onProfile,
   dm,
+  headerExtra,
 }: {
   /** Conversa direta: `channel.name` é o nome da pessoa; sem convite nem lista de membros. */
   dm?: boolean;
+  /** Botões extras no cabeçalho (ligar, bloquear, sair do grupo). */
+  headerExtra?: React.ReactNode;
   channel?: Channel;
   messages: Message[];
   members: Member[];
@@ -130,6 +133,7 @@ export function ChatView({
   return (
     <section className="chat">
       <ChannelHeader icon={dm ? "users" : "hash"} name={channel.name}>
+        {headerExtra}
         {!dm && canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />

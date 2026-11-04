@@ -296,7 +296,33 @@
 .msg:hover .msg-gutter { visibility: visible; }
 .messages-end { height: 8px; flex: none; }
 
-.composer { flex: none; padding: 0 16px 22px; }
+.composer { position: relative; flex: none; padding: 0 16px 22px; }
+.plain-btn.mention { display: inline; padding: 0 3px; border-radius: 3px; background: var(--paper); color: var(--ink-0); font-weight: 600; cursor: pointer; }
+.plain-btn.mention:hover { text-decoration: underline; }
+.msg.mentioned { background: rgba(255, 255, 255, 0.06); box-shadow: inset 3px 0 0 var(--paper); }
+.mention-menu {
+  --lino-bg: var(--ink-0);
+  --lino-border: 2px solid var(--paper);
+  --lino-radius: 6px;
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(100% - 14px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  animation: t-pop 120ms var(--ease);
+}
+.mention-option { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: none; border-radius: 3px; background: transparent; color: var(--paper-dim); text-align: left; font-size: var(--fs-sm); }
+.mention-option.active, .mention-option:hover { background: var(--paper); color: var(--ink-0); }
+.mention-option.active .t-muted, .mention-option:hover .t-muted { color: var(--ink-3); }
+.inviters { margin-top: 20px; }
+.inviter-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 4px; cursor: pointer; }
+.inviter-row:hover { background: var(--bg-hover); }
+.inviter-name { flex: 1; min-width: 0; color: var(--paper-dim); font-weight: 600; }
+.inviter-row input { width: 18px; height: 18px; accent-color: var(--paper); }
 .composer-box { --lino-bg: var(--ink-4); --lino-radius: 8px; display: flex; align-items: center; min-height: 46px; padding: 0 6px 0 16px; }
 .composer-box input { flex: 1; min-width: 0; height: 44px; border: none; background: transparent; outline: none; font-size: var(--fs-md); }
 .composer-box input::placeholder { color: var(--text-faint); }

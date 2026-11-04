@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { ChannelKind } from "@turtle/protocol";
-import { Button, Icon, Modal, TextField } from "@turtle/ui";
-import { api } from "../api";
+import { shownName, type Account, type ChannelKind } from "@turtle/protocol";
+import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
+import { api, fileUrl } from "../api";
 
 export function CreateChannelModal({ serverId, initialKind, onClose }: { serverId: string; initialKind: ChannelKind; onClose: () => void }) {
   const [kind, setKind] = useState<ChannelKind>(initialKind);
@@ -123,7 +123,7 @@ export function AppInvitePanel() {
   };
   return (
     <div className="t-field app-invite">
-      <span className="t-field-label">Convidar para o Turtle (só admin)</span>
+      <span className="t-field-label">Convidar para o Turtle</span>
       {code ? (
         <div className="invite-box lino">
           <code>{link}</code>
@@ -139,6 +139,44 @@ export function AppInvitePanel() {
       )}
       <span className="t-field-hint">Link de uso único para uma pessoa criar a conta. Depois ela entra nos servidores com convites de servidor.</span>
       {code && <div className="profile-actions"><Button size="sm" variant="ghost" onClick={generate}>Gerar outro</Button></div>}
+      {error && <div className="err" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+/** Só para o admin: quem tem o cargo Convidador (pode gerar convites de conta). */
+export function InvitersPanel({ me }: { me: string }) {
+  const [people, setPeople] = useState<Account[]>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    api.accounts().then(setPeople, (e: Error) => setError(e.message));
+  }, []);
+  const toggle = (p: Account, canInvite: boolean) => {
+    setError(undefined);
+    setPeople((list) => list?.map((x) => (x.id === p.id ? { ...x, canInvite } : x)));
+    api.setInviter(p.id, canInvite).catch((e: Error) => {
+      setError(e.message);
+      setPeople((list) => list?.map((x) => (x.id === p.id ? { ...x, canInvite: !canInvite } : x)));
+    });
+  };
+  return (
+    <div className="t-field inviters">
+      <span className="t-field-label">Cargo Convidador</span>
+      <span className="t-field-hint">Quem estiver marcado também pode gerar convites de conta. O admin sempre pode.</span>
+      {people?.map((p) => (
+        <label key={p.id} className="inviter-row">
+          <Avatar name={shownName(p)} src={fileUrl(p.avatar)} size={28} />
+          <span className="inviter-name">
+            {shownName(p)}
+            {p.displayName && <span className="t-muted"> @{p.username}</span>}
+          </span>
+          {p.isAdmin || p.id === me ? (
+            <span className="role-badge t-muted">Admin</span>
+          ) : (
+            <input type="checkbox" aria-label={`Convidador: ${shownName(p)}`} checked={p.canInvite} onChange={(e) => toggle(p, e.target.checked)} />
+          )}
+        </label>
+      ))}
       {error && <div className="err" role="alert">{error}</div>}
     </div>
   );

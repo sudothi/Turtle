@@ -1,4 +1,4 @@
-import type { Channel, ChannelKind, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
+import type { Account, Channel, ChannelKind, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
 export const getToken = () => localStorage.getItem(KEY);
@@ -51,6 +51,8 @@ export const api = {
   members: (serverId: string) => req<Member[]>("GET", `/servers/${serverId}/members`),
   setRole: (serverId: string, userId: string, role: "admin" | "member") => req<{ ok: true }>("PATCH", `/servers/${serverId}/members/${userId}`, { role }),
   removeMember: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/members/${userId}`),
+  accounts: () => req<Account[]>("GET", "/admin/users"),
+  setInviter: (userId: string, canInvite: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { canInvite }),
   createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),

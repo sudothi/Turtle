@@ -34,6 +34,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_key text;
+-- Cargo que pode gerar convites de conta além do admin.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS can_invite boolean NOT NULL DEFAULT false;
 
 -- Servidores (marco 3.5). Tudo idempotente: roda a cada inicialização.
 CREATE TABLE IF NOT EXISTS servers (

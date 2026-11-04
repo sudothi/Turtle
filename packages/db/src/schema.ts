@@ -5,6 +5,8 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   isAdmin: boolean("is_admin").notNull().default(false),
+  /** Cargo "Convidador": pode gerar convites de conta sem ser admin do app. */
+  canInvite: boolean("can_invite").notNull().default(false),
   displayName: text("display_name"),
   bio: text("bio"),
   avatarKey: text("avatar_key"),

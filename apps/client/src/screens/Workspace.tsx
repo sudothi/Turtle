@@ -470,7 +470,11 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     });
   };
 
-  const logout = () => { void voice.leave(); onLogout(); };
+  const leaveServer = (s: Server) => {
+    if (!window.confirm(`Sair de ${s.name}?`)) return;
+    if (snap.channelId && allKnown.find((c) => c.id === snap.channelId)?.serverId === s.id) void voice.leave();
+    api.removeMember(s.id, user.id).then(() => loadServers(), (e: Error) => window.alert(e.message));
+  };
   const speaking = new Set(snap.channelId ? snap.participants.filter((p) => p.speaking && !p.muted).map((p) => p.id) : []);
   const textChannel = channels.find((c) => c.id === current);
   const showMembers = !home && (mobile ? drawer && pane === "content" : membersOpen) && view === "text" && !!serverId;
@@ -594,7 +598,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onCreate={setCreating}
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
-          onLogout={logout}
+          onLeave={server.role === "owner" ? undefined : () => leaveServer(server)}
           onProfile={setViewProfile}
           footer={footer}
           unread={unread}

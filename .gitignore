@@ -5,3 +5,6 @@ dist
 *.log
 data
 apps/desktop/release/
+
+# O app Android tem um pacote Kotlin chamado "data" (código-fonte, não dados locais).
+!apps/android/app/src/main/java/xyz/ogturtle/turtle/data

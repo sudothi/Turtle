@@ -65,7 +65,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
         room = r
         mutedBeforeDeafen = false
         _call.value = CallUi(channelId)
-        events = scope.launch { r.events.collect { onEvent(r, it) } }
+        events = scope.launch { r.events.events.collect { onEvent(r, it) } }
         try {
             r.connect(url, token, ConnectOptions(autoSubscribe = false))
             r.localParticipant.setMicrophoneEnabled(true)

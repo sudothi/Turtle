@@ -23,8 +23,11 @@ import xyz.ogturtle.turtle.data.Realtime
 import xyz.ogturtle.turtle.data.ServerEvent
 import xyz.ogturtle.turtle.data.Server
 import xyz.ogturtle.turtle.data.Session
+import xyz.ogturtle.turtle.data.CallUi
 import xyz.ogturtle.turtle.data.Unread
 import xyz.ogturtle.turtle.data.User
+import xyz.ogturtle.turtle.data.VoiceController
+import xyz.ogturtle.turtle.data.VoiceState
 
 data class UiState(
     val booting: Boolean = true,
@@ -51,6 +54,10 @@ data class UiState(
     val dnd: Set<String> = emptySet(),
     /** Enviando anexos (mostra a barra de progresso no chat). */
     val uploading: Boolean = false,
+    /** Quem está em cada chamada de voz (de todos os meus servidores e conversas). */
+    val voiceStates: List<VoiceState> = emptyList(),
+    /** A chamada em que estou agora (null = fora de chamada). */
+    val call: CallUi? = null,
 )
 
 /** Limites do servidor (packages/protocol): 25 MB por arquivo, 10 por mensagem. */
@@ -77,13 +84,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         onEvent = ::onEvent,
         onOpen = {
             _state.update { it.copy(connected = true) }
+            pushVoice() // o servidor esquece a chamada se a conexão cai; avisa de novo
             // Reabriu a conexão (ou abriu agora): pode ter perdido mensagens enquanto estava fora.
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
         },
     )
 
+    val voice = VoiceController(app, viewModelScope)
+
     init {
+        // Toda mudança na minha chamada (entrar, sair, mudo, fone, câmera) vai para o servidor e para a tela.
+        viewModelScope.launch {
+            var last: List<Any?>? = null
+            voice.call.collect { c ->
+                _state.update { it.copy(call = c) }
+                val key = listOf(c?.channelId, c?.muted, c?.deafened, c?.cameraOn)
+                if (key != last) {
+                    last = key
+                    pushVoice()
+                }
+            }
+        }
         viewModelScope.launch {
             if (session.token == null) {
                 _state.update { it.copy(booting = false) }
@@ -124,7 +146,50 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun pushVoice() {
+        val c = voice.call.value
+        realtime.sendVoice(c?.channelId, c?.muted ?: false, c?.deafened ?: false, c?.cameraOn ?: false)
+    }
+
+    // ---- Chamadas ----
+
+    /** Entra na chamada de voz do canal (as permissões já foram pedidas pela tela). */
+    fun joinCall(channelId: String) {
+        if (_state.value.call?.channelId == channelId) return
+        viewModelScope.launch {
+            try {
+                val t = api.voiceToken(channelId)
+                CallService.start(getApplication())
+                voice.join(channelId, t.url, t.token)
+            } catch (e: ApiException) {
+                CallService.stop(getApplication())
+                _state.update { it.copy(error = e.message) }
+            } catch (e: Exception) {
+                CallService.stop(getApplication())
+                _state.update { it.copy(error = "Não foi possível entrar na chamada: ${e.message ?: "erro desconhecido"}") }
+            }
+        }
+    }
+
+    fun leaveCall() {
+        voice.leave()
+        CallService.stop(getApplication())
+    }
+
+    fun toggleMute() = voice.call.value?.let { voice.setMuted(!it.muted) }
+    fun toggleDeafen() = voice.call.value?.let { voice.setDeafened(!it.deafened) }
+    fun toggleCamera() {
+        val on = voice.call.value?.cameraOn ?: return
+        voice.setCamera(!on) { ok -> if (!ok) _state.update { it.copy(error = "Não foi possível ligar a câmera.") } }
+    }
+
+    override fun onCleared() {
+        voice.leave()
+        CallService.stop(getApplication())
+    }
+
     fun logout() {
+        leaveCall()
         realtime.stop()
         session.token = null
         _state.value = UiState(booting = false)
@@ -287,6 +352,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is ServerEvent.MessageUpdate -> applyUpdate(e.message)
             is ServerEvent.MessageDelete -> applyDelete(e.channelId, e.id)
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
+            is ServerEvent.VoiceStates -> _state.update { it.copy(voiceStates = e.states) }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }

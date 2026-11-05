@@ -129,6 +129,9 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
         return TurtleJson.decodeFromString(Server.serializer(), call("POST", "/invites/$encoded/join", "{}"))
     }
 
+    suspend fun voiceToken(channelId: String): VoiceToken =
+        TurtleJson.decodeFromString(VoiceToken.serializer(), call("POST", "/voice/$channelId/token"))
+
     suspend fun unread(): List<Unread> = get("/unread", ListSerializer(Unread.serializer()))
 
     /** URL de foto/ícone/banner a partir da chave guardada no perfil. */

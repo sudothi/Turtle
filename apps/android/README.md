@@ -16,7 +16,8 @@ borda esquerda para abrir; arraste para o lado, toque fora ou use "voltar" para 
 ## Estado
 
 - Pronto: login e criação de conta com convite, gaveta com servidores, canais, conversas e amigos, não lidas.
-- Próximas etapas: chat e DMs, chamadas de voz/câmera/ver telas (LiveKit), compartilhar tela, notificações.
+- Também: chat e DMs em tempo real (WebSocket), membros do servidor com presença (gaveta da direita) e perfis.
+- Próximas etapas: chamadas de voz/câmera/ver telas (LiveKit), compartilhar tela, notificações.
 
 ## Chave de assinatura
 

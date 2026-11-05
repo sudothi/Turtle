@@ -10,13 +10,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,17 +25,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,6 +50,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,16 +61,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import xyz.ogturtle.turtle.AppViewModel
 import xyz.ogturtle.turtle.R
 import xyz.ogturtle.turtle.UiState
 import xyz.ogturtle.turtle.data.Channel
+import xyz.ogturtle.turtle.data.Server
 import xyz.ogturtle.turtle.data.Unread
 import xyz.ogturtle.turtle.data.shownName
 import xyz.ogturtle.turtle.data.title
@@ -77,9 +83,17 @@ import xyz.ogturtle.turtle.ui.theme.Ink
 /** Onde estou: a lista de conversas e amigos (casa), ou um servidor. */
 private const val HOME = "home"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(state: UiState, vm: AppViewModel) {
+    // Os diálogos abrem por cima da faixa de erro: eles mostram o erro do servidor por dentro.
+    CompositionLocalProvider(LocalDialogError provides DialogError(state.error, vm::clearError)) {
+        HomeContent(state, vm)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeContent(state: UiState, vm: AppViewModel) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val membersDrawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -225,6 +239,8 @@ private fun Sidebar(
     onFriends: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
+    var showServerDialog by remember { mutableStateOf(false) }
+
     Row(Modifier.fillMaxSize()) {
         // Barra de servidores
         LazyColumn(
@@ -245,6 +261,11 @@ private fun Sidebar(
                     Avatar(s.name, vm.api.fileUrl(s.icon), size = 48.dp, square = true)
                 }
             }
+            item {
+                RailItem(selected = false, badge = 0, onClick = { showServerDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Criar ou entrar em servidor", tint = Ink.Paper)
+                }
+            }
         }
 
         // Lista de canais ou de conversas
@@ -256,10 +277,28 @@ private fun Sidebar(
             HorizontalDivider(color = Ink.Line)
             Box(Modifier.weight(1f)) {
                 if (server == null) DmSidebar(state, vm, unread, onFriends, onOpen)
-                else ChannelSidebar(state.channels[server.id].orEmpty(), unread, onOpen)
+                else ChannelSidebar(server, state.channels[server.id].orEmpty(), unread, vm, onOpen)
             }
             UserPanel(state, vm)
         }
+    }
+
+    if (showServerDialog) {
+        CreateOrJoinServerDialog(
+            onDismiss = { showServerDialog = false },
+            onCreate = { name ->
+                vm.createServer(name) { server ->
+                    showServerDialog = false
+                    onPlace(server.id)
+                }
+            },
+            onJoin = { code ->
+                vm.joinInvite(code) { server ->
+                    showServerDialog = false
+                    onPlace(server.id)
+                }
+            },
+        )
     }
 }
 
@@ -278,14 +317,47 @@ private fun RailItem(selected: Boolean, badge: Int, onClick: () -> Unit, content
 }
 
 @Composable
-private fun ChannelSidebar(channels: List<Channel>, unread: Map<String, Unread>, onOpen: (String) -> Unit) {
+private fun ChannelSidebar(
+    server: Server,
+    channels: List<Channel>,
+    unread: Map<String, Unread>,
+    vm: AppViewModel,
+    onOpen: (String) -> Unit,
+) {
     val text = channels.filter { !it.isVoice }
     val voice = channels.filter { it.isVoice }
+    val canManage = server.role == "owner" || server.role == "admin"
+    var showCreateChannel by remember { mutableStateOf(false) }
+
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        item { SectionLabel("Canais de texto", Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel("Canais de texto", Modifier.weight(1f))
+                if (canManage) {
+                    IconButton(onClick = { showCreateChannel = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = "Criar canal", tint = Ink.Muted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
         items(text, key = { it.id }) { c -> ChannelRow(c.name, Icons.Filled.Tag, unread[c.id]?.count ?: 0) { onOpen(c.id) } }
         item { SectionLabel("Canais de voz", Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp)) }
         items(voice, key = { it.id }) { c -> ChannelRow(c.name, Icons.AutoMirrored.Filled.VolumeUp, 0) { onOpen(c.id) } }
+    }
+
+    if (showCreateChannel) {
+        CreateChannelDialog(
+            onDismiss = { showCreateChannel = false },
+            onCreate = { name, kind ->
+                vm.createChannel(server.id, name, kind) { channel ->
+                    showCreateChannel = false
+                    if (!channel.isVoice) onOpen(channel.id)
+                }
+            },
+        )
     }
 }
 
@@ -325,48 +397,155 @@ private fun DmSidebar(state: UiState, vm: AppViewModel, unread: Map<String, Unre
     }
 }
 
-/** Fundo da barra lateral: quem sou eu e o botão de sair. */
+/** Fundo da barra lateral: quem sou eu, status, edição de perfil e o botão de sair. */
 @Composable
 private fun UserPanel(state: UiState, vm: AppViewModel) {
     val me = state.user ?: return
+    var statusMenuOpen by remember { mutableStateOf(false) }
+    var showEditProfile by remember { mutableStateOf(false) }
+
     Column(Modifier.background(Ink.Ink0).navigationBarsPadding()) {
         HorizontalDivider(color = Ink.Line)
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(me.shownName, vm.api.fileUrl(me.avatar), size = 38.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(me.shownName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("@${me.username}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(Modifier.weight(1f)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { statusMenuOpen = true }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Avatar(me.shownName, vm.api.fileUrl(me.avatar), size = 38.dp, status = me.status, ring = Ink.Ink0)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(me.shownName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("@${me.username}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                StatusPicker(
+                    expanded = statusMenuOpen,
+                    current = me.status,
+                    onDismiss = { statusMenuOpen = false },
+                    onPick = { vm.setStatus(it) },
+                )
             }
-            IconButton(onClick = vm::logout) { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sair da conta", tint = Ink.Muted) }
+            IconButton(onClick = { showEditProfile = true }) {
+                Icon(Icons.Filled.Edit, contentDescription = "Editar perfil", tint = Ink.Muted)
+            }
+            IconButton(onClick = vm::logout) {
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sair da conta", tint = Ink.Muted)
+            }
         }
+    }
+
+    if (showEditProfile) {
+        EditProfileDialog(
+            initialName = me.displayName.orEmpty(),
+            initialBio = me.bio.orEmpty(),
+            onDismiss = { showEditProfile = false },
+            onSave = { name, bio ->
+                vm.updateProfile(name, bio) { showEditProfile = false }
+            },
+        )
     }
 }
 
 @Composable
 private fun FriendList(state: UiState, vm: AppViewModel, onProfile: (String) -> Unit) {
-    if (state.friends.isEmpty()) {
-        Placeholder("Sem amigos por aqui ainda", "Adicionar amigos pelo app chega em uma próxima etapa.")
-        return
-    }
-    val groups = listOf("incoming" to "Pedidos recebidos", "friend" to "Amigos", "outgoing" to "Pedidos enviados")
-    LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        groups.forEach { (status, label) ->
-            val list = state.friends.filter { it.status == status }
-            if (list.isNotEmpty()) {
-                item(key = "h-$status") { SectionLabel("$label — ${list.size}", Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
-                items(list, key = { "$status-${it.user.id}" }) { f ->
-                    Row(Modifier.fillMaxWidth().clickable { onProfile(f.user.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(f.user.shownName, vm.api.fileUrl(f.user.avatar), size = 40.dp, ring = Ink.Ink2, status = if (f.user.id in state.online) (if (f.user.id in state.dnd) "busy" else "online") else null)
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text(f.user.shownName, style = MaterialTheme.typography.titleMedium)
-                            if (f.user.displayName != null) Text("@${f.user.username}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+    var showAddDialog by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SectionLabel("Seus amigos")
+            Button(
+                onClick = { showAddDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = Ink.Paper, contentColor = Ink.Ink0),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text("Adicionar amigo", fontWeight = FontWeight.Bold)
+            }
+        }
+
+        notice?.let { msg ->
+            Text(
+                msg,
+                color = Ink.Paper,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Ink.Ink3)
+                    .border(1.dp, Ink.Line, RoundedCornerShape(8.dp))
+                    .clickable { notice = null }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+
+        if (state.friends.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Placeholder("Sem amigos por aqui ainda", "Adicione alguém pelo nome de usuário.")
+            }
+        } else {
+            val groups = listOf("incoming" to "Pedidos recebidos", "friend" to "Amigos", "outgoing" to "Pedidos enviados")
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp)) {
+                groups.forEach { (status, label) ->
+                    val list = state.friends.filter { it.status == status }
+                    if (list.isNotEmpty()) {
+                        item(key = "h-$status") { SectionLabel("$label — ${list.size}", Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
+                        items(list, key = { "$status-${it.user.id}" }) { f ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onProfile(f.user.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Avatar(
+                                    f.user.shownName,
+                                    vm.api.fileUrl(f.user.avatar),
+                                    size = 40.dp,
+                                    ring = Ink.Ink2,
+                                    status = if (f.user.id in state.online) (if (f.user.id in state.dnd) "busy" else "online") else null,
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(f.user.shownName, style = MaterialTheme.typography.titleMedium)
+                                    if (f.user.displayName != null) Text("@${f.user.username}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                if (status == "incoming") {
+                                    IconButton(onClick = { vm.setFriend(f.user.id, true) {} }) {
+                                        Icon(Icons.Filled.Check, contentDescription = "Aceitar", tint = Ink.Paper)
+                                    }
+                                    IconButton(onClick = { vm.setFriend(f.user.id, false) {} }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Recusar", tint = Ink.Muted)
+                                    }
+                                } else if (status == "outgoing") {
+                                    IconButton(onClick = { vm.setFriend(f.user.id, false) {} }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Cancelar pedido", tint = Ink.Muted)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showAddDialog) {
+        AddFriendDialog(
+            onDismiss = { showAddDialog = false },
+            onAdd = { username ->
+                vm.addFriendByName(username) { resStatus ->
+                    showAddDialog = false
+                    notice = if (resStatus == "friend") "Agora vocês são amigos" else "Pedido enviado"
+                }
+            },
+        )
     }
 }
 

@@ -42,7 +42,7 @@ fun parseServerEvent(text: String): ServerEvent? {
             "messageUpdate" -> ServerEvent.MessageUpdate(TurtleJson.decodeFromJsonElement(Message.serializer(), o["message"]!!))
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
-            "sync", "friends" -> ServerEvent.Refresh
+            "sync", "friends", "channel" -> ServerEvent.Refresh
             "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
             "error" -> ServerEvent.Error(str("error") ?: "erro")
             else -> null
@@ -104,9 +104,16 @@ class Realtime(
         socket = null
     }
 
-    /** Envia uma mensagem de texto. Devolve false se não está conectado. */
-    fun send(channelId: String, content: String): Boolean {
-        val json = JsonObject(mapOf("t" to JsonPrimitive("send"), "channelId" to JsonPrimitive(channelId), "content" to JsonPrimitive(content)))
+    /** Envia uma mensagem (texto e/ou ids de anexos já enviados). Devolve false se não está conectado. */
+    fun send(channelId: String, content: String, attachments: List<String> = emptyList()): Boolean {
+        val json = JsonObject(
+            mapOf(
+                "t" to JsonPrimitive("send"),
+                "channelId" to JsonPrimitive(channelId),
+                "content" to JsonPrimitive(content),
+                "attachments" to kotlinx.serialization.json.JsonArray(attachments.map { JsonPrimitive(it) }),
+            ),
+        )
         return socket?.send(json.toString()) ?: false
     }
 }

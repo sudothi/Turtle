@@ -1,0 +1,106 @@
+name: Deploy (VPS)
+# Sobe uma versão do servidor (API + site) na VPS. Só o serviço api reinicia; o LiveKit não,
+# então as chamadas não caem (o chat reconecta em alguns segundos).
+#
+# Automático com aprovação: todo push na main com CI verde cria um deploy pendente, que só
+# roda depois que um revisor aprova no GitHub (Environment "production" com revisor obrigatório).
+# Manual: Actions > Deploy (VPS) > Run workflow. Deixe "sha" vazio para subir a main atual,
+# ou informe um sha antigo para voltar a ele (rollback). O CI daquele commit precisa estar verde.
+#
+# Os secrets ficam no Environment "production" (não no repositório), então sem esse
+# Environment configurado o job não consegue entrar na VPS:
+#   DEPLOY_SSH_KEY (chave privada dedicada, com comando forçado na VPS),
+#   DEPLOY_HOST (IP da VPS) e DEPLOY_KNOWN_HOSTS (saída de ssh-keyscan da VPS).
+# O que roda na VPS está em infra/deploy.sh.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit para subir (vazio = main atual)"
+        required: false
+        default: ""
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Escolher o commit
+        id: alvo
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          ref="${INPUT_SHA:-${RUN_SHA:-origin/main}}"
+          sha="$(git rev-parse --verify "${ref}^{commit}")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Commit: $sha" >> "$GITHUB_STEP_SUMMARY"
+          git log -1 --format='%s' "$sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Conferir se o CI do commit passou
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.alvo.outputs.sha }}
+        run: |
+          conclusao="$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$SHA&status=success&per_page=1" --jq '.total_count')"
+          if [ "$conclusao" = "0" ]; then
+            echo "::error::O CI desse commit não está verde (ou não rodou). Deploy cancelado."
+            exit 1
+          fi
+
+      - name: Pular se só mudou docs ou desktop
+        if: github.event_name == 'workflow_run'
+        id: mudancas
+        env:
+          SHA: ${{ steps.alvo.outputs.sha }}
+        run: |
+          antes="$(git rev-parse "$SHA^1")"
+          if git diff --name-only "$antes" "$SHA" | grep -qvE '^(docs/|apps/desktop/|\.github/workflows/desktop\.yml$|.*\.md$)'; then
+            echo "subir=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "subir=false" >> "$GITHUB_OUTPUT"
+            echo "Só docs/desktop mudaram; nada a subir." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Enviar para a VPS e subir
+        if: steps.mudancas.outputs.subir != 'false'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          SHA: ${{ steps.alvo.outputs.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          git archive --format=tar.gz "$SHA" \
+            | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+                -o ServerAliveInterval=30 "kyo@$HOST" "deploy $SHA"
+          echo "Deploy de ${SHA:0:7} concluído." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Conferir de fora
+        if: steps.mudancas.outputs.subir != 'false'
+        run: curl -fsS --retry 5 --retry-delay 3 https://app.ogturtle.xyz/health

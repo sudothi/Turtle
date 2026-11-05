@@ -885,3 +885,22 @@
 }
 .desktop-hero > svg { flex: none; width: 40px; height: 40px; }
 a.auth-brand { text-decoration: none; }
+
+/* Ondinhas em volta da tartaruga: poucas, finas e balançando devagar. */
+.wave { position: absolute; overflow: visible; opacity: 0.8; animation: landing-wave 6s ease-in-out infinite; }
+.wave path { fill: none; stroke: var(--paper); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.wave.w1 { left: min(40vw, 420px); bottom: min(30vw, 250px); }
+.wave.w2 { left: min(6vw, 60px); bottom: min(50vw, 470px); animation-delay: -1.5s; }
+.wave.w3 { left: min(28vw, 300px); bottom: min(53vw, 520px); animation-delay: -3s; }
+.wave.w4 { left: min(44vw, 470px); bottom: min(12vw, 90px); animation-delay: -4.5s; }
+@keyframes landing-wave {
+  0%, 100% { transform: translateX(0); opacity: 0.8; }
+  50% { transform: translateX(14px); opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) { .wave { animation: none; } }
+@media (max-width: 640px) {
+  .wave.w1 { left: 62vw; bottom: 44vw; }
+  .wave.w2 { left: 4vw; bottom: 82vw; }
+  .wave.w3 { left: 40vw; bottom: 86vw; }
+  .wave.w4 { left: 70vw; bottom: 14vw; }
+}

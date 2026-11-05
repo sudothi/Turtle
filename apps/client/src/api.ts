@@ -1,3 +1,4 @@
+import type { Attachment, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
@@ -32,7 +33,54 @@ async function upload(kind: "avatar" | "banner", file: File): Promise<User> {
   return data as User;
 }
 
+/** Envia um anexo com progresso (fetch não informa o progresso do envio). */
+function uploadAttachment(channelId: string, file: File, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<Attachment> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/channels/${channelId}/attachments`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let data: { error?: string } = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        // resposta sem corpo
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as Attachment);
+      else reject(new Error(data.error ?? `erro ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("falha de rede"));
+    xhr.onabort = () => reject(new Error("cancelado"));
+    signal?.addEventListener("abort", () => xhr.abort());
+    const form = new FormData();
+    form.append("file", file, file.name);
+    xhr.send(form);
+  });
+}
+
+async function uploadIcon(serverId: string, file: Blob): Promise<{ icon: string }> {
+  const form = new FormData();
+  form.append("file", file, "icon.png");
+  const token = getToken();
+  const res = await fetch(`/servers/${serverId}/icon`, { method: "PUT", headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
+  return data as { icon: string };
+}
+
 export const api = {
+  setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
+  unread: () => req<Unread[]>("GET", "/unread"),
+  markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
+  editMessage: (id: string, content: string) => req<Message>("PATCH", `/messages/${id}`, { content }),
+  deleteMessage: (id: string) => req<{ ok: true }>("DELETE", `/messages/${id}`),
+  uploadAttachment,
+  renameChannel: (id: string, name: string) => req<Channel>("PATCH", `/channels/${id}`, { name }),
+  deleteChannel: (id: string) => req<{ ok: true }>("DELETE", `/channels/${id}`),
+  uploadServerIcon: uploadIcon,
+  removeServerIcon: (serverId: string) => req<{ icon: null }>("DELETE", `/servers/${serverId}/icon`),
   updateProfile: (p: { displayName?: string | null; bio?: string | null }) => req<User>("PATCH", "/me", p),
   uploadImage: upload,
   removeImage: (kind: "avatar" | "banner") => req<User>("DELETE", `/me/${kind}`),
@@ -70,5 +118,6 @@ export const api = {
   blocks: () => req<Person[]>("GET", "/blocks"),
   block: (userId: string) => req<{ ok: true }>("POST", `/blocks/${userId}`),
   unblock: (userId: string) => req<{ ok: true }>("DELETE", `/blocks/${userId}`),
-  messages: (channelId: string) => req<Message[]>("GET", `/channels/${channelId}/messages`),
+  messages: (channelId: string, before?: string) =>
+    req<Message[]>("GET", `/channels/${channelId}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`),
 };

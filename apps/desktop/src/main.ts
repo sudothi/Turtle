@@ -96,6 +96,7 @@ function createWindow(splash?: Splash) {
     },
   });
   win.setMenuBarVisibility(false);
+  win.on("focus", () => win?.flashFrame(false));
 
   // Links externos abrem no navegador; o app nunca navega para fora de si.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -170,6 +171,11 @@ else {
     installPermissions();
     installCapture();
     ipcMain.on("debug:webrtc", (event) => fromApp(event.sender) && openWebrtcInternals());
+    // Mensagem nova com a janela sem foco: pisca na barra de tarefas; clicar na notificação traz a janela.
+    ipcMain.on("win:attention", (event) => {
+      if (fromApp(event.sender) && win && !win.isFocused()) win.flashFrame(true);
+    });
+    ipcMain.on("win:focus", (event) => fromApp(event.sender) && showWindow());
     const splash = new Splash();
     if (await updateOnLaunch(splash)) return; // fecha para instalar a versão nova
     splash.status("Abrindo…");

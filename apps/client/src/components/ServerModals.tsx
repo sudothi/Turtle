@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MAX_OWNED_SERVERS, shownName, type InvitePreview, type Member, type Server, type User } from "@turtle/protocol";
 import { Avatar, Button, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { ImageCropper } from "./ImageCropper";
 
 export function CreateServerModal({ ownedCount, onClose, onCreated }: { ownedCount: number; onClose: () => void; onCreated: (s: Server) => void }) {
   const [name, setName] = useState("");
@@ -124,6 +125,8 @@ export function ServerSettingsModal({
   const [name, setName] = useState(server.name);
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string>();
+  const [cropIcon, setCropIcon] = useState<File | null>(null);
+  const iconInput = useRef<HTMLInputElement>(null);
   const run = async (fn: () => Promise<unknown>, done?: () => void) => {
     setError(undefined);
     try {
@@ -134,9 +137,44 @@ export function ServerSettingsModal({
     }
   };
 
+  if (cropIcon)
+    return (
+      <ImageCropper
+        file={cropIcon}
+        width={256}
+        height={256}
+        round
+        title="Recortar ícone do servidor"
+        onCancel={() => setCropIcon(null)}
+        onDone={(blob) => { setCropIcon(null); void run(() => api.uploadServerIcon(server.id, blob)); }}
+      />
+    );
+
   return (
     <Modal title="Configurações do servidor" subtitle={server.name} onClose={onClose}>
       <div className="server-settings">
+        {isOwner && (
+          <div className="server-icon-row">
+            <span className={`server-icon-preview lino ${server.icon ? "has-icon" : ""}`}>
+              {server.icon ? <img src={fileUrl(server.icon)!} alt="" /> : <span className="rail-initials">{server.name.slice(0, 2)}</span>}
+            </span>
+            <div className="server-icon-actions">
+              <span className="t-field-label">Ícone do servidor</span>
+              <span className="t-muted">Quadrado, aparece na barra da esquerda.</span>
+              <div>
+                <Button size="sm" onClick={() => iconInput.current?.click()}>{server.icon ? "Trocar ícone" : "Enviar ícone"}</Button>
+                {server.icon && <Button size="sm" variant="ghost" onClick={() => void run(() => api.removeServerIcon(server.id))}>Remover</Button>}
+              </div>
+              <input
+                ref={iconInput}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                hidden
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setCropIcon(f); }}
+              />
+            </div>
+          </div>
+        )}
         {isOwner && (
           <form
             className="settings-row"

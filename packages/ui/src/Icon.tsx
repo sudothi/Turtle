@@ -133,6 +133,26 @@ const icons = {
       <circle cx="12" cy="12" r="3.3" fill="currentColor" />
     </>
   ),
+  paperclip: <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.1-8.1a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.8 1.8 0 0 1-2.6-2.6l7.3-7.3" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />,
+  pencil: (
+    <>
+      <path d="M4 20l1-4.8L15.6 4.6a2 2 0 0 1 2.8 0l1 1a2 2 0 0 1 0 2.8L8.8 19z" fill="currentColor" />
+      <path d="M3.5 20.5h17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3.5 6h17M9 6V3.5h6V6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.5 8h13l-1 13h-11z" fill="currentColor" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M5 2.5h9l5 5v14H5z" fill="currentColor" />
+      <path d="M14 2.5v5h5" fill="none" stroke="var(--bg-chat, #000)" strokeWidth="1.6" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor" />,
   send: <path d="M3 20.5 21.5 12 3 3.5l2.5 8.5zM5.5 12H13" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />,
   more: (
     <>

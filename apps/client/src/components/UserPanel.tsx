@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Channel, User } from "@turtle/protocol";
+import type { Channel, User, UserStatus } from "@turtle/protocol";
 import { canInviteAccounts, shownName } from "@turtle/protocol";
 import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
@@ -23,6 +23,7 @@ export function UserPanel({
   onProfile,
   onShare,
   onLogout,
+  onStatus,
 }: {
   user: User;
   snap: VoiceSnapshot;
@@ -35,6 +36,8 @@ export function UserPanel({
   /** Abre a escolha de qualidade antes de transmitir a tela. */
   onShare: () => void;
   onLogout: () => void;
+  /** Troca entre Online e Não perturbe. */
+  onStatus: (s: UserStatus) => void;
 }) {
   const channel = channels.find((c) => c.id === snap.channelId);
   const [menu, setMenu] = useState(false);
@@ -90,10 +93,10 @@ export function UserPanel({
       )}
       <div className="user-bar" ref={ref}>
         <button className="user-chip" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}>
-          <Avatar name={shownName(user)} src={fileUrl(user.avatar)} size={32} status="online" statusRing="var(--bg-panel)" />
+          <Avatar name={shownName(user)} src={fileUrl(user.avatar)} size={32} status={user.status === "busy" ? "busy" : "online"} statusRing="var(--bg-panel)" />
           <span className="user-chip-text">
             <b>{shownName(user)}</b>
-            <span className="t-muted">{canInviteAccounts(user) ? <StaffTag /> : "Online"}</span>
+            <span className="t-muted">{user.status === "busy" ? "Não perturbe" : canInviteAccounts(user) ? <StaffTag /> : "Online"}</span>
           </span>
         </button>
         <IconButton label="Mudo" aria-pressed={snap.muted} className={snap.muted ? "is-off" : ""} onClick={() => void voice.toggleMute()}>
@@ -107,6 +110,19 @@ export function UserPanel({
         </IconButton>
         {menu && (
           <div className="menu user-menu lino" role="menu">
+            {(["online", "busy"] as const).map((s) => (
+              <button key={s} role="menuitemradio" aria-checked={user.status === s} className="menu-item status-item" onClick={() => { setMenu(false); onStatus(s); }}>
+                <span className="status-item-label">
+                  <span className={`t-status-inline ${s}`} aria-hidden="true" />
+                  <span>
+                    {s === "online" ? "Online" : "Não perturbe"}
+                    {s === "busy" && <small className="t-muted">Sem sons nem notificações de mensagem</small>}
+                  </span>
+                </span>
+                {user.status === s && <Icon name="check" size={16} />}
+              </button>
+            ))}
+            <hr className="t-divider" />
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); onProfile(); }}>
               <span>Configurações</span>
               <Icon name="settings" size={18} />

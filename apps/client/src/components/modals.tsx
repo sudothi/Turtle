@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { shownName, type Account, type ChannelKind } from "@turtle/protocol";
+import { shownName, type Account, type Channel, type ChannelKind } from "@turtle/protocol";
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
 
@@ -179,5 +179,44 @@ export function InvitersPanel({ me }: { me: string }) {
       ))}
       {error && <div className="err" role="alert">{error}</div>}
     </div>
+  );
+}
+
+/** Editar canal: renomear ou apagar (dono e admin do servidor). */
+export function EditChannelModal({ channel, onClose }: { channel: Channel; onClose: () => void }) {
+  const [name, setName] = useState(channel.name);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const text = channel.kind === "text";
+  const clean = (v: string) => (text ? v.toLowerCase().replace(/\s+/g, "-") : v);
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await fn();
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Editar canal" subtitle={text ? `#${channel.name}` : channel.name} onClose={onClose}>
+      <form className="create-channel" onSubmit={(e) => { e.preventDefault(); void run(() => api.renameChannel(channel.id, name.trim())); }}>
+        <TextField label="Nome do canal" required maxLength={40} value={name} onChange={(e) => setName(clean(e.target.value))} error={error} autoFocus />
+        <div className="modal-actions">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" disabled={busy || !name.trim() || name.trim() === channel.name}>Salvar</Button>
+        </div>
+      </form>
+      <section className="danger-zone lino">
+        <h3 className="t-eyebrow">Apagar canal</h3>
+        <p className="t-muted">{text ? "Apaga o canal com todas as mensagens e arquivos, para todo mundo." : "Apaga o canal e tira da chamada quem estiver nele."} Não dá para desfazer.</p>
+        <Button size="sm" disabled={busy} onClick={() => (confirm ? void run(() => api.deleteChannel(channel.id)) : setConfirm(true))}>
+          {confirm ? "Confirmar: apagar de vez" : "Apagar canal"}
+        </Button>
+      </section>
+    </Modal>
   );
 }

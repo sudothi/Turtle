@@ -1,8 +1,10 @@
 import { Icon, TurtleMark } from "@turtle/ui";
+import { fileUrl } from "../api";
 
 export interface RailServer {
   id: string;
   name: string;
+  icon?: string | null;
 }
 
 /** Iniciais para o ícone do servidor ("Lagoa dos Amigos" -> "LdA"), como no Discord. */
@@ -28,7 +30,10 @@ export function ServerRail({
   homeActive,
   unread,
   onHome,
+  serverUnread = {},
 }: {
+  /** Servidores com algo não lido (e quantas menções a você). */
+  serverUnread?: Record<string, { mentions: number }>;
   servers: RailServer[];
   activeId?: string;
   onSelect?: (id: string) => void;
@@ -52,12 +57,14 @@ export function ServerRail({
       <div className="rail-sep" />
       {servers.map((s) => {
         const active = !homeActive && s.id === activeId;
+        const u = serverUnread[s.id];
         return (
-          <div key={s.id} className={`rail-item ${active ? "active" : ""}`}>
+          <div key={s.id} className={`rail-item ${active ? "active" : ""} ${u ? "has-unread" : ""}`}>
             <span className="rail-pill" aria-hidden="true" />
-            <button className="rail-icon lino" title={s.name} aria-label={s.name} aria-current={active ? "true" : undefined} onClick={() => onSelect?.(s.id)}>
-              <span className="rail-initials">{initials(s.name)}</span>
+            <button className={`rail-icon lino ${s.icon ? "has-icon" : ""}`} title={s.name} aria-label={u ? `${s.name} (não lido)` : s.name} aria-current={active ? "true" : undefined} onClick={() => onSelect?.(s.id)}>
+              {s.icon ? <img src={fileUrl(s.icon)!} alt="" draggable={false} /> : <span className="rail-initials">{initials(s.name)}</span>}
             </button>
+            {!!u?.mentions && <span className="rail-badge" aria-label={`${u.mentions} menções`}>{u.mentions}</span>}
           </div>
         );
       })}

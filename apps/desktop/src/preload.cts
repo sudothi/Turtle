@@ -27,4 +27,10 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
   openWebrtcInternals() {
     ipcRenderer.send("debug:webrtc");
   },
+  attention() {
+    ipcRenderer.send("win:attention");
+  },
+  focus() {
+    ipcRenderer.send("win:focus");
+  },
 });

@@ -17,7 +17,7 @@ export function Avatar({
   size?: number;
   speaking?: boolean;
   /** Bolinha de presença. Omitida = sem bolinha. */
-  status?: "online" | "offline";
+  status?: "online" | "busy" | "offline";
   /** Cor do fundo atrás da bolinha (para o recorte). */
   statusRing?: string;
   /** Foto de perfil (URL). Sem ela, mostra a inicial. */
@@ -34,7 +34,7 @@ export function Avatar({
   return (
     <span className="t-avatar-wrap" style={{ ["--size" as string]: `${size}px`, ["--status-ring" as string]: statusRing }}>
       {avatar}
-      <span className={`t-status ${status}`} />
+      <span className={`t-status ${status}`} title={status === "busy" ? "Não perturbe" : undefined} />
     </span>
   );
 }

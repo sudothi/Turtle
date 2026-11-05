@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { shownName, type Person, type ProfileView, type ServerRole } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { usePresence } from "../presence";
 
 /*
  * Perfil no jeito do Discord, em três tamanhos:
@@ -61,11 +62,12 @@ const useEscape = (onClose: () => void) =>
 function Masthead({ profile, online, size, children }: { profile: ProfileView; online: boolean; size: "sm" | "md" | "lg"; children?: ReactNode }) {
   const banner = fileUrl(profile.banner);
   const avatar = { sm: 80, md: 80, lg: 120 }[size];
+  const presence = usePresence()(profile.id);
   return (
     <div className={`up-mast up-mast-${size}`}>
       <div className={`up-banner ${banner ? "" : "empty"}`}>{banner && <img src={banner} alt="" draggable={false} />}</div>
       <div className="up-avatar">
-        <Avatar name={shownName(profile)} size={avatar} src={fileUrl(profile.avatar)} status={online ? "online" : "offline"} statusRing="var(--up-bg)" />
+        <Avatar name={shownName(profile)} size={avatar} src={fileUrl(profile.avatar)} status={online ? (presence === "busy" ? "busy" : "online") : "offline"} statusRing="var(--up-bg)" />
       </div>
       {children && <div className="up-mast-actions">{children}</div>}
     </div>
@@ -364,12 +366,13 @@ export function DmProfilePanel({ userId, h, onFull, onOpenUser, version }: { use
 
 /** Painel do grupo: lista de quem está na conversa. */
 export function DmGroupPanel({ people, online, onProfile }: { people: Person[]; online: string[]; onProfile: (id: string) => void }) {
+  const presence = usePresence();
   return (
     <aside className="members up-group" aria-label="Membros do grupo">
       <h3 className="t-eyebrow">Membros — {people.length}</h3>
       {people.map((p) => (
         <div key={p.id} className={`member ${online.includes(p.id) ? "" : "offline"}`} role="button" tabIndex={0} onClick={() => onProfile(p.id)} onKeyDown={(e) => e.key === "Enter" && onProfile(p.id)}>
-          <Avatar name={shownName(p)} size={32} src={fileUrl(p.avatar)} status={online.includes(p.id) ? "online" : "offline"} />
+          <Avatar name={shownName(p)} size={32} src={fileUrl(p.avatar)} status={presence(p.id)} />
           <span className="member-name">{shownName(p)}</span>
         </div>
       ))}

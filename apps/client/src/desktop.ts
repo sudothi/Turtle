@@ -15,6 +15,10 @@ export interface TurtleDesktop {
   onPickScreen(cb: (req: PickRequest) => void): () => void;
   pickScreen(id: string | null): void;
   openWebrtcInternals(): void;
+  /** Pisca o ícone na barra de tarefas até a janela ganhar foco (versões novas do app). */
+  attention?(): void;
+  /** Mostra e foca a janela (sai da bandeja). */
+  focus?(): void;
 }
 
 declare global {

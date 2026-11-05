@@ -15,7 +15,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v3
+      # O ubuntu-latest já traz o Android SDK (ANDROID_HOME); o Gradle baixa a plataforma que faltar.
       - run: pnpm install --frozen-lockfile
       - name: Chave de assinatura (opcional)
         # Sem os segredos, o APK sai assinado com a chave de debug: instala, mas não atualiza por cima

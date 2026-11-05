@@ -5,8 +5,6 @@ estão neste app; o servidor (`https://app.ogturtle.xyz`) é usado só para dado
 O visual segue o do site (preto e branco, estilo linogravura), com a barra lateral como gaveta: arraste da
 borda esquerda para abrir; arraste para o lado, toque fora ou use "voltar" para fechar.
 
-> O app anterior baseado em WebView continua em `apps/mobile` até este cobrir tudo.
-
 ## Instalar para testar
 
 1. No GitHub, abra **Actions → Android nativo (APK)**, escolha a execução mais recente (ou *Run workflow*).

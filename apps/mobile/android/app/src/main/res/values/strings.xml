@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Turtle</string>
-    <string name="title_activity_main">Turtle</string>
-    <string name="package_name">xyz.ogturtle.app</string>
-    <string name="custom_url_scheme">xyz.ogturtle.app</string>
-</resources>

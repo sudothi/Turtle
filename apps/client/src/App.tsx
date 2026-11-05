@@ -6,10 +6,9 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { Workspace } from "./screens/Workspace";
 import { Landing } from "./screens/Landing";
 import { desktop } from "./desktop";
-import { isNativeApp } from "./native";
 
 /** Dentro de um app (desktop, APK ou PWA instalado) não tem página inicial: abre direto no login. */
-const insideApp = () => !!desktop() || isNativeApp || matchMedia("(display-mode: standalone)").matches;
+const insideApp = () => !!desktop() || matchMedia("(display-mode: standalone)").matches;
 
 /** Rotas do site público. O resto (/, /login, /convite/<código>) segue como antes. */
 const usePath = () => {

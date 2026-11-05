@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { dmTitle, serverEvent, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type User, type VoiceState } from "@turtle/protocol";
+import { MENTION_RE, dmTitle, mentionedIds, serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
 import { Button, Icon, IconButton } from "@turtle/ui";
-import { api, getToken } from "../api";
+import { api, fileUrl, getToken } from "../api";
+import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
+import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
+import { PresenceContext } from "../presence";
 import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
@@ -14,10 +17,12 @@ import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { DmGroupPanel, DmProfilePanel, ProfileModal, ProfilePopout, type ProfileHandlers } from "../components/UserProfile";
 import { AddToGroupModal, FriendsPanel, HomeSidebar, NewGroupModal } from "../components/Home";
 import { MemberList } from "../components/MemberList";
-import { CreateChannelModal, InviteModal } from "../components/modals";
+import { CreateChannelModal, EditChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
 
 const MEMBERS_KEY = "turtle.membersOpen";
+/** Página do histórico (o servidor manda até 50 por vez). */
+const PAGE = 50;
 const DM_PANEL_KEY = "turtle.dmPanel";
 const SERVER_KEY = "turtle.server";
 const remembered = () => {
@@ -43,6 +48,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [voiceView, setVoiceView] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [online, setOnline] = useState<string[]>([]);
+  const [busy, setBusy] = useState<string[]>([]);
+  /** Ainda há mensagens mais antigas no canal aberto. */
+  const [hasMore, setHasMore] = useState(false);
+  const [editingChannel, setEditingChannel] = useState<Channel>();
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   /** Mini perfil aberto e onde foi o clique (para abrir ao lado). */
@@ -87,7 +96,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [dmCall, setDmCall] = useState(false);
   const [newGroup, setNewGroup] = useState(false);
   const [addToGroup, setAddToGroup] = useState(false);
-  const [unread, setUnread] = useState<Set<string>>(new Set());
+  /** Não lidas por canal (de servidor ou conversa direta); vem do servidor e sobrevive ao recarregar. */
+  const [unread, setUnread] = useState<Record<string, Unread>>({});
   const [membersOpen, setMembersOpen] = useState(() => {
     try {
       return localStorage.getItem(MEMBERS_KEY) !== "0";
@@ -100,14 +110,17 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   /** Canal aberto agora: a conversa direta no Início, senão o canal do servidor. */
   const activeId = home ? dmId : current;
   currentRef.current = activeId;
-  const meRef = useRef(user.id);
-  meRef.current = user.id;
-  /** Canais de servidor já conhecidos: mensagem de outro canal é de uma DM nova. */
-  const serverMessageIds = useRef<Set<string>>(new Set());
-  const dmsRef = useRef<Dm[]>([]);
-  dmsRef.current = dms;
   const serverRef = useRef<string | undefined>(undefined);
   serverRef.current = serverId;
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
+  /** Conversa que está na tela agora (não conta o canal de texto escondido atrás de uma chamada). */
+  const readingRef = useRef<string | undefined>(undefined);
+  readingRef.current = home ? (dmCall ? undefined : dmId) : view === "text" ? current : undefined;
+  const unreadRef = useRef(unread);
+  unreadRef.current = unread;
+  /** Canal a abrir quando os canais do servidor chegarem (clique numa notificação). */
+  const pendingChannel = useRef<string | undefined>(undefined);
 
   const [voice] = useState(
     () =>
@@ -135,6 +148,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     setServers(list);
     setServersLoaded(true);
     if (!list.some((s) => s.id === serverRef.current)) chooseServer(list[0]?.id);
+    // Canais de todos os servidores: para saber de onde vem cada mensagem (não lidas e notificações).
+    const all = await Promise.all(list.map((s) => api.channels(s.id).catch(() => [] as Channel[])));
+    setKnown((k) => ({ ...k, ...Object.fromEntries(all.flat().map((c) => [c.id, c])) }));
   }, [chooseServer]);
 
   /** Busca canais e membros do servidor atual. `pick` escolhe um canal de texto se ainda não há um. */
@@ -144,7 +160,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     setChannels(ch);
     setMembers(mem);
     setKnown((k) => ({ ...k, ...Object.fromEntries(ch.map((c) => [c.id, c])) }));
-    if (pick || !ch.some((c) => c.id === currentRef.current)) setCurrent(ch.find((x) => x.kind === "text")?.id);
+    const wanted = pendingChannel.current && ch.some((c) => c.id === pendingChannel.current) ? pendingChannel.current : undefined;
+    pendingChannel.current = undefined;
+    if (wanted) setCurrent(wanted);
+    else if (pick || !ch.some((c) => c.id === currentRef.current)) setCurrent(ch.find((x) => x.kind === "text")?.id);
   }, []);
 
   useEffect(() => {
@@ -161,11 +180,86 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
 
   useEffect(() => {
     setMessages([]);
+    setHasMore(false);
     if (!activeId) return;
     let stale = false;
-    api.messages(activeId).then((m) => !stale && setMessages(m)).catch(() => {});
+    api.messages(activeId).then((m) => {
+      if (stale) return;
+      setMessages(m);
+      setHasMore(m.length >= PAGE);
+    }).catch(() => {});
     return () => { stale = true; };
   }, [activeId]);
+
+  /** Página anterior do histórico (rolou até o topo). */
+  const loadOlder = useCallback(async () => {
+    const id = currentRef.current;
+    const first = messagesRef.current[0];
+    if (!id || !first) return;
+    const older = await api.messages(id, first.createdAt).catch(() => null);
+    if (!older || currentRef.current !== id) return;
+    setHasMore(older.length >= PAGE);
+    setMessages((m) => {
+      const seen = new Set(m.map((x) => x.id));
+      return [...older.filter((x) => !seen.has(x.id)), ...m];
+    });
+  }, []);
+
+  // ---- Não lidas ----
+  const readTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** Tira a marca na hora e avisa o servidor logo depois (várias mensagens seguidas viram um aviso só). */
+  const markRead = useCallback((id: string) => {
+    setUnread((u) => {
+      if (!u[id]) return u;
+      const n = { ...u };
+      delete n[id];
+      return n;
+    });
+    clearTimeout(readTimers.current.get(id));
+    readTimers.current.set(id, setTimeout(() => {
+      readTimers.current.delete(id);
+      void api.markRead(id).catch(() => {});
+    }, 700));
+  }, []);
+  const loadUnread = useCallback(async () => {
+    const list = await api.unread();
+    const open = readingRef.current;
+    setUnread(Object.fromEntries(list.filter((u) => !(u.channelId === open && appFocused())).map((u) => [u.channelId, u])));
+  }, []);
+  const readingId = home ? (dmCall ? undefined : dmId) : view === "text" ? current : undefined;
+  useEffect(() => {
+    if (readingId && appFocused()) markRead(readingId);
+  }, [readingId, markRead]);
+  useEffect(() => {
+    const back = () => {
+      const id = readingRef.current;
+      if (id && appFocused() && unreadRef.current[id]) markRead(id);
+    };
+    window.addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      window.removeEventListener("focus", back);
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, [markRead]);
+  useEffect(() => askNotificationsOnFirstClick(), []);
+
+  // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
+  const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });
+  useEffect(() => {
+    const prev = lastSnap.current;
+    if (snap.deafened !== prev.deafened) playSound(snap.deafened ? "deafen" : "undeafen");
+    else if (snap.muted !== prev.muted) playSound(snap.muted ? "mute" : "unmute");
+    if (snap.screen !== prev.screen) playSound(snap.screen ? "screenOn" : "screenOff");
+    lastSnap.current = { muted: snap.muted, deafened: snap.deafened, screen: snap.screen };
+  }, [snap.muted, snap.deafened, snap.screen]);
+  useEffect(() => setSoundOutput(snap.prefs.outputId), [snap.prefs.outputId]);
+
+  // Título da janela com o que está esperando você (aparece na barra de tarefas).
+  const waiting = Object.values(unread).reduce((n, u) => n + (u.serverId === null ? 1 : u.mentions), 0);
+  useEffect(() => {
+    document.title = waiting ? `(${waiting}) Turtle` : Object.keys(unread).length ? "• Turtle" : "Turtle";
+  }, [waiting, unread]);
 
   const loadHome = useCallback(async () => {
     const [f, d] = await Promise.all([api.friends(), api.dms()]);
@@ -183,21 +277,24 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const s = new WebSocket(`${proto}://${location.host}/ws?token=${getToken()}`);
       ws.current = s;
-      s.onopen = () => voice.resendState();
+      s.onopen = () => {
+        voice.resendState();
+        void loadUnread().catch(() => {});
+      };
       s.onmessage = (ev) => {
         const parsed = serverEvent.safeParse(JSON.parse(ev.data));
         if (!parsed.success) return;
         const evt = parsed.data;
-        if (evt.t === "message" && evt.message.channelId === currentRef.current) setMessages((m) => [...m, evt.message]);
-        if (evt.t === "message" && dmsRef.current.some((d) => d.channelId === evt.message.channelId)) {
-          const at = evt.message.createdAt;
-          setDms((l) => l.map((d) => (d.channelId === evt.message.channelId ? { ...d, lastMessageAt: at } : d)).sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? "")));
-          if (evt.message.channelId !== currentRef.current)
-            setUnread((u) => (u.has(evt.message.channelId) ? u : new Set(u).add(evt.message.channelId)));
-        } else if (evt.t === "message" && evt.message.userId !== meRef.current && !serverMessageIds.current.has(evt.message.channelId)) {
-          // Mensagem de uma conversa que ainda não conheço (primeira DM de alguém): busca a lista.
-          void loadHome().then(() => setUnread((u) => new Set(u).add(evt.message.channelId))).catch(() => {});
-        }
+        if (evt.t === "message") onMessage.current(evt.message);
+        if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current)
+          setMessages((l) => l.map((x) => (x.id === evt.message.id ? evt.message : x)));
+        if (evt.t === "messageDelete" && evt.channelId === currentRef.current) setMessages((l) => l.filter((x) => x.id !== evt.id));
+        if (evt.t === "read") setUnread((u) => {
+          if (!u[evt.channelId]) return u;
+          const n = { ...u };
+          delete n[evt.channelId];
+          return n;
+        });
         if (evt.t === "friends") void loadHome().catch(() => {});
         if (evt.t === "channel") {
           setKnown((k) => ({ ...k, [evt.channel.id]: evt.channel }));
@@ -208,9 +305,18 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           // Perfil de alguém mudou: atualiza o meu e as fotos/nomes nas mensagens.
           api.me().then(setUser).catch(() => {});
           void loadHome().catch(() => {});
-          if (currentRef.current) api.messages(currentRef.current).then(setMessages).catch(() => {});
+          void loadUnread().catch(() => {});
+          // Atualiza fotos/nomes só na última página (sem perder o que já foi carregado de mais antigo).
+          if (currentRef.current) api.messages(currentRef.current).then((fresh) => setMessages((old) => {
+            const byId = new Map(fresh.map((m) => [m.id, m]));
+            const cut = fresh[0]?.createdAt ?? "";
+            return [...old.filter((m) => m.createdAt < cut).map((m) => byId.get(m.id) ?? m), ...fresh];
+          })).catch(() => {});
         }
-        if (evt.t === "presence") setOnline(evt.online);
+        if (evt.t === "presence") {
+          setOnline(evt.online);
+          setBusy(evt.busy);
+        }
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
       };
       s.onclose = (ev) => {
@@ -220,18 +326,66 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     };
     connect();
     return () => { closed = true; clearTimeout(retry); ws.current?.close(); };
-  }, [onLogout, voice, loadServers, loadServer, loadHome]);
+  }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
 
-  const send = useCallback((content: string) => {
+  const send = useCallback((content: string, attachments: string[] = []) => {
     if (!activeId) return;
-    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content }));
+    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content, attachments }));
   }, [activeId]);
 
   const openDm = useCallback((dm: Dm) => {
     setHome(true);
     setDmCall(false);
     setDmId(dm.channelId);
-    setUnread((u) => { if (!u.has(dm.channelId)) return u; const n = new Set(u); n.delete(dm.channelId); return n; });
+  }, []);
+  /** Abre um canal de servidor (vindo de uma notificação). */
+  const goToChannel = useCallback((sid: string, channelId: string) => {
+    setHome(false);
+    setView("text");
+    if (sid === serverRef.current) return setCurrent(channelId);
+    pendingChannel.current = channelId;
+    chooseServer(sid);
+  }, [chooseServer]);
+
+  // Mensagem nova chegando: lista, não lidas, som e notificação. Fica num ref para ver o estado atual sem reconectar.
+  const onMessage = useRef<(m: Message) => void>(() => {});
+  onMessage.current = (m: Message) => {
+    if (m.channelId === currentRef.current) setMessages((l) => (l.some((x) => x.id === m.id) ? l : [...l, m]));
+    const dm = dms.find((d) => d.channelId === m.channelId);
+    const ch = known[m.channelId];
+    if (dm) {
+      setDms((l) => l.map((d) => (d.channelId === m.channelId ? { ...d, lastMessageAt: m.createdAt } : d)).sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? "")));
+    } else if (!ch) {
+      // Conversa que ainda não conheço (primeira DM de alguém): busca a lista.
+      void loadHome().catch(() => {});
+    }
+    if (m.userId === user.id) return;
+    if (m.channelId === readingRef.current && appFocused()) return markRead(m.channelId);
+    const mention = mentionedIds(m.content).includes(user.id);
+    setUnread((u) => {
+      const prev = u[m.channelId];
+      return { ...u, [m.channelId]: { channelId: m.channelId, serverId: ch?.serverId ?? null, count: (prev?.count ?? 0) + 1, mentions: (prev?.mentions ?? 0) + (mention ? 1 : 0) } };
+    });
+    if (user.status === "busy") return;
+    const direct = !ch;
+    if (!(direct || mention || loadSoundPrefs().allServerMessages)) return;
+    playSound("message");
+    if (appFocused()) return;
+    const names = new Map<string, string>([[user.id, shownName(user)], ...members.map((x) => [x.userId, shownName(x)] as [string, string]), ...dms.flatMap((d) => d.users.map((p) => [p.id, shownName(p)] as [string, string]))]);
+    const text = m.content.replace(MENTION_RE, (_, id: string) => `@${names.get(id) ?? "alguém"}`);
+    const files = m.attachments.length;
+    const body = text || (files === 1 ? (m.attachments[0]!.mime.startsWith("image/") ? "Enviou uma imagem" : `Enviou ${m.attachments[0]!.name}`) : `Enviou ${files} arquivos`);
+    const serverName = ch ? servers.find((s) => s.id === ch.serverId)?.name : undefined;
+    const title = dm?.group ? `${shownName(m)} · ${dmTitle(dm)}` : ch ? `${shownName(m)} · #${ch.name}${serverName ? ` (${serverName})` : ""}` : shownName(m);
+    showNotification(title, body, fileUrl(m.avatar), () => {
+      if (dm) openDm(dm);
+      else if (ch) goToChannel(ch.serverId, ch.id);
+      else setHome(true);
+    });
+  };
+  const changeStatus = useCallback((status: UserStatus) => {
+    setUser((u) => ({ ...u, status }));
+    api.setStatus(status).then(setUser).catch(() => {});
   }, []);
   const closePopout = useCallback(() => setPopout(undefined), []);
   const closeFull = useCallback(() => setFullProfile(undefined), []);
@@ -284,7 +438,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
-  serverMessageIds.current = new Set(Object.keys(known));
+  const dmUnread = new Set(Object.values(unread).filter((u) => u.serverId === null).map((u) => u.channelId));
+  const serverUnread: Record<string, { mentions: number }> = {};
+  for (const u of Object.values(unread)) {
+    if (!u.serverId) continue;
+    serverUnread[u.serverId] = { mentions: (serverUnread[u.serverId]?.mentions ?? 0) + u.mentions };
+  }
+  const presence = { online: new Set(online), busy: new Set(busy) };
   const profileHandlers: ProfileHandlers = {
     meId: user.id,
     online,
@@ -293,9 +453,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     onEditProfile: () => setSettings("profile"),
     onOpenServer: (id) => chooseServer(id),
   };
-  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} />;
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} onStatus={changeStatus} />;
 
   return (
+    <PresenceContext.Provider value={presence}>
     <div className={`app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}>
       <ServerRail
         servers={servers}
@@ -304,14 +465,15 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         onCreate={() => setCreatingServer(true)}
         onJoin={() => setJoining(true)}
         homeActive={home}
-        unread={unread.size}
+        unread={dmUnread.size}
+        serverUnread={serverUnread}
         onHome={() => setHome(true)}
       />
       {home ? (
         <HomeSidebar
           dms={dms}
           current={dmId}
-          unread={unread}
+          unread={dmUnread}
           online={online}
           friendsOpen={!dmId}
           pending={pendingIn}
@@ -339,6 +501,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onLogout={logout}
           onProfile={setViewProfile}
           footer={footer}
+          unread={unread}
+          onEdit={setEditingChannel}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
@@ -366,6 +530,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
               canInvite={false}
               onInvite={() => {}}
               onProfile={setViewProfile}
+              hasMore={hasMore}
+              onLoadOlder={loadOlder}
               headerExtra={
                 <>
                   <IconButton label={snap.channelId === dm.channelId ? "Voltar à chamada" : voiceStates.some((v) => v.channelId === dm.channelId) ? "Entrar na chamada" : "Ligar"} onClick={() => { setDmCall(true); if (snap.channelId !== dm.channelId) void voice.join(dm.channelId); }}>
@@ -416,6 +582,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             canInvite
             onInvite={() => setInviting(true)}
             onProfile={setViewProfile}
+            hasMore={hasMore}
+            onLoadOlder={loadOlder}
+            canModerate={server.role !== "member"}
           />
         )}
       </main>
@@ -440,6 +609,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       )}
       {fullProfile && <ProfileModal userId={fullProfile} role={home ? undefined : members.find((m) => m.userId === fullProfile)?.role} h={profileHandlers} onOpenUser={setFullProfile} onClose={closeFull} />}
       {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
+      {editingChannel && <EditChannelModal channel={editingChannel} onClose={() => setEditingChannel(undefined)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}
       {creatingServer && (
@@ -467,5 +637,6 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         />
       )}
     </div>
+    </PresenceContext.Provider>
   );
 }

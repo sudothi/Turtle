@@ -208,6 +208,8 @@ select.t-select {
   background: var(--paper);
   box-shadow: 0 0 0 3px var(--status-ring, var(--bg-sidebar));
 }
+/* Não perturbe: bolinha clara com um corte escuro no meio (sem cor, no estilo linocut). */
+.t-status.busy { background: linear-gradient(var(--ink-0), var(--ink-0)) center / 58% 26% no-repeat, var(--paper); }
 .t-status.offline { background: var(--ink-0); box-shadow: inset 0 0 0 2px var(--text-faint), 0 0 0 3px var(--status-ring, var(--bg-sidebar)); }
 
 /* ---------- Modal ---------- */

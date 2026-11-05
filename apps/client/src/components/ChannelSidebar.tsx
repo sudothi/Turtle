@@ -79,7 +79,13 @@ export function ChannelSidebar({
   onLogout,
   onProfile,
   footer,
+  unread,
+  onEdit,
 }: {
+  /** Não lidas por canal (count = mensagens, mentions = menções a você). */
+  unread: Record<string, { count: number; mentions: number }>;
+  /** Abre a edição do canal (só para quem gere o servidor). */
+  onEdit: (channel: Channel) => void;
   serverName: string;
   /** Dono ou admin do servidor: cria canais. */
   canManage: boolean;
@@ -109,11 +115,21 @@ export function ChannelSidebar({
         <Category title="Canais de texto" onAdd={canManage ? () => onCreate("text") : undefined}>
           {text.map((c) => {
             const on = view === "text" && c.id === current;
+            const u = !on ? unread[c.id] : undefined;
             return (
-              <button key={c.id} className={`channel ${on ? "on" : ""}`} aria-current={on ? "page" : undefined} onClick={() => onText(c.id)}>
-                <Icon name="hash" size={20} />
-                <span className="channel-name">{c.name}</span>
-              </button>
+              <div key={c.id} className="channel-row">
+                {u && <span className="channel-unread-pill" aria-hidden="true" />}
+                <button className={`channel ${on ? "on" : ""} ${u ? "unread" : ""}`} aria-current={on ? "page" : undefined} aria-label={u ? `${c.name} (não lido)` : undefined} onClick={() => onText(c.id)}>
+                  <Icon name="hash" size={20} />
+                  <span className="channel-name">{c.name}</span>
+                  {!!u?.mentions && <span className="dm-badge" aria-label={`${u.mentions} menções`}>{u.mentions}</span>}
+                </button>
+                {canManage && (
+                  <button className="channel-edit" title="Editar canal" aria-label={`Editar canal ${c.name}`} onClick={() => onEdit(c)}>
+                    <Icon name="settings" size={16} />
+                  </button>
+                )}
+              </div>
             );
           })}
         </Category>
@@ -123,10 +139,17 @@ export function ChannelSidebar({
             const members = voiceStates.filter((v) => v.channelId === c.id);
             return (
               <div key={c.id}>
-                <button className={`channel ${on ? "on" : ""}`} aria-label={`Canal de voz ${c.name}`} onClick={() => onVoice(c.id)}>
-                  <Icon name="speaker" size={20} />
-                  <span className="channel-name">{c.name}</span>
-                </button>
+                <div className="channel-row">
+                  <button className={`channel ${on ? "on" : ""}`} aria-label={`Canal de voz ${c.name}`} onClick={() => onVoice(c.id)}>
+                    <Icon name="speaker" size={20} />
+                    <span className="channel-name">{c.name}</span>
+                  </button>
+                  {canManage && (
+                    <button className="channel-edit" title="Editar canal" aria-label={`Editar canal ${c.name}`} onClick={() => onEdit(c)}>
+                      <Icon name="settings" size={16} />
+                    </button>
+                  )}
+                </div>
                 {members.length > 0 && (
                   <ul className="voice-members">
                     {members.map((v) => (

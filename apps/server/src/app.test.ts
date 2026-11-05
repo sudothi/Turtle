@@ -654,3 +654,191 @@ describe("amigos e mensagens diretas", () => {
     for (const x of [A, B, C]) x.ws.close();
   });
 });
+
+describe("chat do dia a dia", () => {
+  let dono = "";
+  let membro = "";
+  let fora = "";
+  let donoId = "";
+  let membroId = "";
+  let serverId = "";
+  let geral = "";
+  const upload = async (url: string, token: string, data: Uint8Array, name: string, type = "application/octet-stream", method = "POST") => {
+    const form = new FormData();
+    form.append("file", new Blob([data as BlobPart], { type }), name);
+    const res = await fetch(base + url, { method, headers: { authorization: `Bearer ${token}` }, body: form });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+  };
+  const say = (ws: WebSocket, channelId: string, content: string, attachments: string[] = []) =>
+    ws.send(JSON.stringify({ t: "send", channelId, content, attachments }));
+
+  it("prepara contas e servidor", async () => {
+    const admin = (await post("/auth/login", { username: "thiago", password: "12345678" })).body.token;
+    const mk = async (name: string) => {
+      const inv = await post("/invites", {}, admin);
+      const r = await post("/auth/register", { inviteCode: inv.body.code, username: name, password: "12345678" });
+      return { token: r.body.token as string, id: r.body.user.id as string };
+    };
+    ({ token: dono, id: donoId } = await mk("dia-dono"));
+    ({ token: membro, id: membroId } = await mk("dia-membro"));
+    ({ token: fora } = await mk("dia-fora"));
+    serverId = (await post("/servers", { name: "Dia" }, dono)).body.id;
+    const inv = await post(`/servers/${serverId}/invites`, {}, dono);
+    await post(`/invites/${inv.body.code}/join`, {}, membro);
+    geral = (await channelsOf(serverId, dono)).find((c: any) => c.kind === "text").id;
+  });
+
+  it("status Não perturbe aparece na presença e no perfil", async () => {
+    const watcher = await listen(dono);
+    const r = await patch("/me", { status: "busy" }, membro);
+    expect(r.body.status).toBe("busy");
+    const m = await listen(membro);
+    await settle();
+    const last = watcher.events.filter((e) => e.t === "presence").at(-1);
+    expect(last.busy).toContain(membroId);
+    expect(last.online).toContain(membroId);
+    expect((await patch("/me", { status: "sumido" }, membro)).status).toBe(400);
+    await patch("/me", { status: "online" }, membro);
+    await settle();
+    expect(watcher.events.filter((e) => e.t === "presence").at(-1).busy).not.toContain(membroId);
+    watcher.close();
+    m.close();
+  });
+
+  it("não lidas: contam mensagens dos outros, menções, e somem ao ler (avisando os outros aparelhos)", async () => {
+    const d = await listen(dono);
+    const m2 = await listen(membro);
+    say(d.ws, geral, "oi");
+    say(d.ws, geral, `ei <@${membroId}>`);
+    await settle();
+    const mine = (await get("/unread", membro)).body.find((u: any) => u.channelId === geral);
+    expect(mine).toEqual({ channelId: geral, serverId, count: 2, mentions: 1 });
+    // quem escreveu não tem não lidas
+    expect((await get("/unread", dono)).body.find((u: any) => u.channelId === geral)).toBeUndefined();
+    expect((await post(`/channels/${geral}/read`, {}, fora)).status).toBe(404);
+    expect((await post(`/channels/${geral}/read`, {}, membro)).status).toBe(200);
+    await settle();
+    expect(m2.events.some((e) => e.t === "read" && e.channelId === geral)).toBe(true);
+    expect(d.events.some((e) => e.t === "read")).toBe(false);
+    expect((await get("/unread", membro)).body.find((u: any) => u.channelId === geral)).toBeUndefined();
+    d.close();
+    m2.close();
+  });
+
+  it("histórico antigo vem em páginas com ?before", async () => {
+    const d = await listen(dono);
+    for (let i = 0; i < 12; i++) {
+      say(d.ws, geral, `n${i}`);
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    await settle();
+    const last = (await get(`/channels/${geral}/messages?limit=5`, dono)).body;
+    expect(last.map((m: any) => m.content)).toEqual(["n7", "n8", "n9", "n10", "n11"]);
+    const older = (await get(`/channels/${geral}/messages?limit=5&before=${encodeURIComponent(last[0].createdAt)}`, dono)).body;
+    expect(older.map((m: any) => m.content)).toEqual(["n2", "n3", "n4", "n5", "n6"]);
+    expect((await get(`/channels/${geral}/messages?before=ontem`, dono)).status).toBe(400);
+    d.close();
+  });
+
+  it("editar: só quem escreveu; apagar: autor ou dono/admin; todos recebem o evento", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    say(m.ws, geral, "texto com erro");
+    await settle();
+    const msg = m.events.find((e) => e.t === "message" && e.message.content === "texto com erro").message;
+    expect(msg.editedAt).toBeNull();
+    expect((await patch(`/messages/${msg.id}`, { content: "outro" }, dono)).status).toBe(403);
+    expect((await patch(`/messages/${msg.id}`, { content: "  " }, membro)).status).toBe(400);
+    const ed = await patch(`/messages/${msg.id}`, { content: "texto certo" }, membro);
+    expect(ed.status).toBe(200);
+    expect(ed.body.editedAt).toBeTruthy();
+    await settle();
+    expect(d.events.find((e) => e.t === "messageUpdate")?.message.content).toBe("texto certo");
+    const hist = (await get(`/channels/${geral}/messages`, dono)).body;
+    expect(hist.find((x: any) => x.id === msg.id).content).toBe("texto certo");
+    // membro não apaga a do dono; dono apaga a do membro
+    say(d.ws, geral, "do dono");
+    await settle();
+    const donoMsg = d.events.filter((e) => e.t === "message" && e.message.content === "do dono")[0].message;
+    expect((await del(`/messages/${donoMsg.id}`, membro)).status).toBe(403);
+    expect((await del(`/messages/${msg.id}`, fora)).status).toBe(404);
+    expect((await del(`/messages/${msg.id}`, dono)).status).toBe(200);
+    await settle();
+    expect(m.events.some((e) => e.t === "messageDelete" && e.id === msg.id && e.channelId === geral)).toBe(true);
+    expect((await get(`/channels/${geral}/messages`, dono)).body.some((x: any) => x.id === msg.id)).toBe(false);
+    d.close();
+    m.close();
+  });
+
+  it("anexos: imagem sem metadados, arquivo baixável, só no próprio canal, e somem com a mensagem", async () => {
+    const sharp = (await import("sharp")).default;
+    const jpg = new Uint8Array(await sharp({ create: { width: 40, height: 20, channels: 3, background: "#123" } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: "segredo" } } }).toBuffer());
+    const img = await upload(`/channels/${geral}/attachments`, membro, jpg, "foto.jpg", "image/jpeg");
+    expect(img.status).toBe(200);
+    expect(img.body).toMatchObject({ name: "foto.jpg", mime: "image/jpeg", width: 40, height: 20 });
+    const served = await fetch(base + `/files/${img.body.key}`);
+    expect(served.headers.get("content-type")).toBe("image/jpeg");
+    expect(served.headers.get("content-disposition")).toContain("inline");
+    expect((await sharp(Buffer.from(await served.arrayBuffer())).metadata()).exif).toBeUndefined();
+
+    const html = await upload(`/channels/${geral}/attachments`, membro, new TextEncoder().encode("<script>alert(1)</script>"), "página ruim.html", "text/html");
+    expect(html.body.mime).toBe("application/octet-stream");
+    const dl = await fetch(base + `/files/${html.body.key}`);
+    expect(dl.headers.get("content-type")).toBe("application/octet-stream");
+    expect(dl.headers.get("content-disposition")).toMatch(/^attachment;.*filename\*=UTF-8''p%C3%A1gina%20ruim\.html/);
+    expect(dl.headers.get("content-security-policy")).toContain("sandbox");
+
+    expect((await upload(`/channels/${geral}/attachments`, fora, jpg, "x.jpg")).status).toBe(404);
+    expect((await upload(`/channels/${geral}/attachments`, membro, new Uint8Array(0), "vazio.txt")).status).toBe(400);
+
+    const m = await listen(membro);
+    const d = await listen(dono);
+    // o dono não pode usar o anexo do membro
+    say(d.ws, geral, "", [img.body.id]);
+    await settle();
+    expect(d.events.some((e) => e.t === "error")).toBe(true);
+    // só anexo, sem texto
+    say(m.ws, geral, "", [img.body.id, html.body.id]);
+    await settle();
+    const sent = d.events.find((e) => e.t === "message")?.message;
+    expect(sent.content).toBe("");
+    expect(sent.attachments.map((a: any) => a.name)).toEqual(["foto.jpg", "página ruim.html"]);
+    // não dá para reaproveitar o mesmo anexo
+    say(m.ws, geral, "de novo", [img.body.id]);
+    await settle();
+    expect(m.events.some((e) => e.t === "error")).toBe(true);
+    const hist = (await get(`/channels/${geral}/messages`, dono)).body.find((x: any) => x.id === sent.id);
+    expect(hist.attachments).toHaveLength(2);
+    expect((await del(`/messages/${sent.id}`, membro)).status).toBe(200);
+    expect((await fetch(base + `/files/${img.body.key}`)).status).toBe(404);
+    m.close();
+    d.close();
+  });
+
+  it("canais: dono/admin renomeia e apaga; membro não; nome repetido dá 409", async () => {
+    const extra = (await post(`/servers/${serverId}/channels`, { name: "memes" }, dono)).body.id;
+    expect((await patch(`/channels/${extra}`, { name: "outro" }, membro)).status).toBe(403);
+    expect((await patch(`/channels/${extra}`, { name: "geral" }, dono)).status).toBe(409);
+    const r = await patch(`/channels/${extra}`, { name: "memes-bons" }, dono);
+    expect(r.body.name).toBe("memes-bons");
+    expect((await channelsOf(serverId, membro)).some((c: any) => c.name === "memes-bons")).toBe(true);
+    expect((await del(`/channels/${extra}`, membro)).status).toBe(403);
+    expect((await del(`/channels/${extra}`, dono)).status).toBe(200);
+    expect((await channelsOf(serverId, dono)).some((c: any) => c.id === extra)).toBe(false);
+  });
+
+  it("ícone do servidor: só o dono troca; aparece na lista e some ao remover", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = new Uint8Array(await sharp({ create: { width: 300, height: 300, channels: 3, background: "#fff" } }).png().toBuffer());
+    expect((await upload(`/servers/${serverId}/icon`, membro, png, "i.png", "image/png", "PUT")).status).toBe(403);
+    const r = await upload(`/servers/${serverId}/icon`, dono, png, "i.png", "image/png", "PUT");
+    expect(r.status).toBe(200);
+    expect((await get("/servers", membro)).body.find((s: any) => s.id === serverId).icon).toBe(r.body.icon);
+    const meta = await sharp(Buffer.from(await (await fetch(base + `/files/${r.body.icon}`)).arrayBuffer())).metadata();
+    expect([meta.width, meta.height]).toEqual([256, 256]);
+    expect((await del(`/servers/${serverId}/icon`, dono)).status).toBe(200);
+    expect((await get("/servers", dono)).body.find((s: any) => s.id === serverId).icon).toBeNull();
+    expect((await fetch(base + `/files/${r.body.icon}`)).status).toBe(404);
+    expect(donoId).toBeTruthy();
+  });
+});

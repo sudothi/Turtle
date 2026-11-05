@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { dmTitle, shownName, type Dm, type Friend, type Person, type VoiceState } from "@turtle/protocol";
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { dot, usePresence } from "../presence";
 
 const byName = (a: { user: Person }, b: { user: Person }) => shownName(a.user).localeCompare(shownName(b.user), "pt-BR");
 
@@ -23,6 +24,7 @@ export function HomeSidebar({
   calls: VoiceState[];
   footer: ReactNode;
 }) {
+  const presence = usePresence();
   return (
     <aside className="sidebar" aria-label="Mensagens diretas">
       <div className="server-head static">
@@ -46,7 +48,7 @@ export function HomeSidebar({
               {d.group ? (
                 <span className="dm-group-icon" aria-hidden="true"><Icon name="users" size={16} /></span>
               ) : (
-                <Avatar name={dmTitle(d)} src={fileUrl(d.users[0]?.avatar)} size={28} status={d.users[0] && online.includes(d.users[0].id) ? "online" : undefined} statusRing="var(--bg-sidebar)" />
+                <Avatar name={dmTitle(d)} src={fileUrl(d.users[0]?.avatar)} size={28} status={d.users[0] && online.includes(d.users[0].id) ? dot(presence(d.users[0].id)) : undefined} statusRing="var(--bg-sidebar)" />
               )}
               <span className="channel-name">{dmTitle(d)}</span>
               {calls.some((v) => v.channelId === d.channelId) && <span className="live-badge small" title="Chamada em andamento">CHAMADA</span>}
@@ -76,6 +78,7 @@ export function FriendsPanel({
   const [name, setName] = useState("");
   const [note, setNote] = useState<{ ok: boolean; text: string }>();
   const on = new Set(online);
+  const presence = usePresence();
   const accepted = friends.filter((f) => f.status === "friend").sort(byName);
   const pending = friends.filter((f) => f.status !== "friend").sort(byName);
   const list = tab === "online" ? accepted.filter((f) => on.has(f.user.id)) : tab === "all" ? accepted : pending;
@@ -145,7 +148,7 @@ export function FriendsPanel({
           {list.map((f) => (
             <div key={f.user.id} className="friend-row">
               <button className="plain-btn friend-who" onClick={() => onProfile(f.user.id)}>
-                <Avatar name={shownName(f.user)} src={fileUrl(f.user.avatar)} size={36} status={on.has(f.user.id) ? "online" : undefined} statusRing="var(--bg-chat, var(--bg-sidebar))" />
+                <Avatar name={shownName(f.user)} src={fileUrl(f.user.avatar)} size={36} status={on.has(f.user.id) ? dot(presence(f.user.id)) : undefined} statusRing="var(--bg-chat, var(--bg-sidebar))" />
                 <span>
                   <b>{shownName(f.user)}</b>
                   <span className="t-muted"> @{f.user.username}{f.status === "incoming" ? " · quer ser seu amigo" : f.status === "outgoing" ? " · pedido enviado" : ""}</span>

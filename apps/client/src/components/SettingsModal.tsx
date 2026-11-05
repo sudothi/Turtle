@@ -4,12 +4,14 @@ import type { VoiceClient } from "../voice/client";
 import { VoiceSettings } from "../voice/VoiceSettings";
 import { AppInvitePanel, InvitersPanel } from "./modals";
 import { ProfileSettings } from "./ProfileSettings";
+import { NotificationSettings } from "./NotificationSettings";
 
-export type SettingsTab = "profile" | "voice" | "admin";
+export type SettingsTab = "profile" | "voice" | "notifications" | "admin";
 
 const tabs: { id: SettingsTab; label: string; subtitle: string }[] = [
   { id: "profile", label: "Perfil", subtitle: "Como as pessoas veem você" },
   { id: "voice", label: "Voz", subtitle: "Microfone, saída e ruído" },
+  { id: "notifications", label: "Notificações", subtitle: "Sons do app e avisos de mensagem" },
   { id: "admin", label: "Administração", subtitle: "Convites para criar conta no Turtle" },
 ];
 
@@ -40,6 +42,7 @@ export function SettingsModal({ user, voice, prefs, tab, onTab, onChanged, onClo
       <div role="tabpanel" className="settings-panel">
         {current.id === "profile" && <ProfileSettings user={user} onChanged={onChanged} />}
         {current.id === "voice" && <VoiceSettings voice={voice} prefs={prefs} />}
+        {current.id === "notifications" && <NotificationSettings />}
         {current.id === "admin" && (
           <>
             <AppInvitePanel />

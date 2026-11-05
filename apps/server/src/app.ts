@@ -7,9 +7,16 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, lt, messages, or, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, isNull, lt, messages, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
+  ATTACHMENT_MAX_BYTES,
+  type Attachment,
+  editMessageBody,
+  renameChannelBody,
+  SERVER_ICON_MAX_BYTES,
+  type Unread,
+  mentionToken,
   AVATAR_MAX_BYTES,
   type Dm,
   GROUP_MAX_MEMBERS,
@@ -44,7 +51,7 @@ import {
   type VoiceState,
   type VoiceToken,
 } from "@turtle/protocol";
-import { fileStore, isFileKey, processImage, type ImageKind } from "./profile.js";
+import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
 
 export interface AppOptions {
@@ -134,7 +141,10 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     const set = new Set(ids);
     sendWhere(evt, (s) => set.has(online.get(s)!.id));
   };
-  const presence = () => broadcast({ t: "presence", online: [...new Set([...online.values()].map((u) => u.id))] });
+  const presence = () => {
+    const people = [...online.values()];
+    broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
+  };
 
   // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
   const voice = new Map<Socket, VoiceState>();
@@ -174,7 +184,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         { id: newId(), serverId: id, name: "geral", kind: "text" },
         { id: newId(), serverId: id, name: "Sala", kind: "voice" },
       ]);
-      return { id, name, ownerId: owner.id, role: "owner" } satisfies Server;
+      return { id, name, ownerId: owner.id, role: "owner", icon: null } satisfies Server;
     });
   }
 
@@ -211,12 +221,62 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     return (await db.select({ id: serverMembers.serverId }).from(serverMembers).where(and(eq(serverMembers.userId, b), inArray(serverMembers.serverId, mine))).limit(1)).length > 0;
   };
 
+  /** Quem pode ler e escrever num canal de texto (de servidor ou conversa direta). */
+  const canUseText = async (channel: { id: string; serverId: string | null; kind: string } | undefined, userId: string) =>
+    !!channel && (channel.kind === "dm" ? await isDmMember(channel.id, userId) : channel.kind === "text" && !!channel.serverId && !!(await roleIn(channel.serverId, userId)));
+  /** Manda um evento para quem vê o canal. */
+  const toChannel = async (channel: { id: string; serverId: string | null; kind: string }, evt: ServerEvent) => {
+    if (channel.kind === "dm") toUsers(await dmPeers(channel.id), evt);
+    else if (channel.serverId) toServer(channel.serverId, evt);
+  };
+  const attachmentCols = { id: attachments.id, messageId: attachments.messageId, key: attachments.fileKey, name: attachments.name, size: attachments.size, mime: attachments.mime, width: attachments.width, height: attachments.height };
+  const toAttachment = ({ messageId: _m, ...a }: { id: string; messageId: string | null; key: string; name: string; size: number; mime: string; width: number | null; height: number | null }): Attachment => a;
+  const messageCols = {
+    id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey,
+    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt,
+  };
+  /** Linhas do banco (com o autor) viram mensagens com os anexos. */
+  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null }[]): Promise<Message[]> {
+    const files = rows.length ? await db.select(attachmentCols).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).orderBy(asc(attachments.createdAt)) : [];
+    return rows.map(({ isAdmin, canInvite, ...r }) => ({
+      ...r,
+      staff: canInviteAccounts({ isAdmin, canInvite }),
+      createdAt: r.createdAt.toISOString(),
+      editedAt: r.editedAt?.toISOString() ?? null,
+      attachments: files.filter((f) => f.messageId === r.id).map(toAttachment),
+    }));
+  }
+  const loadMessage = async (id: string) => {
+    const row = (await db.select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId)).where(eq(messages.id, id)).limit(1))[0];
+    return row ? (await toMessages([row]))[0] : undefined;
+  };
+  /** Apaga do disco os anexos dos canais (antes de apagar os canais, que leva as linhas junto). */
+  const fileKeysOf = async (channelIds: string[]) =>
+    channelIds.length ? (await db.select({ key: attachments.fileKey }).from(attachments).where(inArray(attachments.channelId, channelIds))).map((r) => r.key) : [];
+  const removeFiles = async (keys: (string | null | undefined)[]) => {
+    for (const k of keys) await files.remove(k).catch(() => {});
+  };
+  /** Marca a conversa como lida agora. */
+  const markRead = (userId: string, channelId: string) =>
+    db.insert(readStates).values({ userId, channelId, lastReadAt: new Date() }).onConflictDoUpdate({ target: [readStates.userId, readStates.channelId], set: { lastReadAt: new Date() } });
+
+  // Anexo enviado e nunca usado numa mensagem some depois de uma hora.
+  const sweepOrphans = async () => {
+    const old = await db.select({ id: attachments.id, key: attachments.fileKey }).from(attachments).where(and(isNull(attachments.messageId), lt(attachments.createdAt, new Date(Date.now() - 3_600_000))));
+    if (!old.length) return;
+    await db.delete(attachments).where(inArray(attachments.id, old.map((o) => o.id)));
+    await removeFiles(old.map((o) => o.key));
+  };
+  const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
+  sweeper.unref();
+  app.addHook("onClose", async () => clearInterval(sweeper));
+
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
-    displayName: users.displayName, bio: users.bio, avatarKey: users.avatarKey, bannerKey: users.bannerKey,
+    displayName: users.displayName, bio: users.bio, avatarKey: users.avatarKey, bannerKey: users.bannerKey, status: users.status,
   };
-  const toUser = (r: { id: string; username: string; isAdmin: boolean; canInvite: boolean; displayName: string | null; bio: string | null; avatarKey: string | null; bannerKey: string | null }): User => ({
-    id: r.id, username: r.username, isAdmin: r.isAdmin, canInvite: r.canInvite, displayName: r.displayName, bio: r.bio, avatar: r.avatarKey, banner: r.bannerKey,
+  const toUser = (r: { id: string; username: string; isAdmin: boolean; canInvite: boolean; displayName: string | null; bio: string | null; avatarKey: string | null; bannerKey: string | null; status: "online" | "busy" }): User => ({
+    id: r.id, username: r.username, isAdmin: r.isAdmin, canInvite: r.canInvite, displayName: r.displayName, bio: r.bio, avatar: r.avatarKey, banner: r.bannerKey, status: r.status,
   });
   const loadUser = async (id: string) => {
     const r = (await db.select(userCols).from(users).where(eq(users.id, id)).limit(1))[0];
@@ -265,7 +325,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
-    const user: User = { id, username, isAdmin: isFirst, canInvite: false, displayName: null, bio: null, avatar: null, banner: null };
+    const user: User = { id, username, isAdmin: isFirst, canInvite: false, displayName: null, bio: null, avatar: null, banner: null, status: "online" };
     await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
@@ -291,15 +351,25 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   });
 
   // Fotos e banners. Públicos de propósito (um <img> não manda token); a chave é aleatória e muda a cada troca.
+  // Anexos do chat seguem a mesma ideia (chave aleatória); só imagens comuns abrem no navegador, o resto é baixado.
   app.get<{ Params: { key: string } }>("/files/:key", async (req, reply) => {
-    if (!isFileKey(req.params.key)) return reply.code(404).send({ error: "não encontrado" });
-    const path = join(files.dir, req.params.key);
+    const key = req.params.key;
+    if (!isFileKey(key)) return reply.code(404).send({ error: "não encontrado" });
+    const path = join(files.dir, key);
     if (!(await stat(path).catch(() => null))) return reply.code(404).send({ error: "não encontrado" });
-    return reply
-      .header("content-type", "image/webp")
+    const att = key.endsWith(".webp") ? undefined : (await db.select({ name: attachments.name, mime: attachments.mime }).from(attachments).where(eq(attachments.fileKey, key)).limit(1))[0];
+    if (!key.endsWith(".webp") && !att) return reply.code(404).send({ error: "não encontrado" });
+    const image = !att || /^image\/(png|jpeg|gif|webp)$/.test(att.mime);
+    reply
+      .header("content-type", att && !image ? "application/octet-stream" : (att?.mime ?? "image/webp"))
       .header("cache-control", "public, max-age=31536000, immutable")
       .header("x-content-type-options", "nosniff")
-      .send(createReadStream(path));
+      .header("content-security-policy", "default-src 'none'; sandbox");
+    if (att) {
+      const ascii = att.name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+      reply.header("content-disposition", `${image ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(att.name)}`);
+    }
+    return reply.send(createReadStream(path));
   });
 
   // Rotas autenticadas
@@ -329,14 +399,24 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     authed.patch("/me", async (req, reply) => {
       const body = updateProfileBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "nome de exibição de 1 a 32 letras e bio de até 190" });
-      const set: { displayName?: string | null; bio?: string | null } = {};
+      const set: { displayName?: string | null; bio?: string | null; status?: "online" | "busy" } = {};
       if (body.data.displayName !== undefined) set.displayName = body.data.displayName || null;
       if (body.data.bio !== undefined) set.bio = body.data.bio || null;
+      if (body.data.status !== undefined) set.status = body.data.status;
       if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, me(req).id));
-      return profileChanged(me(req).id);
+      // Só o status mudou: avisa a presença e pronto (sem fazer todo mundo rebuscar tudo).
+      if (Object.keys(set).length === 1 && set.status) {
+        const fresh = (await loadUser(me(req).id))!;
+        for (const [sock, u] of online) if (u.id === fresh.id) online.set(sock, fresh);
+        presence();
+        return fresh;
+      }
+      const fresh = await profileChanged(me(req).id);
+      presence();
+      return fresh;
     });
 
-    const limits: Record<ImageKind, number> = { avatar: AVATAR_MAX_BYTES, banner: BANNER_MAX_BYTES };
+    const limits: Record<ImageKind, number> = { avatar: AVATAR_MAX_BYTES, banner: BANNER_MAX_BYTES, icon: SERVER_ICON_MAX_BYTES };
     // Limite de uploads por conta: no máximo UPLOAD_LIMIT envios a cada UPLOAD_WINDOW_MS (memória do processo).
     const UPLOAD_LIMIT = 10;
     const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
@@ -418,7 +498,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     authed.get("/servers", async (req) =>
       (
         await db
-          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role })
+          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role, icon: servers.iconKey })
           .from(serverMembers)
           .innerJoin(servers, eq(servers.id, serverMembers.serverId))
           .where(eq(serverMembers.userId, me(req).id))
@@ -460,7 +540,10 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (!body.success || body.data.name !== server.name) return reply.code(400).send({ error: "digite o nome do servidor para apagar" });
       const ids = await memberIds(server.id);
       await dropFromCalls(server.id);
+      const chans = (await db.select({ id: channels.id }).from(channels).where(eq(channels.serverId, server.id))).map((c) => c.id);
+      const keys = await fileKeysOf(chans);
       await db.delete(servers).where(eq(servers.id, server.id));
+      await removeFiles([...keys, server.iconKey]);
       for (const id of ids) await refreshMemberships(id);
       toUsers(ids, { t: "sync" });
       return { ok: true };
@@ -479,6 +562,66 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         await tx.update(serverMembers).set({ role: "admin" }).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, me(req).id)));
       });
       toServer(req.params.id, { t: "sync" });
+      return { ok: true };
+    });
+
+    // Ícone do servidor (só o dono, como o nome).
+    authed.put<{ Params: { id: string } }>("/servers/:id/icon", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner"))) return;
+      if (!uploadAllowed(me(req).id)) return reply.code(429).send({ error: "muitos envios seguidos; espere alguns minutos" });
+      const part = await req.file().catch(() => undefined);
+      if (!part) return reply.code(400).send({ error: "envie uma imagem" });
+      const raw = await part.toBuffer().catch(() => undefined);
+      if (!raw || part.file.truncated || raw.length > SERVER_ICON_MAX_BYTES) return reply.code(413).send({ error: "imagem grande demais (máximo 2 MB)" });
+      const out = await processImage(raw, "icon");
+      if (!out) return reply.code(415).send({ error: "use uma imagem PNG, JPEG, WebP ou GIF" });
+      const key = await files.save(out);
+      const old = (await findServer(req.params.id))?.iconKey;
+      await db.update(servers).set({ iconKey: key }).where(eq(servers.id, req.params.id));
+      await files.remove(old);
+      toServer(req.params.id, { t: "sync" });
+      return { icon: key };
+    });
+    authed.delete<{ Params: { id: string } }>("/servers/:id/icon", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner"))) return;
+      const old = (await findServer(req.params.id))?.iconKey;
+      await db.update(servers).set({ iconKey: null }).where(eq(servers.id, req.params.id));
+      await files.remove(old);
+      toServer(req.params.id, { t: "sync" });
+      return { icon: null };
+    });
+
+    /** Canal de servidor que quem pede pode gerir (dono ou admin). */
+    async function managedChannel(req: FastifyRequest, reply: any, id: string) {
+      const channel = await findChannel(id);
+      if (!channel?.serverId) return void reply.code(404).send({ error: "canal não existe" });
+      if (!(await member(req, reply, channel.serverId, canManage))) return;
+      return channel as typeof channel & { serverId: string };
+    }
+    authed.patch<{ Params: { id: string } }>("/channels/:id", async (req, reply) => {
+      const channel = await managedChannel(req, reply, req.params.id);
+      if (!channel) return;
+      const body = renameChannelBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "o nome precisa ter de 1 a 40 letras" });
+      try {
+        await db.update(channels).set({ name: body.data.name }).where(eq(channels.id, channel.id));
+      } catch {
+        return reply.code(409).send({ error: "já existe um canal com esse nome" });
+      }
+      toServer(channel.serverId, { t: "sync" });
+      return { ...channel, name: body.data.name };
+    });
+    authed.delete<{ Params: { id: string } }>("/channels/:id", async (req, reply) => {
+      const channel = await managedChannel(req, reply, req.params.id);
+      if (!channel) return;
+      const gone: VoiceState[] = [];
+      for (const [sock, v] of voice) if (v.channelId === channel.id) { gone.push(v); voice.delete(sock); }
+      if (gone.length) broadcastVoice();
+      if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(channel.id), v.userId).catch(() => {})));
+      const keys = await fileKeysOf([channel.id]);
+      await db.delete(channels).where(eq(channels.id, channel.id));
+      await removeFiles(keys);
+      toServer(channel.serverId, { t: "sync" });
       return { ok: true };
     });
 
@@ -560,7 +703,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         toServer(inv.serverId, { t: "sync" });
       }
       const role = (await roleIn(inv.serverId, me(req).id))!;
-      return { id: server.id, name: server.name, ownerId: server.ownerId, role } satisfies Server;
+      return { id: server.id, name: server.name, ownerId: server.ownerId, role, icon: server.iconKey } satisfies Server;
     });
 
     // ---- Amigos ----
@@ -810,20 +953,110 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       "/channels/:id/messages",
       async (req, reply) => {
         const channel = await findChannel(req.params.id);
-        const allowed = channel && (channel.kind === "dm" ? await isDmMember(channel.id, me(req).id) : !!channel.serverId && !!(await roleIn(channel.serverId, me(req).id)));
-        if (!channel || !allowed) return reply.code(404).send({ error: "canal não existe" });
+        if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
         const limit = Math.min(Number(req.query.limit ?? 50) || 50, 100);
         const before = req.query.before ? new Date(req.query.before) : undefined;
+        if (before && Number.isNaN(before.getTime())) return reply.code(400).send({ error: "data inválida" });
         const rows = await db
-          .select({ id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt })
+          .select(messageCols)
           .from(messages)
           .innerJoin(users, eq(users.id, messages.userId))
           .where(and(eq(messages.channelId, req.params.id), before ? lt(messages.createdAt, before) : undefined))
           .orderBy(desc(messages.createdAt))
           .limit(limit);
-        return rows.reverse().map(({ isAdmin, canInvite, ...r }): Message => ({ ...r, staff: canInviteAccounts({ isAdmin, canInvite }), createdAt: r.createdAt.toISOString() }));
+        return toMessages(rows.reverse());
       },
     );
+
+    // ---- Não lidas ----
+    /** Conversas com mensagens de outras pessoas depois da última leitura (canais de texto dos meus servidores e DMs). */
+    authed.get("/unread", async (req) => {
+      const id = me(req).id;
+      const token = `%${mentionToken(id)}%`;
+      const rows = await db.execute(sql`
+        WITH mine AS (
+          SELECT c.id, c.server_id, COALESCE(r.last_read_at, sm.joined_at) AS since
+            FROM channels c
+            JOIN server_members sm ON sm.server_id = c.server_id AND sm.user_id = ${id}
+            LEFT JOIN read_states r ON r.channel_id = c.id AND r.user_id = ${id}
+            WHERE c.kind = 'text'
+          UNION ALL
+          SELECT c.id, NULL, COALESCE(r.last_read_at, 'epoch'::timestamptz)
+            FROM dm_members d
+            JOIN channels c ON c.id = d.channel_id
+            LEFT JOIN read_states r ON r.channel_id = c.id AND r.user_id = ${id}
+            WHERE d.user_id = ${id})
+        SELECT mine.id AS "channelId", mine.server_id AS "serverId", count(m.id)::int AS count,
+               (count(m.id) FILTER (WHERE m.content LIKE ${token}))::int AS mentions
+          FROM mine JOIN messages m ON m.channel_id = mine.id AND m.created_at > mine.since AND m.user_id <> ${id}
+          GROUP BY mine.id, mine.server_id`);
+      const list = (Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows) as Unread[];
+      return list.map((r) => ({ channelId: r.channelId, serverId: r.serverId ?? null, count: Number(r.count), mentions: Number(r.mentions) }) satisfies Unread);
+    });
+    authed.post<{ Params: { id: string } }>("/channels/:id/read", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      await markRead(me(req).id, channel.id);
+      toUsers([me(req).id], { t: "read", channelId: channel.id });
+      return { ok: true };
+    });
+
+    // ---- Editar e apagar mensagens ----
+    authed.patch<{ Params: { id: string } }>("/messages/:id", async (req, reply) => {
+      const body = editMessageBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "a mensagem precisa ter de 1 a 4000 letras" });
+      const row = (await db.select({ userId: messages.userId, channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+      const channel = row && (await findChannel(row.channelId));
+      if (!row || !channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "mensagem não existe" });
+      if (row.userId !== me(req).id) return reply.code(403).send({ error: "só quem escreveu pode editar" });
+      await db.update(messages).set({ content: body.data.content, editedAt: new Date() }).where(eq(messages.id, req.params.id));
+      const message = (await loadMessage(req.params.id))!;
+      await toChannel(channel, { t: "messageUpdate", message });
+      return message;
+    });
+    /** Apaga a própria mensagem; em servidor, dono e admin também apagam a dos outros. */
+    authed.delete<{ Params: { id: string } }>("/messages/:id", async (req, reply) => {
+      const row = (await db.select({ userId: messages.userId, channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+      const channel = row && (await findChannel(row.channelId));
+      if (!row || !channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "mensagem não existe" });
+      const mine = row.userId === me(req).id;
+      if (!mine && !(channel.serverId && canManage(await roleIn(channel.serverId, me(req).id)))) return reply.code(403).send({ error: "sem permissão" });
+      const keys = (await db.select({ key: attachments.fileKey }).from(attachments).where(eq(attachments.messageId, req.params.id))).map((r) => r.key);
+      await db.delete(messages).where(eq(messages.id, req.params.id));
+      await removeFiles(keys);
+      await toChannel(channel, { t: "messageDelete", channelId: channel.id, id: req.params.id });
+      return { ok: true };
+    });
+
+    // ---- Anexos ----
+    // Limite próprio, mais folgado que o de fotos de perfil: 40 arquivos a cada 10 minutos.
+    const attachmentsBy = new Map<string, number[]>();
+    const attachmentAllowed = (userId: string) => {
+      const now = Date.now();
+      const recent = (attachmentsBy.get(userId) ?? []).filter((t) => now - t < UPLOAD_WINDOW_MS);
+      if (recent.length >= 40) return (attachmentsBy.set(userId, recent), false);
+      recent.push(now);
+      attachmentsBy.set(userId, recent);
+      return true;
+    };
+    /** Envia um arquivo para usar na próxima mensagem do canal (evento "send" com `attachments`). */
+    authed.post<{ Params: { id: string } }>("/channels/:id/attachments", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      if (channel.kind === "dm" && (await dmBlocked(channel.id))) return reply.code(403).send({ error: "não é possível enviar para essa pessoa" });
+      if (!attachmentAllowed(me(req).id)) return reply.code(429).send({ error: "muitos arquivos seguidos; espere alguns minutos" });
+      const part = await req.file({ limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 } }).catch(() => undefined);
+      if (!part) return reply.code(400).send({ error: "envie um arquivo" });
+      const raw = await part.toBuffer().catch(() => undefined);
+      if (!raw || part.file.truncated || raw.length > ATTACHMENT_MAX_BYTES) return reply.code(413).send({ error: `arquivo grande demais (máximo ${ATTACHMENT_MAX_BYTES / 1024 / 1024} MB)` });
+      if (!raw.length) return reply.code(400).send({ error: "arquivo vazio" });
+      const out = await processAttachment(raw);
+      const name = (part.filename || "arquivo").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120) || "arquivo";
+      const key = await files.save(out.data, out.ext);
+      const att: Attachment = { id: newId(), key, name, size: out.data.length, mime: out.mime, width: out.width, height: out.height };
+      await db.insert(attachments).values({ id: att.id, channelId: channel.id, userId: me(req).id, fileKey: key, name, size: att.size, mime: att.mime, width: att.width, height: att.height });
+      return att;
+    });
   });
 
   app.register(async (instance) => {
@@ -885,11 +1118,20 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
           return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
         if (isDm && (await dmBlocked(channel.id)))
           return socket.send(JSON.stringify({ t: "error", error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
+        // Anexos: só os que a própria pessoa enviou para este canal e ainda não usou.
+        const picked = evt.attachments.length
+          ? await db.select(attachmentCols).from(attachments).where(and(inArray(attachments.id, evt.attachments), eq(attachments.userId, user.id), eq(attachments.channelId, channel.id), isNull(attachments.messageId)))
+          : [];
+        if (picked.length !== new Set(evt.attachments).size)
+          return socket.send(JSON.stringify({ t: "error", error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
-          content: evt.content, createdAt: new Date().toISOString(),
+          content: evt.content, createdAt: new Date().toISOString(), editedAt: null,
+          attachments: evt.attachments.map((id) => toAttachment(picked.find((f) => f.id === id)!)),
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });
+        if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));
+        await markRead(user.id, channel.id);
         if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
         else toServer(channel.serverId!, { t: "message", message });
       });

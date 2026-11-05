@@ -55,21 +55,28 @@ ALTER TABLE channels ADD COLUMN IF NOT EXISTS server_id text REFERENCES servers(
 ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_name_key;
 
 -- Bancos de antes dos servidores: tudo vira o servidor "Turtle" (dono = primeiro admin).
+-- Só roda num banco que ainda não tem nenhum servidor. Conversas diretas (kind = 'dm') também têm
+-- server_id nulo e nunca podem disparar isso: antes, cada reinício com uma DM existente punha todo
+-- mundo no "Turtle" (recriando-o se tivesse sido apagado) e levava as DMs para dentro dele.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM channels WHERE server_id IS NULL) AND EXISTS (SELECT 1 FROM users) THEN
+  IF NOT EXISTS (SELECT 1 FROM servers)
+     AND EXISTS (SELECT 1 FROM channels WHERE server_id IS NULL AND kind <> 'dm')
+     AND EXISTS (SELECT 1 FROM users) THEN
     INSERT INTO servers (id, name, owner_id)
       SELECT 'turtle', 'Turtle', id FROM users ORDER BY is_admin DESC, created_at LIMIT 1
       ON CONFLICT DO NOTHING;
     INSERT INTO server_members (server_id, user_id, role)
       SELECT 'turtle', u.id, CASE WHEN u.id = (SELECT owner_id FROM servers WHERE id = 'turtle') THEN 'owner' ELSE 'member' END
       FROM users u ON CONFLICT DO NOTHING;
-    UPDATE channels SET server_id = 'turtle' WHERE server_id IS NULL;
+    UPDATE channels SET server_id = 'turtle' WHERE server_id IS NULL AND kind <> 'dm';
   END IF;
 END $$;
 DELETE FROM channels WHERE server_id IS NULL AND kind <> 'dm';
 -- server_id fica nulo nas conversas diretas (kind = 'dm').
 ALTER TABLE channels ALTER COLUMN server_id DROP NOT NULL;
+-- Conserta DMs que o bug acima levou para dentro de um servidor: DM nunca tem servidor.
+UPDATE channels SET server_id = NULL WHERE kind = 'dm' AND server_id IS NOT NULL;
 
 -- Amigos: um par por linha, com user_a < user_b para não duplicar.
 CREATE TABLE IF NOT EXISTS friendships (

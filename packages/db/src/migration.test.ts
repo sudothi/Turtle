@@ -60,4 +60,33 @@ describe("migração para servidores", () => {
     await db.exec(MIGRATION);
     expect((await db.query("SELECT 1 FROM read_states")).rows).toHaveLength(1);
   });
+  it("reiniciar com DMs existentes não cria o servidor Turtle nem mexe em membros", async () => {
+    const db = new PGlite();
+    await db.exec(MIGRATION);
+    await db.exec(`
+      INSERT INTO users (id, username, password_hash, is_admin) VALUES
+        ('u1', 'thiago', 'x', true), ('u2', 'amigo', 'x', false), ('u3', 'novo', 'x', false);
+      INSERT INTO servers (id, name, owner_id) VALUES ('s1', 'Servidor 1', 'u1');
+      INSERT INTO server_members (server_id, user_id, role) VALUES ('s1', 'u1', 'owner'), ('s1', 'u2', 'member');
+      INSERT INTO channels (id, server_id, name, kind) VALUES ('c1', 's1', 'geral', 'text');
+      INSERT INTO channels (id, server_id, name, kind) VALUES ('d1', NULL, '', 'dm'), ('d2', NULL, '', 'dm');
+      INSERT INTO dm_members (channel_id, user_id) VALUES ('d1', 'u1'), ('d1', 'u3'), ('d2', 'u2'), ('d2', 'u3');`);
+    await db.exec(MIGRATION); // como um reinício/deploy
+    expect((await db.query("SELECT id FROM servers")).rows).toEqual([{ id: "s1" }]);
+    const members = await db.query("SELECT server_id, user_id FROM server_members ORDER BY user_id");
+    expect(members.rows).toEqual([{ server_id: "s1", user_id: "u1" }, { server_id: "s1", user_id: "u2" }]);
+    const dms = await db.query("SELECT id, server_id FROM channels WHERE kind = 'dm' ORDER BY id");
+    expect(dms.rows).toEqual([{ id: "d1", server_id: null }, { id: "d2", server_id: null }]);
+  });
+
+  it("devolve para fora do servidor as DMs que o bug antigo tinha levado para dentro", async () => {
+    const db = new PGlite();
+    await db.exec(MIGRATION);
+    await db.exec(`
+      INSERT INTO users (id, username, password_hash, is_admin) VALUES ('u1', 'thiago', 'x', true), ('u2', 'amigo', 'x', false);
+      INSERT INTO servers (id, name, owner_id) VALUES ('turtle', 'Turtle', 'u1');
+      INSERT INTO channels (id, server_id, name, kind) VALUES ('d1', 'turtle', '', 'dm');`);
+    await db.exec(MIGRATION);
+    expect((await db.query("SELECT server_id FROM channels WHERE id = 'd1'")).rows).toEqual([{ server_id: null }]);
+  });
 });

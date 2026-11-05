@@ -27,6 +27,7 @@ sealed interface ServerEvent {
     data object Refresh : ServerEvent
     /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
     data class Presence(val online: Set<String>, val busy: Set<String>) : ServerEvent
+    data class VoiceStates(val states: List<VoiceState>) : ServerEvent
     data class Error(val text: String) : ServerEvent
 }
 
@@ -44,6 +45,9 @@ fun parseServerEvent(text: String): ServerEvent? {
             "read" -> ServerEvent.Read(str("channelId")!!)
             "sync", "friends", "channel" -> ServerEvent.Refresh
             "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
+            "voiceStates" -> ServerEvent.VoiceStates(
+                TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),
+            )
             "error" -> ServerEvent.Error(str("error") ?: "erro")
             else -> null
         }
@@ -112,6 +116,21 @@ class Realtime(
                 "channelId" to JsonPrimitive(channelId),
                 "content" to JsonPrimitive(content),
                 "attachments" to kotlinx.serialization.json.JsonArray(attachments.map { JsonPrimitive(it) }),
+            ),
+        )
+        return socket?.send(json.toString()) ?: false
+    }
+
+    /** Diz ao servidor em qual chamada estou (canal null = saí) e o estado do microfone, fone e câmera. */
+    fun sendVoice(channelId: String?, muted: Boolean, deafened: Boolean, camera: Boolean): Boolean {
+        val json = JsonObject(
+            mapOf(
+                "t" to JsonPrimitive("voice"),
+                "channelId" to (channelId?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull),
+                "muted" to JsonPrimitive(muted),
+                "deafened" to JsonPrimitive(deafened),
+                "camera" to JsonPrimitive(camera),
+                "screen" to JsonPrimitive(false),
             ),
         )
         return socket?.send(json.toString()) ?: false

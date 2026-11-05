@@ -1,0 +1,45 @@
+name: Android (APK)
+# Gera o APK do Turtle para Android. Roda em PRs que mexem no app e sob demanda (Actions > Run workflow).
+# O APK fica em "Artifacts" na página da execução. Guia de instalação: apps/mobile/README.md.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["apps/mobile/**", ".github/workflows/android.yml"]
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      # O ubuntu-latest já traz o Android SDK (ANDROID_HOME); o Gradle baixa a plataforma que faltar.
+      - run: pnpm install --frozen-lockfile
+      - name: Chave de assinatura (opcional)
+        # Sem os segredos, o APK sai assinado com a chave de debug: instala, mas não atualiza por cima
+        # de um APK assinado com outra chave. Veja apps/mobile/README.md para criar a chave.
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/turtle.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/turtle.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Sem ANDROID_KEYSTORE_BASE64: assinando com a chave de debug."
+          fi
+      - run: pnpm --filter @turtle/mobile exec cap sync android
+      - name: Compila o APK
+        working-directory: apps/mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
+      - run: mv apps/mobile/android/app/build/outputs/apk/release/*.apk turtle.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turtle-android
+          path: turtle.apk
+          retention-days: 30

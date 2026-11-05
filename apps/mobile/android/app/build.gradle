@@ -8,8 +8,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // O GitHub Actions passa -PversionCode=<número da execução> para cada APK ser mais novo que o anterior.
-        versionCode (project.findProperty("versionCode") ?: "1").toInteger()
-        versionName (project.findProperty("versionName") ?: "0.1.0")
+        versionCode = (project.findProperty("versionCode") ?: "1").toString().toInteger()
+        versionName = (project.findProperty("versionName") ?: "0.1.0").toString()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

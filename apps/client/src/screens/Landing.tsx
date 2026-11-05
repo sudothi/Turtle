@@ -1,9 +1,7 @@
 import type { MouseEvent } from "react";
 import { TurtleMark } from "@turtle/ui";
 import { DesktopDownload } from "../components/DesktopDownload";
-
-/** Poucas ondinhas em volta da tartaruga: quantas cristas cada uma tem. */
-const waves = [3, 2, 4, 2];
+import { SwimmingTurtle } from "./SwimmingTurtle";
 
 export type LandingTab = "home" | "download";
 
@@ -39,18 +37,7 @@ export function Landing({ tab, loggedIn, go }: { tab: LandingTab; loggedIn: bool
       )}
 
       <div className="landing-sea" aria-hidden="true">
-        {waves.map((w, i) => (
-          <svg key={i} className={`wave w${i + 1} lino-boil-filter`} viewBox={`0 0 ${w * 24} 16`} width={w * 24} height={16}>
-            <path d={`M2 10${" q6 -8 12 0 t12 0".repeat(w)}`} />
-          </svg>
-        ))}
-        <span className="bubble b1" />
-        <span className="bubble b2" />
-        <span className="bubble b3" />
-        <span className="bubble b4" />
-        <div className="landing-swim">
-          <TurtleMark className="landing-turtle lino-boil-filter" size={560} />
-        </div>
+        <SwimmingTurtle className="lino-boil-filter" />
       </div>
     </main>
   );

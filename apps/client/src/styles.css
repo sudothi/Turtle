@@ -849,58 +849,43 @@
 }
 .landing-panel h1 { margin: 0 0 16px; font-size: var(--fs-xl); }
 .landing-sea { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-.landing-swim {
-  position: absolute; left: -90px; bottom: -110px;
-  width: min(72vw, 560px); aspect-ratio: 1;
-  animation: landing-drift 14s ease-in-out infinite;
+.swim-turtle { position: absolute; left: -70px; bottom: -90px; width: min(70vw, 560px); height: auto; overflow: visible; transform: rotate(-12deg); }
+.swim-turtle .part { fill: var(--paper); transform-box: view-box; }
+.swim-water path { fill: var(--paper); }
+/* Pontos de articulação em coordenadas da marca (512x512). */
+.fin-fl { transform-origin: 272px 124px; animation: fin-front 3.6s ease-in-out infinite; }
+.fin-fr { transform-origin: 402px 230px; animation: fin-front-r 3.6s ease-in-out infinite; }
+.fin-bl { transform-origin: 126px 300px; animation: fin-back 3.6s ease-in-out infinite 0.4s; }
+.fin-br { transform-origin: 238px 392px; animation: fin-back-r 3.6s ease-in-out infinite 0.4s; }
+.head { transform-origin: 370px 150px; animation: look 11s ease-in-out infinite; }
+@keyframes fin-front { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-16deg); } }
+@keyframes fin-front-r { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(14deg); } }
+@keyframes fin-back { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(10deg); } }
+@keyframes fin-back-r { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-10deg); } }
+/* Olha para um lado, segura, volta, olha para o outro. */
+@keyframes look {
+  0%, 18%, 50%, 68%, 100% { transform: rotate(0); }
+  26%, 42% { transform: rotate(-14deg); }
+  76%, 90% { transform: rotate(10deg); }
 }
-.landing-turtle { width: 100%; height: 100%; color: var(--paper); transform-origin: 50% 50%; animation: landing-paddle 3.2s ease-in-out infinite; }
-@keyframes landing-drift {
-  0%, 100% { transform: translate(0, 0) rotate(-14deg); }
-  50% { transform: translate(46px, -34px) rotate(-6deg); }
-}
-@keyframes landing-paddle {
-  0%, 100% { transform: translateY(0) scale(1, 1); }
-  40% { transform: translateY(-10px) scale(1.025, 0.975); }
-  70% { transform: translateY(4px) scale(0.985, 1.02); }
-}
-.bubble { position: absolute; border: 2px solid var(--paper); border-radius: 50%; opacity: 0; animation: landing-bubble 7s ease-in infinite; }
-.bubble.b1 { width: 14px; height: 14px; left: min(46vw, 400px); bottom: min(40vw, 330px); }
-.bubble.b2 { width: 9px; height: 9px; left: min(50vw, 430px); bottom: min(36vw, 300px); animation-delay: 1.8s; }
-.bubble.b3 { width: 20px; height: 20px; left: min(43vw, 370px); bottom: min(44vw, 360px); animation-delay: 3.6s; }
-.bubble.b4 { width: 7px; height: 7px; left: min(48vw, 410px); bottom: min(42vw, 350px); animation-delay: 5.1s; }
-@keyframes landing-bubble {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12% { opacity: 0.9; }
-  100% { transform: translate(18px, -42vh); opacity: 0; }
+/* Os anéis se abrem a partir do centro da tartaruga e somem, um depois do outro. */
+.ring { transform-box: view-box; transform-origin: 256px 270px; animation: ring 9s ease-out infinite; opacity: 0; }
+.ring2 { animation-delay: -4.5s; }
+@keyframes ring {
+  0% { transform: scale(0.94); opacity: 0; }
+  20% { opacity: 0.85; }
+  100% { transform: scale(1.1); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .landing-swim, .landing-turtle, .bubble { animation: none; }
+  .swim-turtle .part, .ring { animation: none; }
+  .ring { opacity: 0.7; }
 }
 @media (max-width: 640px) {
   .landing-top { padding: 16px; }
   .landing-brand { font-size: var(--fs-lg); }
   .landing-panel { margin: 8px auto 40vw; padding: 20px; }
-  .landing-swim { left: -60px; bottom: -70px; width: 86vw; }
+  .swim-turtle { left: -50px; bottom: -60px; width: 88vw; }
 }
 .desktop-hero > svg { flex: none; width: 40px; height: 40px; }
 a.auth-brand { text-decoration: none; }
 
-/* Ondinhas em volta da tartaruga: poucas, finas e balançando devagar. */
-.wave { position: absolute; overflow: visible; opacity: 0.8; animation: landing-wave 6s ease-in-out infinite; }
-.wave path { fill: none; stroke: var(--paper); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.wave.w1 { left: min(40vw, 420px); bottom: min(30vw, 250px); }
-.wave.w2 { left: min(6vw, 60px); bottom: min(50vw, 470px); animation-delay: -1.5s; }
-.wave.w3 { left: min(28vw, 300px); bottom: min(53vw, 520px); animation-delay: -3s; }
-.wave.w4 { left: min(44vw, 470px); bottom: min(12vw, 90px); animation-delay: -4.5s; }
-@keyframes landing-wave {
-  0%, 100% { transform: translateX(0); opacity: 0.8; }
-  50% { transform: translateX(14px); opacity: 0.35; }
-}
-@media (prefers-reduced-motion: reduce) { .wave { animation: none; } }
-@media (max-width: 640px) {
-  .wave.w1 { left: 62vw; bottom: 44vw; }
-  .wave.w2 { left: 4vw; bottom: 82vw; }
-  .wave.w3 { left: 40vw; bottom: 86vw; }
-  .wave.w4 { left: 70vw; bottom: 14vw; }
-}

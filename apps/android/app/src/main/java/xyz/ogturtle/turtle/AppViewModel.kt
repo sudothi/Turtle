@@ -1,13 +1,17 @@
 package xyz.ogturtle.turtle
 
 import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import xyz.ogturtle.turtle.data.Api
 import xyz.ogturtle.turtle.data.ApiException
 import xyz.ogturtle.turtle.data.Channel
@@ -45,7 +49,16 @@ data class UiState(
     val online: Set<String> = emptySet(),
     /** Quem está em Não perturbe. */
     val dnd: Set<String> = emptySet(),
+    /** Enviando anexos (mostra a barra de progresso no chat). */
+    val uploading: Boolean = false,
 )
+
+/** Limites do servidor (packages/protocol): 25 MB por arquivo, 10 por mensagem. */
+internal const val MAX_FILE_BYTES = 25 * 1024 * 1024
+internal const val MAX_FILES = 10
+
+/** Aceita o código puro ou o link inteiro do convite (pega o que vem depois da última barra). */
+internal fun inviteCode(text: String): String = text.trim().trimEnd('/').substringAfterLast('/').trim()
 
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
 internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it.id == m.id }) this else this + m
@@ -176,10 +189,81 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(channelId: String, text: String) {
+    fun send(channelId: String, text: String, files: List<Uri> = emptyList()) {
         val content = text.trim()
-        if (content.isEmpty()) return
-        if (!realtime.send(channelId, content)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+        if (files.isEmpty()) {
+            if (content.isEmpty()) return
+            if (!realtime.send(channelId, content)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+            return
+        }
+        if (files.size > MAX_FILES) {
+            _state.update { it.copy(error = "No máximo $MAX_FILES arquivos por mensagem.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(uploading = true) }
+            try {
+                val resolver = getApplication<Application>().contentResolver
+                val ids = mutableListOf<String>()
+                for (uri in files) {
+                    val (name, mime, bytes) = withContext(Dispatchers.IO) {
+                        var name = "arquivo"
+                        var size = -1L
+                        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                            if (c.moveToFirst()) {
+                                c.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let { i -> c.getString(i)?.takeIf { it.isNotBlank() }?.let { name = it } }
+                                c.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !c.isNull(it) }?.let { size = c.getLong(it) }
+                            }
+                        }
+                        // Confere o tamanho antes de ler tudo para a memória.
+                        if (size > MAX_FILE_BYTES) throw ApiException("Arquivo grande demais (máximo 25 MB): $name")
+                        val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                            ?: throw ApiException("Não foi possível ler o arquivo $name.")
+                        if (bytes.size > MAX_FILE_BYTES) throw ApiException("Arquivo grande demais (máximo 25 MB): $name")
+                        Triple(name, resolver.getType(uri) ?: "application/octet-stream", bytes)
+                    }
+                    ids += api.uploadAttachment(channelId, name, mime, bytes).id
+                }
+                if (!realtime.send(channelId, content, ids)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            } finally {
+                _state.update { it.copy(uploading = false) }
+            }
+        }
+    }
+
+    /** Aplica uma mensagem editada na lista carregada do canal. */
+    private fun applyUpdate(m: Message) = _state.update { cur ->
+        val list = cur.messages[m.channelId] ?: return@update cur
+        cur.copy(messages = cur.messages + (m.channelId to list.map { if (it.id == m.id) m else it }))
+    }
+
+    private fun applyDelete(channelId: String, id: String) = _state.update { cur ->
+        val list = cur.messages[channelId] ?: return@update cur
+        cur.copy(messages = cur.messages + (channelId to list.filterNot { it.id == id }))
+    }
+
+    fun editMessage(id: String, content: String) {
+        val text = content.trim()
+        if (text.isEmpty()) return
+        launchCatching { applyUpdate(api.editMessage(id, text)) }
+    }
+
+    fun deleteMessage(channelId: String, id: String) = launchCatching {
+        api.deleteMessage(id)
+        applyDelete(channelId, id)
+    }
+
+    /** Roda a chamada e mostra o erro (em português, vindo do servidor) na faixa do topo. */
+    private fun launchCatching(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
     }
 
     private fun onEvent(e: ServerEvent) {
@@ -200,14 +284,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (_state.value.openChannelId == m.channelId) viewModelScope.launch { runCatching { api.markRead(m.channelId) } }
             }
-            is ServerEvent.MessageUpdate -> _state.update { cur ->
-                val list = cur.messages[e.message.channelId] ?: return@update cur
-                cur.copy(messages = cur.messages + (e.message.channelId to list.map { if (it.id == e.message.id) e.message else it }))
-            }
-            is ServerEvent.MessageDelete -> _state.update { cur ->
-                val list = cur.messages[e.channelId] ?: return@update cur
-                cur.copy(messages = cur.messages + (e.channelId to list.filterNot { it.id == e.id }))
-            }
+            is ServerEvent.MessageUpdate -> applyUpdate(e.message)
+            is ServerEvent.MessageDelete -> applyDelete(e.channelId, e.id)
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
             ServerEvent.Refresh -> refresh()
@@ -258,5 +336,69 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(error = e.message) }
             }
         }
+    }
+
+    fun addFriendByName(username: String, onDone: (String) -> Unit) {
+        val name = username.trim().removePrefix("@")
+        if (name.isEmpty()) return
+        launchCatching {
+            val status = api.addFriendByName(name)
+            refresh()
+            onDone(status)
+        }
+    }
+
+    // ---- Minha conta ----
+
+    /** "online" ou "busy" (Não perturbe). */
+    fun setStatus(status: String) = launchCatching {
+        val me = api.setStatus(status)
+        _state.update { it.copy(user = me) }
+    }
+
+    /** Campos vazios voltam ao padrão (apaga o nome de exibição / a bio). */
+    fun updateProfile(displayName: String, bio: String, onDone: () -> Unit) = launchCatching {
+        val me = api.updateProfile(displayName.trim().ifEmpty { null }, bio.trim().ifEmpty { null })
+        _state.update { it.copy(user = me) }
+        onDone()
+    }
+
+    // ---- Servidores e canais ----
+
+    fun createChannel(serverId: String, name: String, kind: String, onDone: (Channel) -> Unit) = launchCatching {
+        val ch = api.createChannel(serverId, name.trim(), kind)
+        _state.update { cur ->
+            val list = cur.channels[serverId].orEmpty()
+            cur.copy(channels = cur.channels + (serverId to if (list.any { it.id == ch.id }) list else list + ch))
+        }
+        onDone(ch)
+    }
+
+    fun createServer(name: String, onDone: (Server) -> Unit) = launchCatching {
+        val server = api.createServer(name.trim())
+        addServer(server)
+        onDone(server)
+    }
+
+    fun joinInvite(text: String, onDone: (Server) -> Unit) {
+        val code = inviteCode(text)
+        if (code.isEmpty()) return
+        launchCatching {
+            val server = api.joinInvite(code)
+            addServer(server)
+            onDone(server)
+        }
+    }
+
+    /** Já mostra o servidor novo na barra (com os canais) antes do refresh completo. */
+    private suspend fun addServer(server: Server) {
+        val channels = runCatching { api.channels(server.id) }.getOrDefault(emptyList())
+        _state.update { cur ->
+            cur.copy(
+                servers = if (cur.servers.any { it.id == server.id }) cur.servers else cur.servers + server,
+                channels = cur.channels + (server.id to channels),
+            )
+        }
+        refresh()
     }
 }

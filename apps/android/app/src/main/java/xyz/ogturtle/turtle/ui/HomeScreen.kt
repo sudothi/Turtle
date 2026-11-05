@@ -75,6 +75,7 @@ import xyz.ogturtle.turtle.R
 import xyz.ogturtle.turtle.UiState
 import xyz.ogturtle.turtle.data.Channel
 import xyz.ogturtle.turtle.data.Server
+import xyz.ogturtle.turtle.data.VoiceState
 import xyz.ogturtle.turtle.data.Unread
 import xyz.ogturtle.turtle.data.shownName
 import xyz.ogturtle.turtle.data.title
@@ -194,10 +195,23 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
                             )
                         },
                     ) { pad ->
-                        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refresh, modifier = Modifier.padding(pad).fillMaxSize()) {
+                        Column(Modifier.padding(pad).fillMaxSize()) {
+                        val call = state.call
+                        if (call != null && call.channelId != openId) {
+                            val callName = allChannels.firstOrNull { it.id == call.channelId }?.name ?: "Chamada"
+                            Row(
+                                Modifier.fillMaxWidth().background(Ink.Paper).clickable { openId = call.channelId; showFriends = false; place = allChannels.firstOrNull { it.id == call.channelId }?.serverId ?: place }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Em chamada · $callName — toque para voltar", color = Ink.Ink0, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Sair", color = Ink.Ink0, fontWeight = FontWeight.ExtraBold, modifier = Modifier.clickable { vm.leaveCall() }.padding(start = 12.dp))
+                            }
+                        }
+                        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxWidth()) {
                             when {
                                 showFriends -> FriendList(state, vm) { profileId = it }
-                                openChannel?.isVoice == true -> Placeholder("Chamadas de voz chegam na próxima etapa", "Por enquanto use o site para entrar em chamadas.")
+                                openChannel?.isVoice == true -> VoiceScreen(state, vm, openChannel)
                                 openId != null -> ChatScreen(state, vm, openId!!) { profileId = it }
                                 else -> Placeholder("Arraste da borda esquerda", "Ou toque em ☰ para escolher um canal ou conversa.")
                             }
@@ -210,6 +224,7 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
                                         .clickable { vm.clearError() }.padding(horizontal = 16.dp, vertical = 10.dp),
                                 )
                             }
+                        }
                         }
                     }
                 }
@@ -277,7 +292,7 @@ private fun Sidebar(
             HorizontalDivider(color = Ink.Line)
             Box(Modifier.weight(1f)) {
                 if (server == null) DmSidebar(state, vm, unread, onFriends, onOpen)
-                else ChannelSidebar(server, state.channels[server.id].orEmpty(), unread, vm, onOpen)
+                else ChannelSidebar(server, state.channels[server.id].orEmpty(), unread, state.voiceStates, vm, onOpen)
             }
             UserPanel(state, vm)
         }
@@ -321,6 +336,7 @@ private fun ChannelSidebar(
     server: Server,
     channels: List<Channel>,
     unread: Map<String, Unread>,
+    voiceStates: List<VoiceState>,
     vm: AppViewModel,
     onOpen: (String) -> Unit,
 ) {
@@ -345,7 +361,19 @@ private fun ChannelSidebar(
         }
         items(text, key = { it.id }) { c -> ChannelRow(c.name, Icons.Filled.Tag, unread[c.id]?.count ?: 0) { onOpen(c.id) } }
         item { SectionLabel("Canais de voz", Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp)) }
-        items(voice, key = { it.id }) { c -> ChannelRow(c.name, Icons.AutoMirrored.Filled.VolumeUp, 0) { onOpen(c.id) } }
+        items(voice, key = { it.id }) { c ->
+            ChannelRow(c.name, Icons.AutoMirrored.Filled.VolumeUp, 0) { onOpen(c.id) }
+            // Quem está na chamada aparece embaixo do canal, como no desktop.
+            voiceStates.filter { it.channelId == c.id }.forEach { v ->
+                Row(Modifier.fillMaxWidth().padding(start = 46.dp, end = 16.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(v.shown, vm.api.fileUrl(v.avatar), size = 22.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(v.shown, style = MaterialTheme.typography.bodyMedium, color = Ink.Muted, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (v.screen) Text("AO VIVO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = Ink.Paper)
+                    else if (v.muted || v.deafened) Text("mudo", style = MaterialTheme.typography.labelSmall, color = Ink.Faint)
+                }
+            }
+        }
     }
 
     if (showCreateChannel) {

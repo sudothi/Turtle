@@ -23,7 +23,7 @@ function Category({ title, onAdd, children }: { title: string; onAdd?: () => voi
   );
 }
 
-function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLogout }: { name: string; canManage: boolean; onCreate: (k: ChannelKind) => void; onInvite: () => void; onSettings: () => void; onLogout: () => void }) {
+function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLeave }: { name: string; canManage: boolean; onCreate: (k: ChannelKind) => void; onInvite: () => void; onSettings: () => void; onLeave?: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -54,8 +54,12 @@ function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLogout 
             </>
           )}
           {item("settings", "Configurações do servidor", onSettings)}
-          <hr className="t-divider" />
-          {item("logout", "Sair da conta", onLogout)}
+          {onLeave && (
+            <>
+              <hr className="t-divider" />
+              {item("logout", "Sair do servidor", onLeave)}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -76,7 +80,7 @@ export function ChannelSidebar({
   onCreate,
   onInvite,
   onSettings,
-  onLogout,
+  onLeave,
   onProfile,
   footer,
   unread,
@@ -101,7 +105,8 @@ export function ChannelSidebar({
   onCreate: (kind: ChannelKind) => void;
   onInvite: () => void;
   onSettings: () => void;
-  onLogout: () => void;
+  /** Sai do servidor. Ausente para o dono, que não pode sair sem passar a posse. */
+  onLeave?: () => void;
   /** Abre o cartão de perfil de quem está na chamada. */
   onProfile: (userId: string) => void;
   footer: ReactNode;
@@ -110,7 +115,7 @@ export function ChannelSidebar({
   const voice = channels.filter((c) => c.kind === "voice");
   return (
     <aside className="sidebar" aria-label="Canais">
-      <HeaderMenu name={serverName} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLogout={onLogout} />
+      <HeaderMenu name={serverName} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLeave={onLeave} />
       <div className="channels">
         <Category title="Canais de texto" onAdd={canManage ? () => onCreate("text") : undefined}>
           {text.map((c) => {

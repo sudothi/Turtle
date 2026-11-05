@@ -13,7 +13,10 @@
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "desktop": "pnpm --filter @turtle/desktop start",
-    "desktop:dist": "pnpm --filter @turtle/desktop dist"
+    "desktop:dist": "pnpm --filter @turtle/desktop dist",
+    "ios": "pnpm --filter @turtle/ios start",
+    "ios:device": "pnpm --filter @turtle/ios ios",
+    "ios:ipa": "pnpm --filter @turtle/ios ipa"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

@@ -2,6 +2,8 @@
 
 Chat privado estilo Discord, preto e branco (linocut), focado em chamadas, tela e câmera.
 
+Prova inicial para iPhone (React Native, iOS 26+): [instalação, build e roteiro de teste](apps/ios/README.md).
+
 ## Rodar local
 ```
 pnpm install

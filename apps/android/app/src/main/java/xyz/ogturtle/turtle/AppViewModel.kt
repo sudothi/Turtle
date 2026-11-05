@@ -43,7 +43,8 @@ data class UiState(
     /** Membros por servidor (carregados quando a pessoa entra no servidor). */
     val members: Map<String, List<Member>> = emptyMap(),
     val online: Set<String> = emptySet(),
-    val busy: Set<String> = emptySet(),
+    /** Quem está em Não perturbe. */
+    val dnd: Set<String> = emptySet(),
 )
 
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
@@ -208,7 +209,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 cur.copy(messages = cur.messages + (e.channelId to list.filterNot { it.id == e.id }))
             }
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
-            is ServerEvent.Presence -> _state.update { it.copy(online = e.online, busy = e.busy) }
+            is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
         }

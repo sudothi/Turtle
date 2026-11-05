@@ -43,7 +43,7 @@ fun MembersPanel(state: UiState, vm: AppViewModel, serverId: String?, onProfile:
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             if (members.isEmpty()) item { Text("Abra um canal de um servidor para ver os membros.", color = Ink.Muted, modifier = Modifier.padding(16.dp)) }
             if (on.isNotEmpty()) item { SectionLabel("Online — ${on.size}", Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp)) }
-            items(on, key = { "on-${it.userId}" }) { MemberRow(it, if (it.userId in state.busy) "busy" else "online", vm, true, onProfile) }
+            items(on, key = { "on-${it.userId}" }) { MemberRow(it, if (it.userId in state.dnd) "busy" else "online", vm, true, onProfile) }
             if (off.isNotEmpty()) item { SectionLabel("Offline — ${off.size}", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) }
             items(off, key = { "off-${it.userId}" }) { MemberRow(it, null, vm, false, onProfile) }
         }

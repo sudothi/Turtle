@@ -79,7 +79,7 @@ fun ProfileSheet(userId: String, myId: String?, vm: AppViewModel, onDismiss: () 
                     }
                 }
                 Row(Modifier.padding(horizontal = 16.dp).offset(y = (-36).dp)) {
-                    Avatar(p.shown, vm.api.fileUrl(p.avatar), size = 80.dp, ring = Ink.Ink2, status = if (p.id in vm.state.value.online) (if (p.id in vm.state.value.busy) "busy" else "online") else null)
+                    Avatar(p.shown, vm.api.fileUrl(p.avatar), size = 80.dp, ring = Ink.Ink2, status = if (p.id in vm.state.value.online) (if (p.id in vm.state.value.dnd) "busy" else "online") else null)
                 }
                 Column(Modifier.padding(horizontal = 16.dp).offset(y = (-24).dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

@@ -315,7 +315,7 @@ private fun DmSidebar(state: UiState, vm: AppViewModel, unread: Map<String, Unre
                 val other = d.users.firstOrNull()
                 Avatar(
                     d.title, if (d.group) null else vm.api.fileUrl(other?.avatar), size = 36.dp,
-                    status = if (!d.group && other != null && other.id in state.online) (if (other.id in state.busy) "busy" else "online") else null,
+                    status = if (!d.group && other != null && other.id in state.online) (if (other.id in state.dnd) "busy" else "online") else null,
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(d.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -357,7 +357,7 @@ private fun FriendList(state: UiState, vm: AppViewModel, onProfile: (String) -> 
                 item(key = "h-$status") { SectionLabel("$label — ${list.size}", Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
                 items(list, key = { "$status-${it.user.id}" }) { f ->
                     Row(Modifier.fillMaxWidth().clickable { onProfile(f.user.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(f.user.shownName, vm.api.fileUrl(f.user.avatar), size = 40.dp, ring = Ink.Ink2, status = if (f.user.id in state.online) (if (f.user.id in state.busy) "busy" else "online") else null)
+                        Avatar(f.user.shownName, vm.api.fileUrl(f.user.avatar), size = 40.dp, ring = Ink.Ink2, status = if (f.user.id in state.online) (if (f.user.id in state.dnd) "busy" else "online") else null)
                         Spacer(Modifier.width(14.dp))
                         Column {
                             Text(f.user.shownName, style = MaterialTheme.typography.titleMedium)

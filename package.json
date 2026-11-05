@@ -12,7 +12,8 @@
     "test": "turbo run test",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "desktop": "pnpm --filter @turtle/desktop start"
+    "desktop": "pnpm --filter @turtle/desktop start",
+    "desktop:dist": "pnpm --filter @turtle/desktop dist"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

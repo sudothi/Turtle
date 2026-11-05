@@ -31,3 +31,5 @@ docker compose -f infra/docker-compose.prod.yml up -d --build
 ```
 
 O primeiro cadastro usa `BOOTSTRAP_INVITE`; esse primeiro usuário vira admin e dono do servidor "Turtle". Portas a liberar no firewall: 80, 443, 7881/tcp, 7882/udp e 3478/udp. O app desktop aponta para o site publicado com `TURTLE_CLIENT_URL=https://app.ogturtle.xyz pnpm desktop`.
+
+Instalador do Windows (já aponta para o site publicado e se atualiza sozinho): `pnpm desktop:dist` em Windows, ou o workflow "Desktop (Windows)" no GitHub Actions. Detalhes e como publicar uma versão em [docs/planos/instalador-desktop.md](docs/planos/instalador-desktop.md).

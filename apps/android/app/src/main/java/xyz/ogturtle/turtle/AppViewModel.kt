@@ -13,6 +13,7 @@ import xyz.ogturtle.turtle.data.ApiException
 import xyz.ogturtle.turtle.data.Channel
 import xyz.ogturtle.turtle.data.Dm
 import xyz.ogturtle.turtle.data.Friend
+import xyz.ogturtle.turtle.data.Member
 import xyz.ogturtle.turtle.data.Message
 import xyz.ogturtle.turtle.data.Realtime
 import xyz.ogturtle.turtle.data.ServerEvent
@@ -39,6 +40,10 @@ data class UiState(
     /** Conversa aberta na tela agora (para não marcar como não lida). */
     val openChannelId: String? = null,
     val connected: Boolean = false,
+    /** Membros por servidor (carregados quando a pessoa entra no servidor). */
+    val members: Map<String, List<Member>> = emptyMap(),
+    val online: Set<String> = emptySet(),
+    val busy: Set<String> = emptySet(),
 )
 
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
@@ -121,7 +126,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val dms = api.dms()
                 val friends = api.friends()
                 val unread = runCatching { api.unread() }.getOrDefault(emptyList())
-                _state.update { it.copy(servers = servers, channels = channels, dms = dms, friends = friends, unread = unread, refreshing = false, error = null) }
+                val members = _state.value.members.keys.filter { id -> servers.any { it.id == id } }.associateWith { api.members(it) }
+                _state.update { it.copy(servers = servers, channels = channels, dms = dms, friends = friends, unread = unread, members = members, refreshing = false, error = null) }
             } catch (e: ApiException) {
                 if (e.status == 401) logout() else _state.update { it.copy(refreshing = false, error = e.message) }
             }
@@ -202,6 +208,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 cur.copy(messages = cur.messages + (e.channelId to list.filterNot { it.id == e.id }))
             }
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
+            is ServerEvent.Presence -> _state.update { it.copy(online = e.online, busy = e.busy) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
         }
@@ -212,5 +219,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (existing != null) return cur.unread.map { if (it.channelId == m.channelId) it.copy(count = it.count + 1) else it }
         val serverId = cur.channels.entries.firstOrNull { (_, list) -> list.any { it.id == m.channelId } }?.key
         return cur.unread + Unread(m.channelId, serverId, 1, 0)
+    }
+
+    // ---- Membros e perfis ----
+
+    fun loadMembers(serverId: String) {
+        viewModelScope.launch {
+            try {
+                val list = api.members(serverId)
+                _state.update { it.copy(members = it.members + (serverId to list)) }
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    /** Abre (ou cria) a conversa direta com a pessoa e devolve o id do canal. */
+    fun openDm(userId: String, onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val dm = api.openDm(userId)
+                _state.update { st -> st.copy(dms = if (st.dms.any { it.channelId == dm.channelId }) st.dms else listOf(dm) + st.dms) }
+                onReady(dm.channelId)
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    fun setFriend(userId: String, add: Boolean, onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                if (add) api.addFriend(userId) else api.removeFriend(userId)
+                refresh()
+                onDone()
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
     }
 }

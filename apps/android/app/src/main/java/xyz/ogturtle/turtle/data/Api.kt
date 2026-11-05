@@ -77,6 +77,12 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
         call("POST", "/channels/$channelId/read", "{}")
     }
 
+    suspend fun members(serverId: String): List<Member> = get("/servers/$serverId/members", ListSerializer(Member.serializer()))
+    suspend fun profile(userId: String): ProfileView = get("/users/$userId", ProfileView.serializer())
+    suspend fun openDm(userId: String): Dm = TurtleJson.decodeFromString(Dm.serializer(), call("POST", "/dms/$userId"))
+    suspend fun addFriend(userId: String) { call("POST", "/friends/$userId") }
+    suspend fun removeFriend(userId: String) { call("DELETE", "/friends/$userId") }
+
     suspend fun unread(): List<Unread> = get("/unread", ListSerializer(Unread.serializer()))
 
     /** URL de foto/ícone/banner a partir da chave guardada no perfil. */

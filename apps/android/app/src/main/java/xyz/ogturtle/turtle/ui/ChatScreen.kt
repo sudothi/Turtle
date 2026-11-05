@@ -1,5 +1,6 @@
 package xyz.ogturtle.turtle.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,7 +75,7 @@ private fun startsGroup(prev: Message?, m: Message): Boolean {
 }
 
 @Composable
-fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String) {
+fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String, onProfile: (String) -> Unit) {
     val messages = state.messages[channelId]
     val names = remember(state.messages, state.dms, state.friends, state.user) {
         buildMap {
@@ -110,7 +111,7 @@ fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String) {
                         items(reversed.size, key = { reversed[it].id }) { i ->
                             val m = reversed[i]
                             val older = reversed.getOrNull(i + 1)
-                            MessageRow(m, header = startsGroup(older, m), names = names, vm = vm, mine = m.userId == state.user?.id)
+                            MessageRow(m, header = startsGroup(older, m), names = names, vm = vm, mine = m.userId == state.user?.id, onProfile = onProfile)
                         }
                     }
                 }
@@ -121,14 +122,14 @@ fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String) {
 }
 
 @Composable
-private fun MessageRow(m: Message, header: Boolean, names: Map<String, String>, vm: AppViewModel, mine: Boolean) {
+private fun MessageRow(m: Message, header: Boolean, names: Map<String, String>, vm: AppViewModel, mine: Boolean, onProfile: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = if (header) 10.dp else 1.dp)) {
-        if (header) Avatar(m.author, vm.api.fileUrl(m.avatar), size = 38.dp) else Spacer(Modifier.size(38.dp))
+        if (header) Avatar(m.author, vm.api.fileUrl(m.avatar), size = 38.dp, modifier = Modifier.clickable { onProfile(m.userId) }) else Spacer(Modifier.size(38.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             if (header) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(m.author, fontWeight = FontWeight.Bold, color = if (mine) Ink.Paper else Ink.PaperDim)
+                    Text(m.author, fontWeight = FontWeight.Bold, color = if (mine) Ink.Paper else Ink.PaperDim, modifier = Modifier.clickable { onProfile(m.userId) })
                     if (m.staff) {
                         Spacer(Modifier.width(6.dp))
                         Text("TURTLE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Ink.Ink0,

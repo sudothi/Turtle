@@ -87,6 +87,41 @@ data class Message(
     val author get() = displayName?.takeIf { it.isNotBlank() } ?: username
 }
 
+@Serializable
+data class Member(
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatar: String? = null,
+    val staff: Boolean = false,
+    val role: String = "member",
+) {
+    val shown get() = displayName?.takeIf { it.isNotBlank() } ?: username
+}
+
+@Serializable
+data class MutualServer(val id: String, val name: String)
+
+/** Perfil visto por outra pessoa (GET /users/:id). */
+@Serializable
+data class ProfileView(
+    val id: String,
+    val username: String,
+    val displayName: String? = null,
+    val bio: String? = null,
+    val avatar: String? = null,
+    val banner: String? = null,
+    val staff: Boolean = false,
+    val createdAt: String = "",
+    val mutualServers: List<MutualServer> = emptyList(),
+    val mutualFriends: List<Person> = emptyList(),
+    /** none | friend | incoming | outgoing (do ponto de vista de quem pede). */
+    val friendship: String = "none",
+    val blocked: Boolean = false,
+) {
+    val shown get() = displayName?.takeIf { it.isNotBlank() } ?: username
+}
+
 val Person.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username
 val User.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username
 

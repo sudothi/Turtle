@@ -25,8 +25,13 @@ sealed interface ServerEvent {
     data class Read(val channelId: String) : ServerEvent
     /** Servidores, canais, membros, amigos ou conversas mudaram: buscar de novo. */
     data object Refresh : ServerEvent
+    /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
+    data class Presence(val online: Set<String>, val busy: Set<String>) : ServerEvent
     data class Error(val text: String) : ServerEvent
 }
+
+private fun ids(e: kotlinx.serialization.json.JsonElement?): Set<String> =
+    (e as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }?.toSet() ?: emptySet()
 
 fun parseServerEvent(text: String): ServerEvent? {
     val o = runCatching { TurtleJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
@@ -38,6 +43,7 @@ fun parseServerEvent(text: String): ServerEvent? {
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
             "sync", "friends" -> ServerEvent.Refresh
+            "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
             "error" -> ServerEvent.Error(str("error") ?: "erro")
             else -> null
         }

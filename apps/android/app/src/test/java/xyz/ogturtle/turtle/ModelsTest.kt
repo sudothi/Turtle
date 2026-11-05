@@ -60,3 +60,22 @@ class RealtimeParsingTest {
         assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("nao e json"))
     }
 }
+
+class ProfileAndPresenceTest {
+    @Test
+    fun parsesPresence() {
+        val e = xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"presence","online":["a","b"],"busy":["b"]}""")
+        assertEquals(xyz.ogturtle.turtle.data.ServerEvent.Presence(setOf("a", "b"), setOf("b")), e)
+    }
+
+    @Test
+    fun parsesProfileView() {
+        val json = """{"id":"u1","username":"kai","displayName":null,"bio":"oi","avatar":null,"banner":null,"staff":true,
+            "createdAt":"2026-11-01T10:00:00.000Z","mutualServers":[{"id":"s1","name":"Turtle"}],"mutualFriends":[],
+            "friendship":"friend","blocked":false}"""
+        val p = xyz.ogturtle.turtle.data.TurtleJson.decodeFromString(xyz.ogturtle.turtle.data.ProfileView.serializer(), json)
+        assertEquals("kai", p.shown)
+        assertEquals("Turtle", p.mutualServers.first().name)
+        assertEquals("friend", p.friendship)
+    }
+}

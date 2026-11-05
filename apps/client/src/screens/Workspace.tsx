@@ -501,7 +501,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     onEditProfile: () => setSettings("profile"),
     onOpenServer: (id) => chooseServer(id),
   };
-  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} onStatus={changeStatus} />;
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
 
   // Celular: barra da chamada ativa quando se está em outra tela (chat, outro servidor, Amigos).
   const callChannel = snap.channelId ? known[snap.channelId] ?? (dms.find((d) => d.channelId === snap.channelId) && asChannel(dms.find((d) => d.channelId === snap.channelId)!)) : undefined;

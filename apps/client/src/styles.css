@@ -815,3 +815,73 @@
   .lightbox img { max-width: 100vw; max-height: 80dvh; }
   .lightbox-bar { flex-wrap: wrap; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
+
+/* Configurações > App desktop */
+.desktop-download { display: flex; flex-direction: column; gap: 14px; }
+.desktop-hero { --lino-bg: var(--ink-2); display: flex; gap: 16px; align-items: center; padding: 18px; }
+.desktop-hero > div { display: flex; flex-direction: column; gap: 4px; }
+.desktop-title { font-family: var(--font-display, inherit); font-size: var(--fs-lg, 1.25rem); }
+.desktop-release { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.desktop-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding-inline: 20px; }
+.desktop-note { margin: 0; padding: 10px 12px; border: 2px dashed var(--ink-5); border-radius: 6px; }
+.desktop-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.45; }
+.desktop-foot { margin: 0; }
+
+/* Página inicial do site (/ e /download): tartaruga gigante nadando no canto inferior esquerdo. */
+.landing { position: relative; min-height: 100%; overflow: hidden; background: var(--ink-0); color: var(--paper); }
+.landing-top { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 28px; }
+.landing-brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-xl); color: var(--paper); text-decoration: none; }
+.landing-nav { display: flex; align-items: center; gap: 8px; }
+.landing-tab { padding: 6px 12px; color: var(--dim); font-weight: 700; text-decoration: none; border-bottom: 2px solid transparent; }
+.landing-tab:hover { color: var(--paper); }
+.landing-tab.active { color: var(--paper); border-bottom-color: var(--paper); }
+.landing-login { text-decoration: none; display: inline-flex; align-items: center; }
+.landing-panel {
+  --lino-bg: var(--ink-2);
+  --lino-border: 2px solid var(--paper);
+  --lino-radius: 10px;
+  position: relative; z-index: 2;
+  width: min(560px, calc(100% - 32px));
+  margin: 24px 28px 48px auto;
+  padding: 28px;
+  box-shadow: 10px 10px 0 var(--ink-0);
+  animation: t-pop 220ms var(--ease);
+}
+.landing-panel h1 { margin: 0 0 16px; font-size: var(--fs-xl); }
+.landing-sea { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.landing-swim {
+  position: absolute; left: -90px; bottom: -110px;
+  width: min(72vw, 560px); aspect-ratio: 1;
+  animation: landing-drift 14s ease-in-out infinite;
+}
+.landing-turtle { width: 100%; height: 100%; color: var(--paper); transform-origin: 50% 50%; animation: landing-paddle 3.2s ease-in-out infinite; }
+@keyframes landing-drift {
+  0%, 100% { transform: translate(0, 0) rotate(-14deg); }
+  50% { transform: translate(46px, -34px) rotate(-6deg); }
+}
+@keyframes landing-paddle {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  40% { transform: translateY(-10px) scale(1.025, 0.975); }
+  70% { transform: translateY(4px) scale(0.985, 1.02); }
+}
+.bubble { position: absolute; border: 2px solid var(--paper); border-radius: 50%; opacity: 0; animation: landing-bubble 7s ease-in infinite; }
+.bubble.b1 { width: 14px; height: 14px; left: min(46vw, 400px); bottom: min(40vw, 330px); }
+.bubble.b2 { width: 9px; height: 9px; left: min(50vw, 430px); bottom: min(36vw, 300px); animation-delay: 1.8s; }
+.bubble.b3 { width: 20px; height: 20px; left: min(43vw, 370px); bottom: min(44vw, 360px); animation-delay: 3.6s; }
+.bubble.b4 { width: 7px; height: 7px; left: min(48vw, 410px); bottom: min(42vw, 350px); animation-delay: 5.1s; }
+@keyframes landing-bubble {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12% { opacity: 0.9; }
+  100% { transform: translate(18px, -42vh); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-swim, .landing-turtle, .bubble { animation: none; }
+}
+@media (max-width: 640px) {
+  .landing-top { padding: 16px; }
+  .landing-brand { font-size: var(--fs-lg); }
+  .landing-panel { margin: 8px auto 40vw; padding: 20px; }
+  .landing-swim { left: -60px; bottom: -70px; width: 86vw; }
+}
+.desktop-hero > svg { flex: none; width: 40px; height: 40px; }
+a.auth-brand { text-decoration: none; }

@@ -161,6 +161,12 @@ const icons = {
       <path d="M14 2.5v5h5" fill="none" stroke="var(--bg-chat, #000)" strokeWidth="1.6" />
     </>
   ),
+  download: (
+    <>
+      <path d="M12 3v11M7 9.5l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 17v3.5h16V17" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
   moon: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor" />,
   send: <path d="M3 20.5 21.5 12 3 3.5l2.5 8.5zM5.5 12H13" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />,
   more: (

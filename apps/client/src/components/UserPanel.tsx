@@ -4,6 +4,7 @@ import { canInviteAccounts, shownName } from "@turtle/protocol";
 import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
+import { desktop } from "../desktop";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
   idle: "",
@@ -22,6 +23,7 @@ export function UserPanel({
   onSettings,
   onProfile,
   onShare,
+  onDownload,
   onLogout,
   onStatus,
 }: {
@@ -35,6 +37,8 @@ export function UserPanel({
   onProfile: () => void;
   /** Abre a escolha de qualidade antes de transmitir a tela. */
   onShare: () => void;
+  /** Abre Configurações > App desktop. */
+  onDownload: () => void;
   onLogout: () => void;
   /** Troca entre Online e Não perturbe. */
   onStatus: (s: UserStatus) => void;
@@ -127,6 +131,12 @@ export function UserPanel({
               <span>Configurações</span>
               <Icon name="settings" size={18} />
             </button>
+            {!desktop() && (
+              <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); onDownload(); }}>
+                <span>Baixar app desktop</span>
+                <Icon name="download" size={18} />
+              </button>
+            )}
             <button role="menuitem" className="menu-item" onClick={() => { setMenu(false); void voice.leave(); onLogout(); }}>
               <span>Sair da conta</span>
               <Icon name="logout" size={18} />

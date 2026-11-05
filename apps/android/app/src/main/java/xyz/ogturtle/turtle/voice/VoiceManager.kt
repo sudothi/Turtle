@@ -231,7 +231,7 @@ class VoiceManager(
             id = localId,
             name = localName,
             speaking = lp.isSpeaking,
-            muted = _ui.value.muted || !lp.isMicrophoneEnabled(),
+            muted = _ui.value.muted || !lp.isMicrophoneEnabled,
             local = true,
         )
 
@@ -242,7 +242,7 @@ class VoiceManager(
                 id = pid,
                 name = pname,
                 speaking = rp.isSpeaking,
-                muted = !rp.isMicrophoneEnabled(),
+                muted = !rp.isMicrophoneEnabled,
                 local = false,
             )
             for ((pub, track) in rp.videoTrackPublications) {

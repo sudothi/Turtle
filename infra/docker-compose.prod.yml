@@ -52,6 +52,7 @@ services:
       DOMAIN: ${DOMAIN:-ogturtle.xyz}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./desktop:/srv/desktop:ro
       - caddy_data:/data
     depends_on: [app, livekit]
 

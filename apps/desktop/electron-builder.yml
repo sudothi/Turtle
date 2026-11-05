@@ -1,0 +1,53 @@
+# Instalador do Windows (NSIS) e auto-atualização. Gerar: `pnpm desktop:dist` na raiz (em Windows).
+appId: xyz.ogturtle.turtle
+productName: Turtle
+copyright: Turtle
+directories:
+  output: release
+  buildResources: build
+# O main é um arquivo só (esbuild); nada de node_modules dentro do app.
+files:
+  - dist/**
+  - assets/**
+  - package.json
+  - "!node_modules/**"
+asar: true
+electronLanguages: [pt-BR, en-US]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  executableName: Turtle
+  # Sem certificado de assinatura por enquanto: o Windows mostra o aviso do SmartScreen
+  # ("Mais informações > Executar assim mesmo") na primeira instalação.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Turtle-Setup-${version}.${ext}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  installerSidebar: build/installerSidebar.bmp
+  uninstallerSidebar: build/uninstallerSidebar.bmp
+  installerHeader: build/installerHeader.bmp
+  installerLanguages: [pt_BR]
+  language: "1046"
+  multiLanguageInstaller: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Turtle
+  uninstallDisplayName: Turtle
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+
+# Auto-atualização: o app procura o latest.yml neste endereço (servido pelo Caddy do VPS).
+publish:
+  provider: generic
+  url: https://app.ogturtle.xyz/desktop/
+  channel: latest

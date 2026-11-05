@@ -20,11 +20,15 @@ import xyz.ogturtle.turtle.data.Friend
 import xyz.ogturtle.turtle.data.Member
 import xyz.ogturtle.turtle.data.Message
 import xyz.ogturtle.turtle.data.Realtime
-import xyz.ogturtle.turtle.data.ServerEvent
 import xyz.ogturtle.turtle.data.Server
+import xyz.ogturtle.turtle.data.ServerEvent
 import xyz.ogturtle.turtle.data.Session
 import xyz.ogturtle.turtle.data.Unread
 import xyz.ogturtle.turtle.data.User
+import xyz.ogturtle.turtle.data.VoiceState
+import xyz.ogturtle.turtle.voice.CallService
+import xyz.ogturtle.turtle.voice.CallUi
+import xyz.ogturtle.turtle.voice.VoiceManager
 
 data class UiState(
     val booting: Boolean = true,
@@ -49,6 +53,8 @@ data class UiState(
     val online: Set<String> = emptySet(),
     /** Quem está em Não perturbe. */
     val dnd: Set<String> = emptySet(),
+    /** Quem está em qual canal de voz agora. */
+    val voiceStates: List<VoiceState> = emptyList(),
     /** Enviando anexos (mostra a barra de progresso no chat). */
     val uploading: Boolean = false,
 )
@@ -70,7 +76,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private val realtime = Realtime(
+    private val realtime: Realtime = Realtime(
         baseUrl = BuildConfig.SERVER_URL,
         token = { session.token },
         scope = viewModelScope,
@@ -80,10 +86,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // Reabriu a conexão (ou abriu agora): pode ter perdido mensagens enquanto estava fora.
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
+            voice.reportAgain()
         },
     )
 
+    val voice = VoiceManager(app, api, viewModelScope) { ch, m, d -> realtime.sendVoice(ch, m, d) }
+    val call: StateFlow<CallUi> = voice.ui
+
     init {
+        CallService.onHangUp = { voice.leave() }
         viewModelScope.launch {
             if (session.token == null) {
                 _state.update { it.copy(booting = false) }
@@ -125,10 +136,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
+        voice.leave()
         realtime.stop()
         session.token = null
         _state.value = UiState(booting = false)
     }
+
+    override fun onCleared() {
+        voice.leave()
+        super.onCleared()
+    }
+
+    // ---- Chamadas de voz ----
+
+    fun joinVoice(channelId: String) = voice.join(channelId)
+    fun leaveVoice() = voice.leave()
+    fun toggleMute() = voice.toggleMute()
+    fun toggleDeafen() = voice.toggleDeafen()
 
     /** Busca servidores, canais, conversas diretas, amigos e não lidas. */
     fun refresh() {
@@ -288,6 +312,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is ServerEvent.MessageDelete -> applyDelete(e.channelId, e.id)
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
+            is ServerEvent.VoiceStates -> _state.update { it.copy(voiceStates = e.states) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
         }

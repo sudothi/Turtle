@@ -56,7 +56,7 @@ class RealtimeParsingTest {
 
     @Test
     fun ignoresUnknownAndBrokenEvents() {
-        assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"voiceStates","states":[]}"""))
+        assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"pong"}"""))
         assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("nao e json"))
     }
 }

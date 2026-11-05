@@ -92,6 +92,8 @@ fun HomeScreen(state: UiState, vm: AppViewModel) {
         else -> "Turtle"
     }
 
+    // Avisa o estado qual conversa está na tela (para as não lidas e o histórico).
+    LaunchedEffect(openId, showFriends, openChannel?.isVoice) { vm.openChannel(if (showFriends || openChannel?.isVoice == true) null else openId) }
     // Abre a gaveta na primeira vez, para a pessoa ver onde estão os canais.
     LaunchedEffect(Unit) { if (openId == null && !showFriends) drawer.open() }
     // Voltar fecha a gaveta se aberta; senão volta à gaveta a partir de uma conversa.
@@ -136,8 +138,18 @@ fun HomeScreen(state: UiState, vm: AppViewModel) {
             PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refresh, modifier = Modifier.padding(pad).fillMaxSize()) {
                 when {
                     showFriends -> FriendList(state, vm)
-                    openId != null -> Placeholder("A conversa chega na próxima etapa", "Por enquanto o app lista servidores, canais, conversas e amigos.")
+                    openChannel?.isVoice == true -> Placeholder("Chamadas de voz chegam na próxima etapa", "Por enquanto use o site para entrar em chamadas.")
+                    openId != null -> ChatScreen(state, vm, openId!!)
                     else -> Placeholder("Arraste da borda esquerda", "Ou toque em ☰ para escolher um canal ou conversa.")
+                }
+                state.error?.let { msg ->
+                    Text(
+                        msg,
+                        color = Ink.Ink0,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Ink.Paper)
+                            .clickable { vm.clearError() }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
                 }
             }
         }

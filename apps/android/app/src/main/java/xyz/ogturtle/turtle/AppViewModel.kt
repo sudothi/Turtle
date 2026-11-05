@@ -13,6 +13,9 @@ import xyz.ogturtle.turtle.data.ApiException
 import xyz.ogturtle.turtle.data.Channel
 import xyz.ogturtle.turtle.data.Dm
 import xyz.ogturtle.turtle.data.Friend
+import xyz.ogturtle.turtle.data.Message
+import xyz.ogturtle.turtle.data.Realtime
+import xyz.ogturtle.turtle.data.ServerEvent
 import xyz.ogturtle.turtle.data.Server
 import xyz.ogturtle.turtle.data.Session
 import xyz.ogturtle.turtle.data.Unread
@@ -29,7 +32,17 @@ data class UiState(
     val friends: List<Friend> = emptyList(),
     val unread: List<Unread> = emptyList(),
     val refreshing: Boolean = false,
+    /** Mensagens carregadas por canal/conversa (ordem cronológica). */
+    val messages: Map<String, List<Message>> = emptyMap(),
+    /** Canais cujo histórico inteiro já foi carregado (não há mais mensagens antigas). */
+    val fullyLoaded: Set<String> = emptySet(),
+    /** Conversa aberta na tela agora (para não marcar como não lida). */
+    val openChannelId: String? = null,
+    val connected: Boolean = false,
 )
+
+/** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
+internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it.id == m.id }) this else this + m
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
@@ -37,6 +50,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    private val realtime = Realtime(
+        baseUrl = BuildConfig.SERVER_URL,
+        token = { session.token },
+        scope = viewModelScope,
+        onEvent = ::onEvent,
+        onOpen = {
+            _state.update { it.copy(connected = true) }
+            // Reabriu a conexão (ou abriu agora): pode ter perdido mensagens enquanto estava fora.
+            refresh()
+            _state.value.openChannelId?.let { id -> reloadMessages(id) }
+        },
+    )
 
     init {
         viewModelScope.launch {
@@ -47,6 +73,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val me = api.me()
                     _state.update { it.copy(user = me, booting = false) }
                     refresh()
+                    realtime.start()
                 } catch (e: ApiException) {
                     // Token recusado: volta para o login. Falha de rede (status 0): mantém a sessão e mostra o erro.
                     if (e.status == 401 || e.status == 403) session.token = null
@@ -71,6 +98,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 session.token = res.token
                 _state.update { it.copy(user = res.user, busy = false) }
                 refresh()
+                realtime.start()
             } catch (e: ApiException) {
                 _state.update { it.copy(busy = false, error = e.message) }
             }
@@ -78,6 +106,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
+        realtime.stop()
         session.token = null
         _state.value = UiState(booting = false)
     }
@@ -97,5 +126,91 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (e.status == 401) logout() else _state.update { it.copy(refreshing = false, error = e.message) }
             }
         }
+    }
+
+    // ---- Conversas ----
+
+    /** Chamado quando a tela de uma conversa abre (id) ou fecha (null). */
+    fun openChannel(id: String?) {
+        _state.update { st -> st.copy(openChannelId = id, unread = if (id == null) st.unread else st.unread.filterNot { it.channelId == id }) }
+        if (id == null) return
+        viewModelScope.launch {
+            if (_state.value.messages[id] == null) reloadMessages(id)
+            runCatching { api.markRead(id) }
+        }
+    }
+
+    private fun reloadMessages(id: String) {
+        viewModelScope.launch {
+            try {
+                val list = api.messages(id)
+                _state.update { it.copy(messages = it.messages + (id to list), fullyLoaded = if (list.size < 50) it.fullyLoaded + id else it.fullyLoaded - id) }
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    /** Busca as mensagens mais antigas que as já carregadas. */
+    fun loadOlder(id: String) {
+        val st = _state.value
+        val current = st.messages[id] ?: return
+        if (id in st.fullyLoaded || current.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val older = api.messages(id, before = current.first().createdAt)
+                _state.update {
+                    val merged = older + (it.messages[id] ?: emptyList())
+                    it.copy(messages = it.messages + (id to merged), fullyLoaded = if (older.size < 50) it.fullyLoaded + id else it.fullyLoaded)
+                }
+            } catch (e: ApiException) {
+                _state.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    fun send(channelId: String, text: String) {
+        val content = text.trim()
+        if (content.isEmpty()) return
+        if (!realtime.send(channelId, content)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+    }
+
+    private fun onEvent(e: ServerEvent) {
+        when (e) {
+            is ServerEvent.NewMessage -> {
+                val m = e.message
+                val st = _state.value
+                val known = st.channels.values.any { list -> list.any { it.id == m.channelId } } || st.dms.any { it.channelId == m.channelId }
+                if (!known) refresh()
+                _state.update { cur ->
+                    val loaded = cur.messages[m.channelId]
+                    val isOpen = cur.openChannelId == m.channelId
+                    val mine = m.userId == cur.user?.id
+                    cur.copy(
+                        messages = if (loaded != null) cur.messages + (m.channelId to loaded.withMessage(m)) else cur.messages,
+                        unread = if (isOpen || mine) cur.unread else bump(cur, m),
+                    )
+                }
+                if (_state.value.openChannelId == m.channelId) viewModelScope.launch { runCatching { api.markRead(m.channelId) } }
+            }
+            is ServerEvent.MessageUpdate -> _state.update { cur ->
+                val list = cur.messages[e.message.channelId] ?: return@update cur
+                cur.copy(messages = cur.messages + (e.message.channelId to list.map { if (it.id == e.message.id) e.message else it }))
+            }
+            is ServerEvent.MessageDelete -> _state.update { cur ->
+                val list = cur.messages[e.channelId] ?: return@update cur
+                cur.copy(messages = cur.messages + (e.channelId to list.filterNot { it.id == e.id }))
+            }
+            is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
+            ServerEvent.Refresh -> refresh()
+            is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
+        }
+    }
+
+    private fun bump(cur: UiState, m: Message): List<Unread> {
+        val existing = cur.unread.firstOrNull { it.channelId == m.channelId }
+        if (existing != null) return cur.unread.map { if (it.channelId == m.channelId) it.copy(count = it.count + 1) else it }
+        val serverId = cur.channels.entries.firstOrNull { (_, list) -> list.any { it.id == m.channelId } }?.key
+        return cur.unread + Unread(m.channelId, serverId, 1, 0)
     }
 }

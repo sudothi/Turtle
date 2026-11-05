@@ -57,6 +57,36 @@ data class Unread(val channelId: String, val serverId: String? = null, val count
 @Serializable
 data class Friend(val user: Person, val status: String)
 
+@Serializable
+data class Attachment(
+    val id: String,
+    val key: String,
+    val name: String,
+    val size: Long = 0,
+    val mime: String = "",
+    val width: Int? = null,
+    val height: Int? = null,
+) {
+    val isImage get() = Regex("^image/(png|jpeg|gif|webp)$").matches(mime)
+}
+
+@Serializable
+data class Message(
+    val id: String,
+    val channelId: String,
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatar: String? = null,
+    val staff: Boolean = false,
+    val content: String = "",
+    val createdAt: String,
+    val editedAt: String? = null,
+    val attachments: List<Attachment> = emptyList(),
+) {
+    val author get() = displayName?.takeIf { it.isNotBlank() } ?: username
+}
+
 val Person.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username
 val User.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username
 

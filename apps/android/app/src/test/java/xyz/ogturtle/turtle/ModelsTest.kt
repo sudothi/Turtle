@@ -37,3 +37,26 @@ class ModelsTest {
         assertEquals("Galera", dm.copy(name = "Galera").title)
     }
 }
+
+class RealtimeParsingTest {
+    @Test
+    fun parsesMessageEvent() {
+        val json = """{"t":"message","message":{"id":"m1","channelId":"c1","userId":"u1","username":"kai","displayName":null,
+            "avatar":null,"staff":false,"content":"oi <@u2>","createdAt":"2026-11-05T17:00:00.000Z","editedAt":null,"attachments":[]}}"""
+        val e = xyz.ogturtle.turtle.data.parseServerEvent(json)
+        assertTrue(e is xyz.ogturtle.turtle.data.ServerEvent.NewMessage)
+        assertEquals("oi <@u2>", (e as xyz.ogturtle.turtle.data.ServerEvent.NewMessage).message.content)
+    }
+
+    @Test
+    fun syncAndFriendsMeanRefresh() {
+        assertEquals(xyz.ogturtle.turtle.data.ServerEvent.Refresh, xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"sync"}"""))
+        assertEquals(xyz.ogturtle.turtle.data.ServerEvent.Refresh, xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"friends"}"""))
+    }
+
+    @Test
+    fun ignoresUnknownAndBrokenEvents() {
+        assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"presence","online":[]}"""))
+        assertEquals(null, xyz.ogturtle.turtle.data.parseServerEvent("nao e json"))
+    }
+}

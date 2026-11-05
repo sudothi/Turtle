@@ -67,6 +67,16 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
     suspend fun channels(serverId: String): List<Channel> = get("/servers/$serverId/channels", ListSerializer(Channel.serializer()))
     suspend fun dms(): List<Dm> = get("/dms", ListSerializer(Dm.serializer()))
     suspend fun friends(): List<Friend> = get("/friends", ListSerializer(Friend.serializer()))
+    /** Mensagens em ordem cronológica; `before` = createdAt da mais antiga já carregada. */
+    suspend fun messages(channelId: String, before: String? = null): List<Message> {
+        val q = if (before != null) "?before=" + java.net.URLEncoder.encode(before, "UTF-8") else ""
+        return get("/channels/$channelId/messages$q", ListSerializer(Message.serializer()))
+    }
+
+    suspend fun markRead(channelId: String) {
+        call("POST", "/channels/$channelId/read", "{}")
+    }
+
     suspend fun unread(): List<Unread> = get("/unread", ListSerializer(Unread.serializer()))
 
     /** URL de foto/ícone/banner a partir da chave guardada no perfil. */

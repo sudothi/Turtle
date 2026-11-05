@@ -35,6 +35,8 @@ data class VideoTile(
     val name: String,
     val screen: Boolean,
     val track: VideoTrack,
+    /** É a minha própria câmera (mostrada para eu me ver). */
+    val local: Boolean = false,
 )
 
 /** Estado completo da chamada para a interface. */
@@ -43,6 +45,8 @@ data class CallUi(
     val channelId: String? = null,
     val muted: Boolean = false,
     val deafened: Boolean = false,
+    /** Minha câmera está ligada. */
+    val cameraOn: Boolean = false,
     val people: List<CallPerson> = emptyList(),
     val videos: List<VideoTile> = emptyList(),
     val error: String? = null,
@@ -55,7 +59,7 @@ class VoiceManager(
     private val context: Context,
     private val api: Api,
     private val scope: CoroutineScope,
-    private val onReport: (channelId: String?, muted: Boolean, deafened: Boolean) -> Unit,
+    private val onReport: (channelId: String?, muted: Boolean, deafened: Boolean, camera: Boolean) -> Unit,
 ) {
     private val _ui = MutableStateFlow(CallUi())
     val ui: StateFlow<CallUi> = _ui.asStateFlow()
@@ -100,7 +104,7 @@ class VoiceManager(
                         if (room === newRoom) {
                             cleanupRoom()
                             CallService.stop(context)
-                            onReport(null, false, false)
+                            onReport(null, false, false, false)
                             _ui.value = CallUi()
                         }
                         return@collect
@@ -135,14 +139,14 @@ class VoiceManager(
                 _ui.update { it.copy(status = "connected", error = null) }
                 rebuildSnapshot(newRoom)
                 val st = _ui.value
-                onReport(channelId, st.muted, st.deafened)
+                onReport(channelId, st.muted, st.deafened, false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 if (room === newRoom) {
                     cleanupRoom()
                     CallService.stop(context)
-                    onReport(null, false, false)
+                    onReport(null, false, false, false)
                     val msg = e.message ?: "erro desconhecido"
                     _ui.value = CallUi(error = "Não foi possível entrar na chamada: $msg")
                 }
@@ -153,7 +157,7 @@ class VoiceManager(
     fun leave() {
         disconnectCurrent()
         CallService.stop(context)
-        onReport(null, false, false)
+        onReport(null, false, false, false)
         _ui.value = CallUi()
     }
 
@@ -173,7 +177,7 @@ class VoiceManager(
                 runCatching { r.localParticipant.setMicrophoneEnabled(!nextMuted) }
                 rebuildSnapshot(r)
             }
-            onReport(st.channelId, nextMuted, st.deafened)
+            onReport(st.channelId, nextMuted, st.deafened, st.cameraOn)
         }
     }
 
@@ -194,14 +198,32 @@ class VoiceManager(
                 runCatching { r.localParticipant.setMicrophoneEnabled(!nextMuted) }
                 rebuildSnapshot(r)
             }
-            onReport(st.channelId, nextMuted, nextDeafened)
+            onReport(st.channelId, nextMuted, nextDeafened, st.cameraOn)
+        }
+    }
+
+    /** Liga ou desliga a minha câmera (a permissão de câmera já foi pedida pela tela). */
+    fun toggleCamera() {
+        val st = _ui.value
+        val r = room
+        if (r == null || st.status == "idle") return
+        val next = !st.cameraOn
+        scope.launch {
+            val ok = runCatching { r.localParticipant.setCameraEnabled(next) }.getOrDefault(false)
+            if (!ok && next) {
+                _ui.update { it.copy(error = "Não foi possível ligar a câmera.") }
+            } else {
+                _ui.update { it.copy(cameraOn = next) }
+                onReport(st.channelId, _ui.value.muted, _ui.value.deafened, next)
+            }
+            rebuildSnapshot(r)
         }
     }
 
     fun reportAgain() {
         val st = _ui.value
         if (st.channelId != null && st.status != "idle") {
-            onReport(st.channelId, st.muted, st.deafened)
+            onReport(st.channelId, st.muted, st.deafened, st.cameraOn)
         }
     }
 
@@ -234,6 +256,14 @@ class VoiceManager(
             muted = _ui.value.muted || !lp.isMicrophoneEnabled,
             local = true,
         )
+
+        if (_ui.value.cameraOn) {
+            for ((pub, track) in lp.videoTrackPublications) {
+                val videoTrack = track as? VideoTrack ?: continue
+                if (pub.source != Track.Source.CAMERA) continue
+                videos += VideoTile(key = "$localId:camera:${pub.sid}", participantId = localId, name = localName, screen = false, track = videoTrack, local = true)
+            }
+        }
 
         for (rp in r.remoteParticipants.values) {
             val pid = rp.identity?.value ?: continue

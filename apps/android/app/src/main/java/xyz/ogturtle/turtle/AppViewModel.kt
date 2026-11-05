@@ -90,7 +90,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         },
     )
 
-    val voice = VoiceManager(app, api, viewModelScope) { ch, m, d -> realtime.sendVoice(ch, m, d) }
+    val voice = VoiceManager(app, api, viewModelScope) { ch, m, d, c -> realtime.sendVoice(ch, m, d, c) }
     val call: StateFlow<CallUi> = voice.ui
 
     init {
@@ -153,6 +153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun leaveVoice() = voice.leave()
     fun toggleMute() = voice.toggleMute()
     fun toggleDeafen() = voice.toggleDeafen()
+    fun toggleCamera() = voice.toggleCamera()
 
     /** Busca servidores, canais, conversas diretas, amigos e não lidas. */
     fun refresh() {

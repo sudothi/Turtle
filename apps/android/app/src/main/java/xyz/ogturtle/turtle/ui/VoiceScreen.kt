@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.HeadsetOff
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -98,6 +100,10 @@ fun VoiceScreen(
         } else {
             permError = "Sem permissão do microfone, não dá para falar."
         }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.toggleCamera() else permError = "Sem permissão da câmera."
     }
 
     fun requestJoin() {
@@ -235,6 +241,10 @@ fun VoiceScreen(
                 ) {
                     CallControlButton(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (call.muted) "Ativar microfone" else "Silenciar microfone", call.muted) { vm.toggleMute() }
                     CallControlButton(if (call.deafened) Icons.Filled.HeadsetOff else Icons.Filled.Headset, if (call.deafened) "Ativar áudio" else "Desativar áudio", call.deafened) { vm.toggleDeafen() }
+                    CallControlButton(if (call.cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, if (call.cameraOn) "Desligar câmera" else "Ligar câmera", call.cameraOn) {
+                        if (call.cameraOn || ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) vm.toggleCamera()
+                        else cameraLauncher.launch(Manifest.permission.CAMERA)
+                    }
                     CallControlButton(Icons.Filled.CallEnd, "Sair da chamada", true) { vm.leaveVoice() }
                 }
             }

@@ -5,6 +5,7 @@ import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
+import { MobileBack, useMobile } from "../mobile";
 import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
@@ -105,6 +106,40 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       return true;
     }
   });
+  // ---- Celular: uma tela por vez (lista de canais ou conteúdo) e membros/perfil numa gaveta ----
+  const mobile = useMobile();
+  const [pane, setPane] = useState<"nav" | "content">("nav");
+  const [drawer, setDrawer] = useState(false);
+  /** Abre a conversa/chamada escolhida em tela cheia (no celular). */
+  const showContent = useCallback(() => {
+    setDrawer(false);
+    setPane("content");
+  }, []);
+  // O voltar do Android/navegador volta para a lista em vez de sair do app.
+  useEffect(() => {
+    if (!mobile || pane !== "content") return;
+    if (history.state?.turtlePane !== "content") history.pushState({ turtlePane: "content" }, "");
+    const onPop = () => { setDrawer(false); setPane("nav"); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [mobile, pane]);
+  const back = useCallback(() => {
+    if (history.state?.turtlePane === "content") history.back();
+    else { setDrawer(false); setPane("nav"); }
+  }, []);
+  // Deslizar da borda esquerda para a direita também volta.
+  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = mobile && pane === "content" && t && t.clientX < 32 ? { x: t.clientX, y: t.clientY } : undefined;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = swipe.current;
+    const t = e.changedTouches[0];
+    swipe.current = undefined;
+    if (start && t && t.clientX - start.x > 70 && Math.abs(t.clientY - start.y) < 60) back();
+  };
+
   const ws = useRef<WebSocket | undefined>(undefined);
   const currentRef = useRef<string | undefined>(undefined);
   /** Canal aberto agora: a conversa direta no Início, senão o canal do servidor. */
@@ -337,15 +372,17 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     setHome(true);
     setDmCall(false);
     setDmId(dm.channelId);
-  }, []);
+    showContent();
+  }, [showContent]);
   /** Abre um canal de servidor (vindo de uma notificação). */
   const goToChannel = useCallback((sid: string, channelId: string) => {
     setHome(false);
     setView("text");
+    showContent();
     if (sid === serverRef.current) return setCurrent(channelId);
     pendingChannel.current = channelId;
     chooseServer(sid);
-  }, [chooseServer]);
+  }, [chooseServer, showContent]);
 
   // Mensagem nova chegando: lista, não lidas, som e notificação. Fica num ref para ver o estado atual sem reconectar.
   const onMessage = useRef<(m: Message) => void>(() => {});
@@ -401,6 +438,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   }, [openDm]);
 
   const toggleMembers = () => {
+    if (mobile) return setDrawer((o) => !o);
     setMembersOpen((o) => {
       try {
         localStorage.setItem(MEMBERS_KEY, o ? "0" : "1");
@@ -412,6 +450,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   };
 
   const toggleDmPanel = () => {
+    if (mobile) return setDrawer((o) => !o);
     setDmPanel((o) => {
       try {
         localStorage.setItem(DM_PANEL_KEY, o ? "0" : "1");
@@ -425,9 +464,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const logout = () => { void voice.leave(); onLogout(); };
   const speaking = new Set(snap.channelId ? snap.participants.filter((p) => p.speaking && !p.muted).map((p) => p.id) : []);
   const textChannel = channels.find((c) => c.id === current);
-  const showMembers = !home && membersOpen && view === "text" && !!serverId;
+  const showMembers = !home && (mobile ? drawer && pane === "content" : membersOpen) && view === "text" && !!serverId;
   const dm = dms.find((d) => d.channelId === dmId);
-  const showDmPanel = home && !!dm && !dmCall && dmPanel;
+  const showDmPanel = home && !!dm && !dmCall && (mobile ? drawer && pane === "content" : dmPanel);
   const asChannel = (d: Dm): Channel => ({ id: d.channelId, serverId: "", name: dmTitle(d), kind: "text" });
   const dmChannel: Channel | undefined = dm && asChannel(dm);
   const dmMembers: Member[] = dm
@@ -455,9 +494,25 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   };
   const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} onStatus={changeStatus} />;
 
+  const noServer = (
+    <div className="no-server">
+      <h2 className="t-display">Você ainda não está em nenhum servidor</h2>
+      <p className="t-muted">Crie o seu ou entre em um com um convite de um amigo.</p>
+      <div className="no-server-actions">
+        <Button onClick={() => setCreatingServer(true)}>Criar servidor</Button>
+        <Button variant="ghost" onClick={() => setJoining(true)}>Entrar com convite</Button>
+      </div>
+    </div>
+  );
+
   return (
     <PresenceContext.Provider value={presence}>
-    <div className={`app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}>
+    <MobileBack.Provider value={mobile ? back : undefined}>
+    <div
+      className={mobile ? `app m m-${pane}` : `app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
       <ServerRail
         servers={servers}
         activeId={serverId}
@@ -477,7 +532,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           online={online}
           friendsOpen={!dmId}
           pending={pendingIn}
-          onFriends={() => setDmId(undefined)}
+          onFriends={() => { setDmId(undefined); showContent(); }}
           onDm={openDm}
           onNewGroup={() => setNewGroup(true)}
           calls={voiceStates}
@@ -493,8 +548,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           voiceView={voiceView}
           voiceStates={voiceStates}
           speaking={speaking}
-          onText={(id) => { setCurrent(id); setView("text"); }}
-          onVoice={(id) => { setVoiceView(id); setView("voice"); void voice.join(id); }}
+          onText={(id) => { setCurrent(id); setView("text"); showContent(); }}
+          onVoice={(id) => { setVoiceView(id); setView("voice"); showContent(); void voice.join(id); }}
           onCreate={setCreating}
           onInvite={() => setInviting(true)}
           onSettings={() => setServerSettings(true)}
@@ -506,7 +561,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">
-          <div className="channels" />
+          <div className="channels">{mobile && serversLoaded && noServer}</div>
           {footer}
         </aside>
       )}
@@ -545,8 +600,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
                   ) : null}
                   <IconButton
                     label={dm.group ? (dmPanel ? "Ocultar lista de membros" : "Mostrar lista de membros") : dmPanel ? "Ocultar perfil do usuário" : "Mostrar perfil do usuário"}
-                    aria-pressed={dmPanel}
-                    className={dmPanel ? "is-active" : ""}
+                    aria-pressed={mobile ? drawer : dmPanel}
+                    className={(mobile ? drawer : dmPanel) ? "is-active" : ""}
                     onClick={toggleDmPanel}
                   >
                     <Icon name={dm.group ? "users" : "profile"} />
@@ -559,14 +614,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           )
         ) : !server ? (
           serversLoaded && (
-            <div className="no-server">
-              <h2 className="t-display">Você ainda não está em nenhum servidor</h2>
-              <p className="t-muted">Crie o seu ou entre em um com um convite de um amigo.</p>
-              <div className="no-server-actions">
-                <Button onClick={() => setCreatingServer(true)}>Criar servidor</Button>
-                <Button variant="ghost" onClick={() => setJoining(true)}>Entrar com convite</Button>
-              </div>
-            </div>
+            noServer
           )
         ) : view === "voice" ? (
           <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} />
@@ -577,7 +625,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             members={members}
             meId={user.id}
             onSend={send}
-            membersOpen={membersOpen}
+            membersOpen={mobile ? drawer : membersOpen}
             onToggleMembers={toggleMembers}
             canInvite
             onInvite={() => setInviting(true)}
@@ -591,6 +639,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {showDmPanel && dm && (dm.group
         ? <DmGroupPanel people={[...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }]} online={online} onProfile={setViewProfile} />
         : dm.users[0] && <DmProfilePanel userId={dm.users[0].id} h={profileHandlers} version={profileVersion} onFull={() => setFullProfile(dm.users[0]!.id)} onOpenUser={setFullProfile} />)}
+      {mobile && (showMembers || showDmPanel) && <button className="m-backdrop" aria-label="Fechar painel" onClick={() => setDrawer(false)} />}
       {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
@@ -637,6 +686,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         />
       )}
     </div>
+    </MobileBack.Provider>
     </PresenceContext.Provider>
   );
 }

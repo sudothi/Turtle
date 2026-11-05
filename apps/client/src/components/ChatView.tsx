@@ -6,10 +6,23 @@ import {
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
+import { useMobileBack } from "../mobile";
+
+/** Botão "voltar" do celular (só aparece no layout de uma tela por vez). */
+export function BackButton() {
+  const back = useMobileBack();
+  if (!back) return null;
+  return (
+    <IconButton label="Voltar" className="m-back" onClick={back}>
+      <Icon name="chevron-left" size={24} />
+    </IconButton>
+  );
+}
 
 export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speaker" | "users"; name: string; children?: React.ReactNode }) {
   return (
     <header className="chat-head">
+      <BackButton />
       <Icon name={icon} size={22} className="chat-head-icon" />
       <h1 className="chat-head-name">{name}</h1>
       <div className="chat-head-actions">{children}</div>

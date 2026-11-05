@@ -3,6 +3,7 @@ import { dmTitle, shownName, type Dm, type Friend, type Person, type VoiceState 
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
 import { dot, usePresence } from "../presence";
+import { BackButton } from "./ChatView";
 
 const byName = (a: { user: Person }, b: { user: Person }) => shownName(a.user).localeCompare(shownName(b.user), "pt-BR");
 
@@ -116,6 +117,7 @@ export function FriendsPanel({
   return (
     <section className="chat friends" aria-label="Amigos">
       <header className="chat-head">
+        <BackButton />
         <Icon name="users" size={22} className="chat-head-icon" />
         <h1 className="chat-head-name">Amigos</h1>
         <div className="friends-tabs">

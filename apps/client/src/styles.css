@@ -637,3 +637,79 @@
 .up-fold:first-child .up-fold-head { border-top: 0; }
 .up-fold-body { padding: 0 6px 8px; display: flex; flex-direction: column; }
 .up-group h3 { margin: 8px 8px 6px; }
+
+/* ===================== Celular (≤ 760 px): uma tela por vez ===================== */
+/* O Workspace põe .m e .m-nav (servidores + canais) ou .m-content (conversa/chamada em tela cheia). */
+.app.m {
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  background: var(--bg-rail);
+}
+.app.m-nav { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
+.app.m-nav > .stage { display: none; }
+.app.m-content { grid-template-columns: minmax(0, 1fr); }
+.app.m-content > .rail, .app.m-content > .sidebar { display: none; }
+.app.m .sidebar { border-radius: 12px 0 0 0; overflow: hidden; }
+.app.m .user-panel { padding-bottom: env(safe-area-inset-bottom); }
+.app.m-content > .stage { animation: m-slide 180ms var(--ease); }
+@keyframes m-slide { from { transform: translateX(24px); opacity: 0.4; } }
+.app.m .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+/* Cabeçalho: botão voltar e ações compactas */
+.m-back { margin-left: -8px; margin-right: 2px; }
+.app.m .chat-head { padding-left: 8px; padding-right: 8px; gap: 6px; }
+.app.m .chat-head-actions { gap: 0; }
+.app.m .friends .chat-head { height: auto; min-height: var(--header-h); flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
+.app.m .friends-tabs { margin-left: 0; width: 100%; flex-wrap: nowrap; overflow-x: auto; }
+.app.m .friends-tab { flex: none; }
+
+/* Gaveta de membros / perfil da DM, vinda da direita */
+.app.m > .members, .app.m > .up-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(320px, 86vw);
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: env(safe-area-inset-bottom);
+  border-left: 2px solid var(--paper);
+  box-shadow: -10px 0 0 var(--ink-0);
+  animation: m-drawer 180ms var(--ease);
+}
+.app.m > .members { display: block; }
+.app.m > .up-panel { display: flex; }
+@keyframes m-drawer { from { transform: translateX(100%); } }
+.m-backdrop { position: fixed; inset: 0; z-index: 39; border: 0; padding: 0; background: var(--bg-overlay); animation: t-fade 120ms var(--ease); }
+
+/* Mensagens: sem espaço reservado para o mouse */
+.app.m .msg { grid-template-columns: 48px minmax(0, 1fr); padding: 2px 12px; }
+.app.m .msg-gutter, .app.m .msg:hover .msg-gutter { visibility: hidden; }
+.app.m .channel-welcome { padding: 12px 12px 8px; }
+.app.m .day-divider { margin-left: 12px; margin-right: 12px; }
+.app.m .composer-box input, .app.m textarea { font-size: 16px; } /* 16 px evita o zoom automático do iPhone */
+
+/* Chamada: grade em coluna, controles maiores */
+.app.m .tiles { grid-template-columns: 1fr; padding: 8px; gap: 8px; align-content: start; }
+.app.m .focus-stage { padding: 8px 8px 0; }
+.app.m .call-controls { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+/* Alvos de toque de pelo menos 44 px */
+.app.m .channel { min-height: 40px; }
+.app.m .member, .app.m .friend-row { min-height: 52px; }
+.app.m .channel-edit { opacity: 1; }
+
+/* Modais ocupam a largura do celular */
+@media (max-width: 760px) {
+  .t-modal-backdrop, .modal { padding: 8px; align-items: end; }
+  .t-modal, .panel { width: 100%; max-height: calc(100dvh - 16px - env(safe-area-inset-top)); }
+  .up-popout { left: 8px !important; right: 8px; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important; width: auto; }
+  .settings-tabs { overflow-x: auto; }
+  .settings-tab { flex: none; }
+}
+
+/* Telas de toque (sem mouse): mostra o que só aparecia com o cursor em cima */
+@media (hover: none) {
+  .tile-actions, .tile-volume { opacity: 1; }
+  .msg:hover { background: none; }
+}

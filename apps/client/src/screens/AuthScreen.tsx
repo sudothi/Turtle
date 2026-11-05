@@ -17,7 +17,7 @@ function errorField(mode: Mode, message: string): Field[] {
 /** Código de convite vindo de um link /convite/<código>. */
 const inviteFromLink = () => decodeURIComponent(location.pathname.match(/^\/convite\/([^/]+)/)?.[1] ?? "");
 
-export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
+export function AuthScreen({ onAuth, onHome }: { onAuth: (u: User) => void; /** Volta para a página inicial do site (não existe no app desktop). */ onHome?: () => void }) {
   const linkCode = inviteFromLink();
   const [mode, setMode] = useState<Mode>(linkCode ? "register" : "login");
   const [error, setError] = useState<{ fields: Field[]; message: string }>();
@@ -49,10 +49,26 @@ export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
 
   return (
     <main className="auth lino-live">
-      <div className="auth-brand" aria-hidden="true">
-        <TurtleMark size={30} />
-        <span className="t-display">Turtle</span>
-      </div>
+      {onHome ? (
+        <a
+          href="/"
+          className="auth-brand"
+          aria-label="Página inicial do Turtle"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onHome();
+          }}
+        >
+          <TurtleMark size={30} />
+          <span className="t-display">Turtle</span>
+        </a>
+      ) : (
+        <div className="auth-brand" aria-hidden="true">
+          <TurtleMark size={30} />
+          <span className="t-display">Turtle</span>
+        </div>
+      )}
 
       <div className={`auth-card lino lino-lg ${mode}`}>
         <form className="auth-form" onSubmit={submit} key={mode}>

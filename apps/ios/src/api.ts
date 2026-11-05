@@ -1,4 +1,4 @@
-import { channelSchema, loginBody, registerBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
+import { channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -65,5 +65,10 @@ export class Api {
   me = () => this.request("/me", userSchema);
   servers = () => this.request("/servers", z.array(serverSchema));
   channels = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/channels`, z.array(channelSchema));
+  members = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/members`, z.array(memberSchema));
+  friends = () => this.request("/friends", z.array(friendSchema));
+  dms = () => this.request("/dms", z.array(dmSchema));
+  messages = (id: string) => this.request(`/channels/${encodeURIComponent(id)}/messages`, z.array(messageSchema));
+  fileUrl = (key: string | null | undefined) => key ? `${this.origin}/files/${encodeURIComponent(key)}` : undefined;
   voiceToken = (id: string) => this.request(`/voice/${encodeURIComponent(id)}/token`, voiceTokenSchema, {});
 }

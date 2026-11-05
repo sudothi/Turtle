@@ -17,6 +17,7 @@ import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { DmGroupPanel, DmProfilePanel, ProfileModal, ProfilePopout, type ProfileHandlers } from "../components/UserProfile";
 import { AddToGroupModal, FriendsPanel, HomeSidebar, NewGroupModal } from "../components/Home";
+import { callService } from "../native";
 import { MemberList } from "../components/MemberList";
 import { CreateChannelModal, EditChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
@@ -166,6 +167,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   );
   const snap = useSyncExternalStore(voice.subscribe, voice.getSnapshot);
   useEffect(() => () => void voice.leave(), [voice]);
+  // No app Android, mantém um serviço em primeiro plano enquanto estiver numa chamada.
+  const inCall = snap.status !== "idle";
+  const callLabel = snap.channelId ? known[snap.channelId]?.name ?? (() => { const d = dms.find((x) => x.channelId === snap.channelId); return d ? dmTitle(d) : "chamada"; })() : "chamada";
+  useEffect(() => {
+    if (inCall) callService.start(`Na chamada · ${callLabel}`);
+    else callService.stop();
+  }, [inCall, callLabel]);
 
   const chooseServer = useCallback((id: string | undefined) => {
     setHome(false);

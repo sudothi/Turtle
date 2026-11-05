@@ -26,13 +26,25 @@ jobs:
             echo "::warning::Sem ANDROID_KEYSTORE_BASE64: assinando com a chave de debug."
           fi
       - name: Testes
-        run: ./gradlew testDebugUnitTest --no-daemon --console=plain
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/test.log" || {
+            echo "=== PRIMEIROS ERROS ==="
+            grep -m 12 -E "^(e: |w: .*error|.*FAILED)" "$RUNNER_TEMP/test.log" | cut -c1-260
+            exit 1
+          }
       - name: Compila o APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --console=plain
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/build.log" || {
+            echo "=== PRIMEIROS ERROS ==="
+            grep -m 12 -E "^e: " "$RUNNER_TEMP/build.log" | cut -c1-260
+            exit 1
+          }
       - run: mv app/build/outputs/apk/release/*.apk "$RUNNER_TEMP/turtle-nativo.apk"
       - uses: actions/upload-artifact@v4
         with:

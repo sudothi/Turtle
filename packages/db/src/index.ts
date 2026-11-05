@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -94,6 +94,36 @@ CREATE TABLE IF NOT EXISTS blocks (
   PRIMARY KEY (blocker, blocked));
 CREATE INDEX IF NOT EXISTS blocks_blocked_idx ON blocks (blocked);
 CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_id, name);
+
+-- Status (Não perturbe), ícone do servidor e mensagens editadas.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'online';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS icon_key text;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+-- Anexos do chat (os arquivos ficam na pasta de uploads).
+CREATE TABLE IF NOT EXISTS attachments (
+  id text PRIMARY KEY,
+  channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  message_id text REFERENCES messages(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_key text NOT NULL, name text NOT NULL, size integer NOT NULL, mime text NOT NULL,
+  width integer, height integer, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS attachments_message_idx ON attachments (message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS attachments_key_idx ON attachments (file_key);
+-- Não lidas. Na primeira vez, tudo o que já existe conta como lido (ninguém abre o app com 500 não lidas).
+DO $$
+BEGIN
+  IF to_regclass('read_states') IS NULL THEN
+    CREATE TABLE read_states (
+      user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      last_read_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, channel_id));
+    INSERT INTO read_states (user_id, channel_id)
+      SELECT m.user_id, c.id FROM server_members m JOIN channels c ON c.server_id = m.server_id WHERE c.kind = 'text'
+      UNION SELECT user_id, channel_id FROM dm_members
+      ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 `;
 
 export interface DbHandle {

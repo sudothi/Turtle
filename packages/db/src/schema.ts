@@ -11,6 +11,8 @@ export const users = pgTable("users", {
   bio: text("bio"),
   avatarKey: text("avatar_key"),
   bannerKey: text("banner_key"),
+  /** "online" ou "busy" (Não perturbe). */
+  status: text("status", { enum: ["online", "busy"] }).notNull().default("online"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -31,6 +33,7 @@ export const servers = pgTable("servers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   ownerId: text("owner_id").notNull().references(() => users.id),
+  iconKey: text("icon_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -77,8 +80,39 @@ export const messages = pgTable(
     userId: text("user_id").notNull().references(() => users.id),
     content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
   },
   (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt)],
+);
+
+/** Arquivos do chat. Sem `messageId` = enviado mas ainda não usado numa mensagem (some depois de 1 h). */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    fileKey: text("file_key").notNull(),
+    name: text("name").notNull(),
+    size: integer("size").notNull(),
+    mime: text("mime").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("attachments_message_idx").on(t.messageId), uniqueIndex("attachments_key_idx").on(t.fileKey)],
+);
+
+/** Até quando cada pessoa leu cada conversa (para as marcas de não lida). */
+export const readStates = pgTable(
+  "read_states",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.channelId] })],
 );
 
 export const friendships = pgTable(

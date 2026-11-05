@@ -46,4 +46,18 @@ describe("migração para servidores", () => {
     expect((await db.query("SELECT id FROM channels")).rows).toHaveLength(0);
     expect((await db.query("SELECT id FROM servers")).rows).toHaveLength(0);
   });
+
+  it("não lidas: na primeira vez, o que já existe conta como lido; depois não mexe mais", async () => {
+    const db = new PGlite();
+    await db.exec(LEGACY);
+    await db.exec(`
+      INSERT INTO users (id, username, password_hash, is_admin) VALUES ('u1', 'thiago', 'x', true), ('u2', 'amigo', 'x', false);
+      INSERT INTO channels (id, name, kind) VALUES ('c1', 'geral', 'text'), ('c2', 'Sala', 'voice');`);
+    await db.exec(MIGRATION);
+    const seeded = await db.query<{ user_id: string; channel_id: string }>("SELECT user_id, channel_id FROM read_states ORDER BY user_id");
+    expect(seeded.rows).toEqual([{ user_id: "u1", channel_id: "c1" }, { user_id: "u2", channel_id: "c1" }]);
+    await db.exec("DELETE FROM read_states WHERE user_id = 'u2'");
+    await db.exec(MIGRATION);
+    expect((await db.query("SELECT 1 FROM read_states")).rows).toHaveLength(1);
+  });
 });

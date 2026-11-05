@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+/** Arquivo anexado a uma mensagem: `key` serve em GET /files/:key. Imagens trazem a largura e a altura. */
+export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 10;
+export const attachmentSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  name: z.string(),
+  size: z.number(),
+  mime: z.string(),
+  width: z.number().nullable().default(null),
+  height: z.number().nullable().default(null),
+});
+export type Attachment = z.infer<typeof attachmentSchema>;
+/** Imagem que o app mostra direto no chat (o resto vira um cartão de download). */
+export const isInlineImage = (a: Pick<Attachment, "mime">) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime);
+
 export const messageSchema = z.object({
   id: z.string(),
   channelId: z.string(),
@@ -11,13 +27,25 @@ export const messageSchema = z.object({
   staff: z.boolean().default(false),
   content: z.string(),
   createdAt: z.string(),
+  /** Quando foi editada pela última vez (mostra "(editado)"). */
+  editedAt: z.string().nullable().default(null),
+  attachments: z.array(attachmentSchema).default([]),
 });
 export type Message = z.infer<typeof messageSchema>;
 
 export const channelKind = z.enum(["text", "voice"]);
 export type ChannelKind = z.infer<typeof channelKind>;
 export const channelSchema = z.object({ id: z.string(), serverId: z.string(), name: z.string(), kind: channelKind });
+export const channelNameSchema = z.string().trim().min(1).max(40);
+export const renameChannelBody = z.object({ name: channelNameSchema });
+/** Edição de mensagem (PATCH /messages/:id). */
+export const editMessageBody = z.object({ content: z.string().trim().min(1).max(4000) });
 export type Channel = z.infer<typeof channelSchema>;
+
+/** Status escolhido pela pessoa: "busy" (Não perturbe) silencia sons e notificações. */
+export const userStatus = z.enum(["online", "busy"]);
+export type UserStatus = z.infer<typeof userStatus>;
+export const statusLabel: Record<UserStatus, string> = { online: "Online", busy: "Não perturbe" };
 
 /** Perfil público: `avatar` e `banner` são chaves de arquivo (GET /files/:key). */
 export const BIO_MAX = 190;
@@ -32,12 +60,14 @@ export const userSchema = z.object({
   bio: z.string().nullable().default(null),
   avatar: z.string().nullable().default(null),
   banner: z.string().nullable().default(null),
+  status: userStatus.default("online"),
 });
 export type User = z.infer<typeof userSchema>;
 export const updateProfileBody = z.object({
   /** null/vazio volta a usar o nome de usuário. */
   displayName: displayNameSchema.nullable().optional().or(z.literal("").transform(() => null)),
   bio: z.string().trim().max(BIO_MAX).nullable().optional(),
+  status: userStatus.optional(),
 });
 /** Limites de upload (bytes) e tamanho final das imagens. */
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
@@ -117,7 +147,8 @@ export const MAX_OWNED_SERVERS = 2;
 export const serverRole = z.enum(["owner", "admin", "member"]);
 export type ServerRole = z.infer<typeof serverRole>;
 /** Um servidor visto por quem é membro dele. */
-export const serverSchema = z.object({ id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole });
+export const serverSchema = z.object({ id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole, icon: z.string().nullable().default(null) });
+export const SERVER_ICON_MAX_BYTES = 2 * 1024 * 1024;
 export type Server = z.infer<typeof serverSchema>;
 export const memberSchema = z.object({
   userId: z.string(),
@@ -144,7 +175,11 @@ export const createInviteBody = z.object({
 export const invitePreviewSchema = z.object({ serverName: z.string(), members: z.number() });
 export type InvitePreview = z.infer<typeof invitePreviewSchema>;
 
-export const createChannelBody = z.object({ name: z.string().trim().min(1).max(40), kind: channelKind.default("text") });
+export const createChannelBody = z.object({ name: channelNameSchema, kind: channelKind.default("text") });
+
+/** Conversa com mensagens não lidas (GET /unread). `serverId` null = conversa direta. */
+export const unreadSchema = z.object({ channelId: z.string(), serverId: z.string().nullable(), count: z.number(), mentions: z.number() });
+export type Unread = z.infer<typeof unreadSchema>;
 
 /** Pessoa como aparece nas listas de amigos e de conversas. */
 export const personSchema = z.object({
@@ -219,23 +254,34 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
-  z.object({ t: z.literal("send"), channelId: z.string(), content: z.string().trim().min(1).max(4000) }),
+  /** Texto e/ou anexos já enviados por POST /channels/:id/attachments. */
+  z.object({
+    t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
+    attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
+  }),
   /** channelId null = saiu da voz. */
   z.object({
     t: z.literal("voice"), channelId: z.string().nullable(), muted: z.boolean(), deafened: z.boolean(),
     camera: z.boolean().default(false), screen: z.boolean().default(false),
   }),
-]);
+]).superRefine((e, ctx) => {
+  if (e.t === "send" && !e.content && !e.attachments.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "mensagem vazia" });
+});
 export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),
   z.object({ t: z.literal("message"), message: messageSchema }),
+  z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
+  z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
+  /** Você leu a conversa em outro aparelho: tira a marca de não lida. */
+  z.object({ t: z.literal("read"), channelId: z.string() }),
   z.object({ t: z.literal("channel"), channel: channelSchema }),
   /** Algo mudou nos servidores, canais ou membros: buscar de novo. */
   z.object({ t: z.literal("sync") }),
   /** Amigos ou conversas diretas mudaram: buscar GET /friends e GET /dms de novo. */
   z.object({ t: z.literal("friends") }),
   /** ids das pessoas conectadas. */
-  z.object({ t: z.literal("presence"), online: z.array(z.string()) }),
+  /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
+  z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
   z.object({ t: z.literal("error"), error: z.string() }),
 ]);

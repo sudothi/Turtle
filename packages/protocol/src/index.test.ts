@@ -13,6 +13,8 @@ describe("protocol", () => {
   it("rejeita evento desconhecido e mensagem vazia", () => {
     expect(() => clientEvent.parse({ t: "nope" })).toThrow();
     expect(() => clientEvent.parse({ t: "send", channelId: "c", content: "  " })).toThrow();
+    // só anexo, sem texto, vale
+    expect(clientEvent.parse({ t: "send", channelId: "c", content: "", attachments: ["a"] }).t).toBe("send");
   });
   it("valida cadastro", () => {
     expect(() => registerBody.parse({ inviteCode: "x", username: "a", password: "12345678" })).toThrow();

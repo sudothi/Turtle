@@ -689,10 +689,47 @@
 .app.m .day-divider { margin-left: 12px; margin-right: 12px; }
 .app.m .composer-box input, .app.m textarea { font-size: 16px; } /* 16 px evita o zoom automático do iPhone */
 
-/* Chamada: grade em coluna, controles maiores */
-.app.m .tiles { grid-template-columns: 1fr; padding: 8px; gap: 8px; align-content: start; }
-.app.m .focus-stage { padding: 8px 8px 0; }
-.app.m .call-controls { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+/* Chamada: duas colunas de pessoas, transmissões na largura toda */
+.app.m .stage { flex-direction: column; }
+.app.m .stage > .chat, .app.m .stage > .call, .app.m .stage > .dm-call { flex: 1; min-height: 0; height: auto; }
+.app.m .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; padding: 8px; gap: 8px; align-content: start; }
+.app.m .tiles[data-count="1"] { grid-template-columns: 1fr; align-content: center; }
+.app.m .tiles .tile:not(.screen-tile) { aspect-ratio: 1; min-height: 0; }
+.app.m .tiles .screen-tile { grid-column: 1 / -1; }
+.app.m .focus-stage { padding: 0; gap: 8px; }
+.app.m .focus-main .tile { --lino-radius: 0; }
+.app.m .focus-strip { padding: 0 8px 4px; }
+.app.m .focus-strip .tile { flex-basis: 96px; }
+.app.m .focus-strip .tile.screen-tile { flex-basis: 140px; }
+.app.m .call-controls { gap: 10px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.app.m .t-icon-btn.big { width: 48px; height: 48px; }
+.app.m .t-icon-btn.big.hangup { width: 60px; }
+.zoom-box { position: absolute; inset: 0; transform-origin: center; }
+.app.m .screen-tile.focused { touch-action: none; overflow: hidden; }
+.app.m .tile-volume { width: 40%; }
+.app.m .screen-tile .tile-volume { top: 14px; bottom: auto; left: 12px; right: auto; }
+.app.m .tiles .tile:not(.screen-tile) .tile-volume { left: 12px; right: 12px; bottom: auto; top: 12px; width: auto; }
+.app.m .tiles .tile:not(.screen-tile) .tile-quality { display: none; }
+.call-unlock { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 8px 0; padding: 12px; border: 2px solid var(--ink-0); border-radius: 8px; background: var(--paper); color: var(--ink-0); font: inherit; font-weight: 700; }
+
+/* Celular deitado vendo uma transmissão: só o vídeo e os controles */
+@media (orientation: landscape) and (max-height: 500px) {
+  .app.m .call .chat-head, .app.m .m-callbar { display: none; }
+  .app.m .focus-strip { display: none; }
+  .app.m .call-controls { padding: 6px; gap: 8px; }
+  .app.m .t-icon-btn.big { width: 40px; height: 40px; }
+  .app.m .t-icon-btn.big.hangup { width: 52px; }
+}
+
+/* Barra da chamada ativa (aparece quando a chamada não está na tela) */
+.m-callbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 6px 6px 6px 4px; background: var(--paper); color: var(--ink-0); border-bottom: 2px solid var(--ink-0); }
+.m-callbar .t-icon-btn { color: var(--ink-0); }
+.m-callbar .t-icon-btn.is-off { color: var(--ink-0); --slash-gap: var(--paper); }
+.m-callbar-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 4px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.m-callbar-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.m-callbar-text b { font-size: var(--fs-sm); }
+.m-callbar-text span { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-callbar.connecting b { animation: blink 1.2s steps(2) infinite; }
 
 /* Alvos de toque de pelo menos 44 px */
 .app.m .channel { min-height: 40px; }

@@ -3,6 +3,7 @@ import {
   createLocalAudioTrack,
   DisconnectReason,
   type LocalAudioTrack,
+  type LocalVideoTrack,
   type Participant,
   type RemoteParticipant,
   RemoteTrack,
@@ -63,6 +64,8 @@ export interface VoiceSnapshot {
   deafened: boolean;
   participants: CallParticipant[];
   camera: boolean;
+  /** Câmera do celular em uso: frontal (espelhada) ou traseira. */
+  facing: "user" | "environment";
   screen: boolean;
   videos: VideoTile[];
   shareStats?: ShareStats;
@@ -115,7 +118,7 @@ export class VoiceClient {
   private listeners = new Set<() => void>();
   private snap: VoiceSnapshot = {
     status: "idle", muted: false, deafened: false, participants: [], camera: false, screen: false, videos: [],
-    needsAudioUnlock: false, prefs: loadPrefs(),
+    needsAudioUnlock: false, facing: "user", prefs: loadPrefs(),
   };
   private joinSeq = 0;
   /** Quem você escolheu assistir (transmissões de tela só chegam a quem pede). */
@@ -266,9 +269,11 @@ export class VoiceClient {
     const on = !room.localParticipant.isCameraEnabled;
     try {
       const { cameraId } = this.snap.prefs;
+      // No celular, "padrão" = câmera frontal (ou a traseira, se a pessoa virou).
+      const device = cameraId === "default" ? { facingMode: this.snap.facing } : { deviceId: { exact: cameraId } };
       await room.localParticipant.setCameraEnabled(
         on,
-        on ? { deviceId: cameraId === "default" ? undefined : { exact: cameraId }, resolution: VideoPresets.h720.resolution } : undefined,
+        on ? { ...device, resolution: VideoPresets.h720.resolution } : undefined,
         on ? { simulcast: true } : undefined,
       );
       this.set({ camera: room.localParticipant.isCameraEnabled, error: undefined });
@@ -276,6 +281,19 @@ export class VoiceClient {
       this.set({ camera: false, error: `Não deu para ligar a câmera (${(err as Error).message}). Confira a permissão e o dispositivo.` });
     }
     this.reportState();
+    this.refresh();
+  }
+
+  /** Troca entre câmera frontal e traseira (celular), sem desligar a câmera. */
+  async flipCamera() {
+    const facing = this.snap.facing === "user" ? "environment" : "user";
+    const track = this.room?.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack as LocalVideoTrack | undefined;
+    try {
+      if (track) await track.restartTrack({ facingMode: facing, resolution: VideoPresets.h720.resolution });
+      this.set({ facing, error: undefined });
+    } catch (err) {
+      this.set({ error: `Não deu para trocar de câmera (${(err as Error).message}).` });
+    }
     this.refresh();
   }
 

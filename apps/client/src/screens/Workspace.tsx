@@ -494,6 +494,38 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   };
   const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onLogout={onLogout} onStatus={changeStatus} />;
 
+  // Celular: barra da chamada ativa quando se está em outra tela (chat, outro servidor, Amigos).
+  const callChannel = snap.channelId ? known[snap.channelId] ?? (dms.find((d) => d.channelId === snap.channelId) && asChannel(dms.find((d) => d.channelId === snap.channelId)!)) : undefined;
+  const callDm = dms.find((d) => d.channelId === snap.channelId);
+  const watchingCall = home ? dmCall && dmId === snap.channelId : view === "voice" && voiceView === snap.channelId;
+  const openCall = () => {
+    if (!snap.channelId) return;
+    if (callDm) { openDm(callDm); setDmCall(true); return; }
+    const sid = known[snap.channelId]?.serverId;
+    setHome(false);
+    if (sid && sid !== serverId) chooseServer(sid);
+    setVoiceView(snap.channelId);
+    setView("voice");
+    showContent();
+  };
+  const callBar = mobile && snap.status !== "idle" && snap.channelId && !(pane === "content" && watchingCall) ? (
+    <div className={`m-callbar ${snap.status !== "connected" ? "connecting" : ""}`}>
+      <button className="m-callbar-open" onClick={openCall}>
+        <Icon name="speaker" size={18} />
+        <span className="m-callbar-text">
+          <b>{snap.status === "connected" ? "Na chamada" : "Conectando…"}</b>
+          <span>{callChannel?.name ?? "chamada"}{snap.videos.some((v) => v.source === "screen" && !v.isLocal) ? " · tem tela ao vivo" : ""}</span>
+        </span>
+      </button>
+      <IconButton label="Mudo" aria-pressed={snap.muted} className={snap.muted ? "is-off" : ""} onClick={() => void voice.toggleMute()}>
+        <Icon name={snap.muted ? "mic-off" : "mic"} />
+      </IconButton>
+      <IconButton label="Sair da chamada" onClick={() => void voice.leave()}>
+        <Icon name="phone-off" />
+      </IconButton>
+    </div>
+  ) : null;
+
   const noServer = (
     <div className="no-server">
       <h2 className="t-display">Você ainda não está em nenhum servidor</h2>
@@ -566,6 +598,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         </aside>
       )}
       <main className="stage">
+        {pane === "content" && callBar}
         {home ? (
           dmChannel && dm && dmCall ? (
             <div className="dm-call">

@@ -59,6 +59,14 @@ const icons = {
   ),
   plus: <path d="M12 4.5v15M4.5 12h15" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />,
   "chevron-down": <path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />,
+  "camera-flip": (
+    <g fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5" />
+      <path d="M20 3.5v5h-5" />
+      <path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5" />
+      <path d="M4 20.5v-5h5" />
+    </g>
+  ),
   "chevron-left": <path d="M14.5 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />,
   "chevron-right": <path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />,
   users: (

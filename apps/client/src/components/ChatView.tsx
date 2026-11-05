@@ -6,7 +6,7 @@ import {
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
-import { useMobileBack } from "../mobile";
+import { useMobile, useMobileBack } from "../mobile";
 
 /** Botão "voltar" do celular (só aparece no layout de uma tela por vez). */
 export function BackButton() {
@@ -145,6 +145,27 @@ function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (text
   );
 }
 
+/** Menu de ações de uma mensagem no celular (abre com toque longo), vindo de baixo. */
+function MessageSheet({ message, text, canEdit, canDelete, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(onClose, 600); }).catch(() => {});
+  };
+  return (
+    <div className="m-sheet-wrap" role="presentation" onClick={onClose}>
+      <div className="m-sheet lino" role="menu" aria-label="Ações da mensagem" onClick={(e) => e.stopPropagation()}>
+        <div className="m-sheet-grip" aria-hidden="true" />
+        <p className="m-sheet-preview t-muted"><b>{shownName(message)}</b> {text || (message.attachments.length ? "(arquivo)" : "")}</p>
+        {text && <button type="button" role="menuitem" className="m-sheet-item" onClick={copy}><Icon name="file" size={20} /> {copied ? "Copiado!" : "Copiar texto"}</button>}
+        {canEdit && <button type="button" role="menuitem" className="m-sheet-item" onClick={onEdit}><Icon name="pencil" size={20} /> Editar mensagem</button>}
+        <button type="button" role="menuitem" className="m-sheet-item" onClick={onProfile}><Icon name="profile" size={20} /> Ver perfil</button>
+        {canDelete && <button type="button" role="menuitem" className="m-sheet-item danger" onClick={onDelete}><Icon name="trash" size={20} /> Apagar mensagem</button>}
+        <button type="button" className="m-sheet-cancel" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 /** `@algo` logo antes do cursor: o que está sendo digitado para mencionar. */
 const mentionQuery = (value: string, caret: number) => /(?:^|\s)@([^\s@]{0,32})$/u.exec(value.slice(0, caret))?.[1];
 
@@ -187,6 +208,32 @@ export function ChatView({
   canModerate?: boolean;
 }) {
   const list = useRef<HTMLDivElement>(null);
+  const mobile = useMobile();
+  /** Mensagem com o menu de ações aberto (toque longo no celular). */
+  const [sheet, setSheet] = useState<Message>();
+  /** Lendo mensagens antigas: mostra o botão de voltar ao fim. */
+  const [away, setAway] = useState(false);
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | undefined>(undefined);
+  /** O toque longo abriu o menu: o "clique" que vem ao soltar o dedo não deve abrir mais nada. */
+  const fired = useRef(false);
+  const startPress = (m: Message, e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!mobile || !t || editing === m.id) return;
+    clearTimeout(press.current?.timer);
+    fired.current = false;
+    press.current = { x: t.clientX, y: t.clientY, timer: setTimeout(() => { press.current = undefined; fired.current = true; navigator.vibrate?.(15); setSheet(m); }, 450) };
+  };
+  const movePress = (e: React.TouchEvent) => {
+    const p = press.current;
+    const t = e.touches[0];
+    if (p && t && Math.hypot(t.clientX - p.x, t.clientY - p.y) > 10) { clearTimeout(p.timer); press.current = undefined; }
+  };
+  const endPress = (e: React.TouchEvent) => {
+    clearTimeout(press.current?.timer);
+    press.current = undefined;
+    if (fired.current) { e.preventDefault(); fired.current = false; }
+  };
+  const pressHandlers = (m: Message) => (mobile ? { onTouchStart: (e: React.TouchEvent) => startPress(m, e), onTouchMove: movePress, onTouchEnd: endPress, onTouchCancel: endPress, onContextMenu: (e: React.MouseEvent) => e.preventDefault() } : {});
   const rows = useMemo(() => toRows(messages), [messages]);
   const names = useMemo(() => new Map(members.map((m) => [m.userId, shownName(m)])), [members]);
 
@@ -204,6 +251,8 @@ export function ChatView({
     atBottom.current = true;
     lastId.current = undefined;
     prepending.current = null;
+    setAway(false);
+    setSheet(undefined);
   }, [channel?.id]);
   useLayoutEffect(() => {
     const el = list.current;
@@ -227,6 +276,8 @@ export function ChatView({
     const el = list.current;
     if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const far = el.scrollHeight - el.scrollTop - el.clientHeight > 600;
+    if (far !== away) setAway(far);
     if (el.scrollTop < 300 && hasMore && !loadingOlder.current && messages.length) {
       loadingOlder.current = true;
       prepending.current = { height: el.scrollHeight, top: el.scrollTop };
@@ -237,6 +288,15 @@ export function ChatView({
       });
     }
   };
+  // A lista mudou de tamanho (teclado do celular abriu, a conversa saiu de uma tela escondida):
+  // se estava no fim, continua no fim.
+  useEffect(() => {
+    const el = list.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { if (atBottom.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [channel?.id]);
   const onMediaLoad = () => {
     if (atBottom.current) toBottom();
   };
@@ -363,6 +423,8 @@ export function ChatView({
       }
       if (e.key === "Escape") return setQuery(undefined);
     }
+    // No celular, Enter quebra a linha (como no Discord); envia pelo botão.
+    if (mobile && e.key === "Enter") return;
     // Seta para cima com a caixa vazia: edita a sua última mensagem, como no Discord.
     if (e.key === "ArrowUp" && !text) {
       const mine = [...messages].reverse().find((m) => m.userId === meId && m.content);
@@ -474,7 +536,7 @@ export function ChatView({
               <span>{r.label}</span>
             </div>
           ) : r.head ? (
-            <article key={r.key} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}`}>
+            <article key={r.key} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
               <button type="button" className="plain-btn" aria-label={`Perfil de ${shownName(r.message)}`} onClick={() => onProfile(r.message.userId)}>
                 <Avatar name={shownName(r.message)} src={fileUrl(r.message.avatar)} size={40} />
               </button>
@@ -488,21 +550,26 @@ export function ChatView({
                 </div>
                 {body(r.message)}
               </div>
-              {editing !== r.message.id && actions(r.message)}
+              {editing !== r.message.id && !mobile && actions(r.message)}
             </article>
           ) : (
-            <article key={r.key} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}`}>
+            <article key={r.key} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
               <time className="msg-gutter" dateTime={r.message.createdAt}>
                 {shortTime(r.message.createdAt)}
               </time>
               <div className="msg-body">{body(r.message)}</div>
-              {editing !== r.message.id && actions(r.message)}
+              {editing !== r.message.id && !mobile && actions(r.message)}
             </article>
           ),
         )}
         <div className="messages-end" />
       </div>
 
+      {away && (
+        <button type="button" className="jump-latest lino" onClick={() => { atBottom.current = true; setAway(false); toBottom(); }}>
+          Ver mensagens recentes <Icon name="chevron-down" size={16} />
+        </button>
+      )}
       <form className="composer" onSubmit={send}>
         {suggestions.length > 0 && (
           <div className="mention-menu lino" role="listbox" aria-label="Mencionar">
@@ -576,6 +643,16 @@ export function ChatView({
         </div>
       )}
       {viewing && <Lightbox item={viewing} onClose={() => setViewing(undefined)} />}
+      {sheet && <MessageSheet
+        message={sheet}
+        canEdit={sheet.userId === meId && sheet.content !== ""}
+        canDelete={sheet.userId === meId || (!!canModerate && !dm)}
+        text={decodeMentions(sheet.content, names)}
+        onEdit={() => { setEditing(sheet.id); setSheet(undefined); }}
+        onDelete={() => { const m = sheet; setSheet(undefined); void removeMessage(m); }}
+        onProfile={() => { const id = sheet.userId; setSheet(undefined); onProfile(id); }}
+        onClose={() => setSheet(undefined)}
+      />}
     </section>
   );
 }

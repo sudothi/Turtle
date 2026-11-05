@@ -23,8 +23,11 @@ export function ImageCropper({
   const [zoom, setZoom] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  // Tamanho da área de recorte na tela.
-  const viewW = round ? 280 : 480;
+  /** Dedos na tela (para o zoom de pinça no celular). */
+  const fingers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  // Tamanho da área de recorte na tela (cabe no celular: largura da tela menos as margens do modal).
+  const [viewW] = useState(() => Math.max(200, Math.min(round ? 280 : 480, (typeof window === "undefined" ? 480 : window.innerWidth) - 72)));
   const viewH = (viewW * height) / width;
 
   useEffect(() => {
@@ -76,7 +79,7 @@ export function ImageCropper({
   return (
     <Modal
       title={title}
-      subtitle="Arraste para posicionar e use o zoom."
+      subtitle="Arraste para posicionar e use o zoom (ou pince com dois dedos)."
       onClose={onCancel}
       footer={
         <>
@@ -90,13 +93,35 @@ export function ImageCropper({
         style={{ width: viewW, height: viewH }}
         onPointerDown={(e) => {
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          drag.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
+          fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          const pts = [...fingers.current.values()];
+          if (pts.length === 2) {
+            drag.current = null;
+            pinch.current = { dist: Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y), zoom };
+          } else {
+            drag.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
+          }
         }}
         onPointerMove={(e) => {
+          if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          const pts = [...fingers.current.values()];
+          if (pinch.current && pts.length === 2) {
+            const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
+            return changeZoom((pinch.current.zoom * dist) / pinch.current.dist);
+          }
           const d = drag.current;
           if (d) setPos(clamp({ x: d.px + e.clientX - d.x, y: d.py + e.clientY - d.y }));
         }}
-        onPointerUp={() => { drag.current = null; }}
+        onPointerUp={(e) => {
+          fingers.current.delete(e.pointerId);
+          pinch.current = null;
+          drag.current = null;
+        }}
+        onPointerCancel={(e) => {
+          fingers.current.delete(e.pointerId);
+          pinch.current = null;
+          drag.current = null;
+        }}
         onWheel={(e) => changeZoom(zoom - e.deltaY * 0.002)}
       >
         {img && <img src={img.src} alt="" draggable={false} style={{ width: dw, height: dh, transform: `translate(${pos.x}px, ${pos.y}px)` }} />}

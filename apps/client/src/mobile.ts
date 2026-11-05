@@ -21,3 +21,26 @@ export function useMobile() {
 /** No celular, o cabeçalho da conversa/chamada mostra "voltar" para a lista de canais. */
 export const MobileBack = createContext<(() => void) | undefined>(undefined);
 export const useMobileBack = () => useContext(MobileBack);
+
+/**
+ * Altura visível de verdade (descontando o teclado) em --vvh. O iPhone não encolhe a página quando o
+ * teclado abre, então sem isso o compositor fica escondido atrás dele e o cabeçalho sobe.
+ */
+export function trackVisualViewport() {
+  const vv = typeof window !== "undefined" ? window.visualViewport : null;
+  if (!vv) return () => {};
+  const root = document.documentElement;
+  const apply = () => {
+    root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+    // O iPhone rola a página inteira para mostrar o campo; volta para o topo (o app tem a própria rolagem).
+    if (window.scrollY !== 0) window.scrollTo(0, 0);
+  };
+  apply();
+  vv.addEventListener("resize", apply);
+  vv.addEventListener("scroll", apply);
+  return () => {
+    vv.removeEventListener("resize", apply);
+    vv.removeEventListener("scroll", apply);
+    root.style.removeProperty("--vvh");
+  };
+}

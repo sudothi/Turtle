@@ -641,7 +641,7 @@
 /* ===================== Celular (≤ 760 px): uma tela por vez ===================== */
 /* O Workspace põe .m e .m-nav (servidores + canais) ou .m-content (conversa/chamada em tela cheia). */
 .app.m {
-  height: 100dvh;
+  height: var(--vvh, 100dvh);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   background: var(--bg-rail);
 }
@@ -749,4 +749,69 @@
 @media (hover: none) {
   .tile-actions, .tile-volume { opacity: 1; }
   .msg:hover { background: none; }
+}
+
+/* ===================== Celular: chat ===================== */
+.app.m .msg.pressed { background: rgba(255, 255, 255, 0.08); }
+.app.m .msg { -webkit-touch-callout: none; }
+.app.m .msg-text { user-select: none; -webkit-user-select: none; }
+.app.m .msg-image { max-width: 100%; height: auto; }
+.app.m .composer-send { width: 40px; height: 40px; color: var(--paper); }
+.app.m .composer-attach { width: 40px; height: 40px; }
+.app.m .mention-option { min-height: 44px; }
+.chat { position: relative; }
+.jump-latest {
+  --lino-bg: var(--paper);
+  --lino-radius: 999px;
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  z-index: 5;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 0;
+  color: var(--ink-0);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 4px 4px 0 var(--ink-0);
+  animation: t-pop 160ms var(--ease);
+}
+
+/* Menu de ações da mensagem (toque longo) */
+.m-sheet-wrap { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; background: var(--bg-overlay); animation: t-fade 120ms var(--ease); }
+.m-sheet {
+  --lino-bg: var(--ink-2);
+  --lino-border: 2px solid var(--paper);
+  --lino-radius: 16px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 8px max(12px, env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  animation: m-up 180ms var(--ease);
+}
+@keyframes m-up { from { transform: translateY(100%); } }
+.m-sheet-grip { align-self: center; width: 40px; height: 4px; margin: 2px 0 8px; border-radius: 4px; background: var(--ink-5); }
+.m-sheet-preview { margin: 0 8px 8px; font-size: var(--fs-sm); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.m-sheet-preview b { color: var(--paper); }
+.m-sheet-item { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--paper); font: inherit; font-weight: 600; text-align: left; }
+.m-sheet-item:active { background: var(--paper); color: var(--ink-0); }
+.m-sheet-item.danger { color: var(--paper); text-decoration: underline wavy var(--ink-5); text-underline-offset: 4px; }
+.m-sheet-cancel { margin-top: 6px; min-height: 48px; border: 2px solid var(--ink-5); border-radius: 8px; background: none; color: var(--paper-dim); font: inherit; font-weight: 700; }
+
+/* Configurações e perfil na largura do celular */
+@media (max-width: 760px) {
+  .t-modal-body { padding: 12px 16px; }
+  .t-modal-head { padding: 20px 44px 8px 16px; text-align: left; }
+  .profile-editor { gap: 16px; }
+  /* flex: none: com overflow a faixa de abas encolhia até sumir dentro do corpo do modal (coluna flex) */
+  .server-settings-tabs, .settings-tabs { flex: none; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .lightbox img { max-width: 100vw; max-height: 80dvh; }
+  .lightbox-bar { flex-wrap: wrap; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }

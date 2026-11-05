@@ -5,7 +5,7 @@ import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
-import { MobileBack, useMobile } from "../mobile";
+import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
 import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
@@ -110,6 +110,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const mobile = useMobile();
   const [pane, setPane] = useState<"nav" | "content">("nav");
   const [drawer, setDrawer] = useState(false);
+  useEffect(() => (mobile ? trackVisualViewport() : undefined), [mobile]);
   /** Abre a conversa/chamada escolhida em tela cheia (no celular). */
   const showContent = useCallback(() => {
     setDrawer(false);

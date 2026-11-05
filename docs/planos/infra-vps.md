@@ -39,18 +39,18 @@ O segredo vazou, então a chave nova precisa ter outro nome e outro segredo (32+
 - TURN TLS na 5349 precisa de certificado para `lk.ogturtle.xyz` (o Caddy já emite; falta o LiveKit usá-lo ou um domínio `turn.` próprio) e de abrir a porta no firewall.
 - Envio ao R2 precisa de credenciais criadas pelo dono (token só com permissão no bucket de backup).
 
-## Deploy automático com aprovação
+## Deploy da VPS pelo GitHub (só manual)
 
 Código: `.github/workflows/deploy.yml` (GitHub Actions) e `infra/deploy.sh` (roda na VPS). Plano completo: [Deploy automático do Turtle na VPS](https://claude.ai/artifact/KRJL3FJxYcJiC6k5qNVHpy).
 
-Fluxo: merge na main, CI verde, o deploy fica esperando aprovação no GitHub (Environment `production`), e depois de aprovado o job envia o código por SSH. Na VPS o script faz backup, build de `turtle-app:<sha>`, troca a tag do serviço `api`, sobe só o `api`, espera o healthcheck e volta para a tag anterior se ele falhar. Merges que só mexem em `docs/`, `apps/desktop/` ou `.md` são ignorados. Rollback manual: Actions > Deploy (VPS) > Run workflow com o sha antigo.
+Fluxo: Actions > Deploy (VPS) > Run workflow. O job confere que o CI do commit está verde e envia o código por SSH. Não há gatilho automático a cada merge, porque o GitHub Free não deixa exigir aprovação (Required reviewers) em Environments de repositório privado; sem essa trava, qualquer merge iria direto para produção. Na VPS o script faz backup, build de `turtle-app:<sha>`, troca a tag do serviço `api`, sobe só o `api`, espera o healthcheck e volta para a tag anterior se ele falhar. Rollback: o mesmo botão, com o sha antigo.
 
-Para ativar (nada disso foi feito ainda):
+Passos de ativação:
 
 1. Na VPS, copiar `infra/deploy.sh` para `~/turtle/deploy.sh` (`chmod +x`).
 2. Gerar uma chave só para isso (`ssh-keygen -t ed25519 -N '' -f turtle-deploy`) e acrescentar a pública ao `~/.ssh/authorized_keys` do `kyo` com o comando forçado:
    `command="/home/kyo/turtle/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... turtle-deploy`
-3. No GitHub, Settings > Environments > New environment `production`: marcar Required reviewers (o dono) e criar os secrets `DEPLOY_SSH_KEY` (chave privada), `DEPLOY_HOST` (IP) e `DEPLOY_KNOWN_HOSTS` (saída de `ssh-keyscan -t ed25519 <ip>`).
+3. No GitHub, Settings > Environments > New environment `production` (com um plano que tenha Required reviewers, marcar o dono e voltar o gatilho `workflow_run`) e criar os secrets `DEPLOY_SSH_KEY` (chave privada), `DEPLOY_HOST` (IP) e `DEPLOY_KNOWN_HOSTS` (saída de `ssh-keyscan -t ed25519 <ip>`).
 4. Testar com Run workflow na main atual, aprovando quando o GitHub pedir, e olhar o resultado e o `/health`.
 
 Revogar: apagar a linha da chave no `authorized_keys`.

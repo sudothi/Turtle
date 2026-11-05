@@ -142,7 +142,12 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     fun setMuted(muted: Boolean) {
         val r = room ?: return
         val cur = _call.value ?: return
-        if (cur.deafened && !muted) return // surdo não liga o microfone
+        // Ligar o microfone sem áudio não faz sentido: volta o áudio também (como no desktop).
+        if (cur.deafened && !muted) {
+            mutedBeforeDeafen = false
+            setDeafened(false)
+            return
+        }
         _call.value = cur.copy(muted = muted)
         scope.launch { runCatching { r.localParticipant.setMicrophoneEnabled(!muted) }; refresh() }
     }

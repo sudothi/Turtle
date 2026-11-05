@@ -25,7 +25,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -103,6 +107,8 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
     var showFriends by rememberSaveable { mutableStateOf(false) }
     var profileId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Conversa cuja tela de chamada está aberta (no lugar do chat).
+    var dmCallId by rememberSaveable { mutableStateOf<String?>(null) }
 
     val unread = state.unread.associateBy { it.channelId }
     val allChannels = state.channels.values.flatten()
@@ -117,6 +123,10 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
         else -> "Turtle"
     }
 
+    // Trocou de conversa: volta para o chat.
+    LaunchedEffect(openId) { if (dmCallId != openId) dmCallId = null }
+    // Chamada da conversa: o canal de voz é o próprio canal da conversa.
+    val dmCall = openDm?.takeIf { dmCallId == it.channelId }?.let { Channel(it.channelId, "", it.title, "voice") }
     // Avisa o estado qual conversa está na tela (para as não lidas e o histórico).
     LaunchedEffect(openId, showFriends, openChannel?.isVoice) { vm.openChannel(if (showFriends || openChannel?.isVoice == true) null else openId) }
     // Carrega os membros do servidor atual (lista lateral e perfis).
@@ -184,8 +194,11 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
                                 actions = {
                                     if (currentServerId != null) {
                                         IconButton(onClick = { scope.launch { membersDrawer.open() } }) { Icon(Icons.Filled.Group, contentDescription = "Membros") }
-                                    } else if (openDm != null && !openDm.group) {
-                                        IconButton(onClick = { profileId = openDm.users.firstOrNull()?.id }) { Icon(Icons.Filled.Person, contentDescription = "Ver perfil") }
+                                    } else if (openDm != null) {
+                                        IconButton(onClick = { dmCallId = openDm.channelId }) { Icon(Icons.Filled.Call, contentDescription = "Chamada") }
+                                        if (!openDm.group) {
+                                            IconButton(onClick = { profileId = openDm.users.firstOrNull()?.id }) { Icon(Icons.Filled.Person, contentDescription = "Ver perfil") }
+                                        }
                                     }
                                 },
                                 colors = TopAppBarDefaults.topAppBarColors(
@@ -197,21 +210,41 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
                     ) { pad ->
                         Column(Modifier.padding(pad).fillMaxSize()) {
                         val call = state.call
-                        if (call != null && call.channelId != openId) {
-                            val callName = allChannels.firstOrNull { it.id == call.channelId }?.name ?: "Chamada"
+                        // Tela de chamada visível agora (canal de voz ou chamada da conversa).
+                        val callScreenId = if (showFriends) null else if (openChannel?.isVoice == true) openId else dmCall?.id
+                        if (call != null && call.channelId != callScreenId) {
+                            val callDm = state.dms.firstOrNull { it.channelId == call.channelId }
+                            val callName = allChannels.firstOrNull { it.id == call.channelId }?.name ?: callDm?.title ?: "Chamada"
                             Row(
-                                Modifier.fillMaxWidth().background(Ink.Paper).clickable { openId = call.channelId; showFriends = false; place = allChannels.firstOrNull { it.id == call.channelId }?.serverId ?: place }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                Modifier.fillMaxWidth().background(Ink.Paper).clickable {
+                                    openId = call.channelId; showFriends = false
+                                    if (callDm != null) { dmCallId = call.channelId; place = HOME }
+                                    else place = allChannels.firstOrNull { it.id == call.channelId }?.serverId ?: place
+                                }.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text("Em chamada · $callName — toque para voltar", color = Ink.Ink0, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("Sair", color = Ink.Ink0, fontWeight = FontWeight.ExtraBold, modifier = Modifier.clickable { vm.leaveCall() }.padding(start = 12.dp))
+                                IconButton(onClick = { vm.toggleMute() }) {
+                                    Icon(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, contentDescription = if (call.muted) "Ativar microfone" else "Silenciar microfone", tint = Ink.Ink0)
+                                }
+                                Text("Sair", color = Ink.Ink0, fontWeight = FontWeight.ExtraBold, modifier = Modifier.clickable { vm.leaveCall() }.padding(horizontal = 12.dp, vertical = 10.dp))
                             }
                         }
                         PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxWidth()) {
                             when {
                                 showFriends -> FriendList(state, vm) { profileId = it }
                                 openChannel?.isVoice == true -> VoiceScreen(state, vm, openChannel)
+                                dmCall != null -> Column(Modifier.fillMaxSize()) {
+                                    Row(
+                                        Modifier.fillMaxWidth().background(Ink.Ink1).clickable { dmCallId = null }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Ink.Paper, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Voltar para a conversa", color = Ink.Paper, style = MaterialTheme.typography.labelLarge)
+                                    }
+                                    Box(Modifier.weight(1f).fillMaxWidth()) { VoiceScreen(state, vm, dmCall) }
+                                }
                                 openId != null -> ChatScreen(state, vm, openId!!) { profileId = it }
                                 else -> Placeholder("Arraste da borda esquerda", "Ou toque em ☰ para escolher um canal ou conversa.")
                             }
@@ -419,6 +452,10 @@ private fun DmSidebar(state: UiState, vm: AppViewModel, unread: Map<String, Unre
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(d.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Alguém está na chamada desta conversa.
+                if (state.voiceStates.any { it.channelId == d.channelId }) {
+                    Icon(Icons.Filled.Call, contentDescription = "Chamada em andamento", tint = Ink.Paper, modifier = Modifier.padding(horizontal = 6.dp).size(16.dp))
+                }
                 Badge(unread[d.channelId]?.count ?: 0)
             }
         }

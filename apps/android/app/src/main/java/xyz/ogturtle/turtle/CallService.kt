@@ -22,6 +22,11 @@ class CallService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_HANG_UP) {
+            onHangUp?.invoke()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Chamada em andamento", NotificationManager.IMPORTANCE_LOW))
@@ -37,6 +42,13 @@ class CallService : Service() {
             .setOngoing(true)
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .addAction(
+                0, "Sair",
+                PendingIntent.getService(
+                    this, 1, Intent(this, CallService::class.java).setAction(ACTION_HANG_UP),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
             .build()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
         ServiceCompat.startForeground(this, ID, notification, type)
@@ -46,6 +58,10 @@ class CallService : Service() {
     companion object {
         private const val CHANNEL = "call"
         private const val ID = 7
+        private const val ACTION_HANG_UP = "xyz.ogturtle.turtle.SAIR_DA_CHAMADA"
+
+        /** O que fazer quando tocam em "Sair" na notificação (o AppViewModel encerra a chamada). */
+        var onHangUp: (() -> Unit)? = null
 
         fun start(context: Context) {
             runCatching { ContextCompat.startForegroundService(context, Intent(context, CallService::class.java)) }

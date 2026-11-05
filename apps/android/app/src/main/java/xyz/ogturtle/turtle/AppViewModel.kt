@@ -94,6 +94,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val voice = VoiceController(app, viewModelScope)
 
     init {
+        CallService.onHangUp = { leaveCall() }
         // Toda mudança na minha chamada (entrar, sair, mudo, fone, câmera) vai para o servidor e para a tela.
         viewModelScope.launch {
             var last: List<Any?>? = null

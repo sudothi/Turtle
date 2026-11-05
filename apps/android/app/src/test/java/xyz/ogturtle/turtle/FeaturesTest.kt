@@ -27,4 +27,13 @@ class FeaturesTest {
         assertTrue(upd is ServerEvent.MessageUpdate && upd.message.editedAt != null)
         assertEquals(ServerEvent.MessageDelete("c1", "m1"), parseServerEvent("""{"t":"messageDelete","channelId":"c1","id":"m1"}"""))
     }
+
+    @Test
+    fun voiceStatesParse() {
+        val e = parseServerEvent("""{"t":"voiceStates","states":[{"userId":"u1","username":"kai","displayName":null,"avatar":null,"staff":false,"channelId":"v1","serverId":"s1","muted":true,"deafened":false,"camera":false,"screen":true}]}""")
+        assertTrue(e is ServerEvent.VoiceStates)
+        val s = (e as ServerEvent.VoiceStates).states.single()
+        assertEquals("kai", s.shown)
+        assertTrue(s.muted && s.screen)
+    }
 }

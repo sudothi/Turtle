@@ -131,6 +131,10 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
 
     suspend fun unread(): List<Unread> = get("/unread", ListSerializer(Unread.serializer()))
 
+    /** Pede o token e a URL do servidor LiveKit para entrar no canal de voz. */
+    suspend fun voiceToken(channelId: String): VoiceToken =
+        TurtleJson.decodeFromString(VoiceToken.serializer(), call("POST", "/voice/$channelId/token", "{}"))
+
     /** URL de foto/ícone/banner a partir da chave guardada no perfil. */
     fun fileUrl(key: String?): String? = key?.let { baseUrl.trimEnd('/') + "/files/" + it }
 }

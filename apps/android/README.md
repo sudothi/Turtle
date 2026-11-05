@@ -17,7 +17,10 @@ borda esquerda para abrir; arraste para o lado, toque fora ou use "voltar" para 
 
 - Pronto: login e criação de conta com convite, gaveta com servidores, canais, conversas e amigos, não lidas.
 - Também: chat e DMs em tempo real (WebSocket), membros do servidor com presença (gaveta da direita) e perfis.
-- Próximas etapas: chamadas de voz/câmera/ver telas (LiveKit), compartilhar tela, notificações.
+- Também: editar/apagar mensagens, fotos e arquivos, amigos, status, perfil, criar canal/servidor e convites.
+- Também: chamadas de voz (LiveKit) em canais de voz e conversas, mudo/sem áudio, quem está falando,
+  assistir câmera e tela dos outros; a chamada continua com o app em segundo plano (notificação "Em chamada").
+- Próximas etapas: ligar a própria câmera, compartilhar tela, notificações de mensagens.
 
 ## Chave de assinatura
 

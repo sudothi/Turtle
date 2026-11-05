@@ -1,7 +1,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
 
-/** Largura em que o app vira layout de celular (uma tela por vez). */
-export const MOBILE_QUERY = "(max-width: 760px)";
+/** Quando o app vira layout de celular (uma tela por vez): tela estreita, ou celular deitado. */
+export const MOBILE_QUERY = "(max-width: 760px), (max-height: 500px) and (pointer: coarse)";
 
 const query = () => (typeof window !== "undefined" && window.matchMedia ? window.matchMedia(MOBILE_QUERY) : undefined);
 

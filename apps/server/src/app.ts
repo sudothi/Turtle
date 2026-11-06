@@ -35,7 +35,7 @@ import {
   setInviterBody,
   type Account,
   BANNER_MAX_BYTES,
-  MAX_EMOJI_LENGTH, MAX_OWNED_SERVERS, MAX_REACTION_KINDS,
+  MAX_EMOJI_LENGTH, MAX_OWNED_SERVERS, MAX_PINS, MAX_REACTION_KINDS,
   clientEvent,
   createChannelBody,
   createInviteBody,
@@ -397,7 +397,7 @@ export async function buildApp({
   const toAttachment = ({ messageId: _m, ...a }: { id: string; messageId: string | null; key: string; name: string; size: number; mime: string; width: number | null; height: number | null }): Attachment => a;
   const messageCols = {
     id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey,
-    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt, replyTo: messages.replyTo,
+    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt, replyTo: messages.replyTo, pinnedAt: messages.pinnedAt,
   };
   /** Prévias das mensagens respondidas (as que não existem mais ficam de fora). */
   async function replyPreviews(ids: string[]): Promise<Map<string, ReplyPreview>> {
@@ -419,12 +419,13 @@ export async function buildApp({
     return [...by].map(([emoji, userIds]) => ({ emoji, userIds }));
   };
   /** Linhas do banco (com o autor) viram mensagens com os anexos e a prévia da resposta. */
-  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null; replyTo: string | null }[]): Promise<Message[]> {
+  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null; replyTo: string | null; pinnedAt: Date | null }[]): Promise<Message[]> {
     const files = rows.length ? await db.select(attachmentCols).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).orderBy(asc(attachments.createdAt)) : [];
     const replies = await replyPreviews(rows.flatMap((r) => (r.replyTo ? [r.replyTo] : [])));
     const reacts = rows.length ? await db.select().from(reactions).where(inArray(reactions.messageId, rows.map((r) => r.id))).orderBy(asc(reactions.createdAt)) : [];
-    return rows.map(({ isAdmin, canInvite, replyTo, ...r }) => ({
+    return rows.map(({ isAdmin, canInvite, replyTo, pinnedAt, ...r }) => ({
       ...r,
+      pinned: pinnedAt !== null,
       staff: canInviteAccounts({ isAdmin, canInvite }),
       createdAt: r.createdAt.toISOString(),
       editedAt: r.editedAt?.toISOString() ?? null,
@@ -1458,6 +1459,36 @@ export async function buildApp({
       await toChannel(channel, { t: "messageUpdate", message });
       return message;
     });
+    // ---- Fixar mensagens ----
+    /** Em servidor, só dono/admin fixam; em conversa direta, qualquer participante. */
+    const pinTo = (pin: boolean) => async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const row = (await db.select({ channelId: messages.channelId, pinnedAt: messages.pinnedAt }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+      const channel = row && (await findChannel(row.channelId));
+      if (!row || !channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "mensagem não existe" });
+      if (channel.serverId && !canManage(await roleIn(channel.serverId, me(req).id))) return reply.code(403).send({ error: "só dono e admins fixam mensagens" });
+      if (pin && row.pinnedAt === null) {
+        const n = (await db.select({ n: count() }).from(messages).where(and(eq(messages.channelId, channel.id), isNotNull(messages.pinnedAt))))[0]?.n ?? 0;
+        if (Number(n) >= MAX_PINS) return reply.code(400).send({ error: `no máximo ${MAX_PINS} mensagens fixadas por canal` });
+      }
+      if ((row.pinnedAt !== null) !== pin) {
+        await db.update(messages).set({ pinnedAt: pin ? new Date() : null }).where(eq(messages.id, req.params.id));
+      }
+      const message = (await loadMessage(req.params.id))!;
+      await toChannel(channel, { t: "messageUpdate", message });
+      return message;
+    };
+    authed.put<{ Params: { id: string } }>("/messages/:id/pin", pinTo(true));
+    authed.delete<{ Params: { id: string } }>("/messages/:id/pin", pinTo(false));
+    authed.get<{ Params: { id: string } }>("/channels/:id/pins", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      const rows = await db
+        .select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId))
+        .where(and(eq(messages.channelId, channel.id), isNotNull(messages.pinnedAt)))
+        .orderBy(desc(messages.pinnedAt));
+      return toMessages(rows);
+    });
+
     // ---- Reações ----
     const reactTo = (add: boolean) => async (req: FastifyRequest<{ Params: { id: string; emoji: string } }>, reply: FastifyReply) => {
       const emoji = req.params.emoji.normalize("NFC");
@@ -1799,7 +1830,7 @@ export async function buildApp({
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(), editedAt: null,
           attachments: evt.attachments.map((id) => toAttachment(picked.find((f) => f.id === id)!)),
-          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null, reactions: [],
+          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null, reactions: [], pinned: false,
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));

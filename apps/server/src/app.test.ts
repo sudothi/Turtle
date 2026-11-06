@@ -713,6 +713,25 @@ describe("amigos e mensagens diretas", () => {
   });
 
 
+  it("fixar: participantes da DM fixam, lista de fixadas e quem não participa não vê", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const A = await wsOpen(a);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "mensagem importante" }));
+    await new Promise((r) => setTimeout(r, 250));
+    const msg = (await get(`/channels/${dm}/messages`, a)).body.find((m: any) => m.content === "mensagem importante");
+    expect(msg.pinned).toBe(false);
+    const pin = (id: string, token: string, method = "PUT") => fetch(base + `/messages/${id}/pin`, { method, headers: { authorization: `Bearer ${token}` } });
+    expect((await pin(msg.id, b)).status).toBe(404);
+    expect((await pin(msg.id, c)).status).toBe(200);
+    expect((await pin(msg.id, c)).status).toBe(200); // repetir não duplica
+    expect((await get(`/channels/${dm}/pins`, a)).body.map((m: any) => m.id)).toEqual([msg.id]);
+    expect((await get(`/channels/${dm}/pins`, b)).status).toBe(404);
+    expect((await pin(msg.id, a, "DELETE")).status).toBe(200);
+    expect((await get(`/channels/${dm}/pins`, a)).body).toEqual([]);
+    A.ws.close();
+  });
+
+
   it("busca: acha por palavra na conversa e não vaza para quem não participa", async () => {
     const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
     const A = await wsOpen(a);

@@ -95,6 +95,8 @@ export const messages = pgTable(
     editedAt: timestamp("edited_at", { withTimezone: true }),
     /** Mensagem respondida (do mesmo canal). Sem chave estrangeira: se a original for apagada, a resposta mostra "mensagem apagada". */
     replyTo: text("reply_to"),
+    /** Quando foi fixada no canal (nulo = não fixada). */
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   },
   (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_reply_to_idx").on(t.replyTo)],
 );

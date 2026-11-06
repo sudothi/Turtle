@@ -150,6 +150,7 @@ const icons = {
       <path d="M3.5 20.5h17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </>
   ),
+  pin: <path d="M9 3h6l-1 6 3.5 3.5V14H13v6l-1 1-1-1v-6H6.5v-1.5L10 9z" fill="currentColor" />,
   trash: (
     <>
       <path d="M3.5 6h17M9 6V3.5h6V6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />

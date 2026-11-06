@@ -131,3 +131,4 @@
 .msg-codeblock code { font: inherit; }
 .msg-spoiler { cursor: pointer; background: var(--paper-dim); color: transparent; border-radius: 3px; user-select: none; }
 .msg-spoiler.shown { background: var(--ink-3, #222); color: inherit; cursor: auto; user-select: auto; }
+.typing-line { min-height: 18px; font-size: 12px; color: var(--text-muted); padding: 0 16px 2px; }

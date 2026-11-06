@@ -1546,6 +1546,12 @@ export async function buildApp({
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "typing") {
+          const ch = await findChannel(evt.channelId);
+          const ok = !ch ? false : ch.kind === "dm" ? await isDmMember(ch.id, user.id) : ch.kind === "text" && !!ch.serverId && !!memberships.get(socket)?.has(ch.serverId);
+          if (ch && ok) await toChannel(ch, { t: "typing", channelId: ch.id, userId: user.id });
+          return;
+        }
         if (evt.t === "ringDecline") {
           const r = rings.get(evt.channelId);
           if (r?.targets.has(user.id)) {

@@ -258,7 +258,13 @@ export function ChatView({
   hasMore,
   onLoadOlder,
   canModerate,
+  typing = [],
+  onTyping,
 }: {
+  /** ids de quem está digitando agora neste canal. */
+  typing?: string[];
+  /** Chamado ao digitar (a tela manda o aviso ao servidor, no máximo a cada 3 s). */
+  onTyping?: () => void;
   /** Conversa direta: `channel.name` é o nome da pessoa; sem convite nem lista de membros. */
   dm?: boolean;
   /** Botões extras no cabeçalho (ligar, bloquear, sair do grupo). */
@@ -503,8 +509,13 @@ export function ChatView({
     });
   const uploading = pending.some((p) => !p.done && !p.error);
 
+  const lastTyping = useRef(0);
   const onType = (value: string, caret: number) => {
     setText(value);
+    if (value && onTyping && Date.now() - lastTyping.current > 3000) {
+      lastTyping.current = Date.now();
+      onTyping();
+    }
     setQuery(mentionQuery(value, caret));
     setPick(0);
   };
@@ -793,6 +804,12 @@ export function ChatView({
               <Icon name="send" size={20} />
             </button>
           </div>
+        </div>
+        <div className="typing-line" aria-live="polite">
+          {(() => {
+            const who = typing.filter((id) => id !== meId).map((id) => { const m = members.find((x) => x.userId === id); return m ? shownName(m) : "Alguém"; });
+            return who.length === 0 ? "" : who.length === 1 ? `${who[0]} está digitando…` : who.length === 2 ? `${who[0]} e ${who[1]} estão digitando…` : "Várias pessoas estão digitando…";
+          })()}
         </div>
         {fileError && <p className="composer-error" role="alert">{fileError}</p>}
       </form>

@@ -677,6 +677,18 @@ describe("amigos e mensagens diretas", () => {
     for (const x of [A, B, C]) x.ws.close();
   });
 
+  it("digitando: só quem está na conversa recebe o aviso", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C, B] = await Promise.all([wsOpen(a), wsOpen(c), wsOpen(b)]);
+    A.ws.send(JSON.stringify({ t: "typing", channelId: dm }));
+    B.ws.send(JSON.stringify({ t: "typing", channelId: dm })); // quem não está na conversa não consegue avisar
+    await new Promise((r) => setTimeout(r, 250));
+    expect(C.events.filter((e) => e.t === "typing")).toEqual([{ t: "typing", channelId: dm, userId: aId }]);
+    expect(B.events.some((e) => e.t === "typing")).toBe(false);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);

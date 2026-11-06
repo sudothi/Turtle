@@ -689,6 +689,30 @@ describe("amigos e mensagens diretas", () => {
   });
 
 
+  it("reações: adicionar, remover, validar o emoji e só quem vê a conversa reage", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C] = await Promise.all([wsOpen(a), wsOpen(c)]);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "reaja a isto" }));
+    await new Promise((r) => setTimeout(r, 250));
+    const msg = C.events.find((e) => e.t === "message" && e.message.content === "reaja a isto").message;
+    const put = (id: string, emoji: string, token: string, method = "PUT") =>
+      fetch(base + `/messages/${id}/reactions/${encodeURIComponent(emoji)}`, { method, headers: { authorization: `Bearer ${token}` } });
+    expect((await put(msg.id, "👍", c)).status).toBe(200);
+    expect((await put(msg.id, "👍", c)).status).toBe(200); // repetir não duplica
+    expect((await put(msg.id, "👍", a)).status).toBe(200);
+    expect((await put(msg.id, "abc", a)).status).toBe(400);
+    expect((await put(msg.id, "1", a)).status).toBe(400);
+    expect((await put(msg.id, "👍", b)).status).toBe(404); // fora da conversa
+    await new Promise((r) => setTimeout(r, 200));
+    const upd = A.events.filter((e) => e.t === "messageUpdate" && e.message.id === msg.id).at(-1).message;
+    expect(upd.reactions).toEqual([{ emoji: "👍", userIds: [cId, aId] }]);
+    expect((await put(msg.id, "👍", c, "DELETE")).status).toBe(200);
+    const after = (await get(`/channels/${dm}/messages`, a)).body.find((m: any) => m.id === msg.id);
+    expect(after.reactions).toEqual([{ emoji: "👍", userIds: [aId] }]);
+    for (const x of [A, C]) x.ws.close();
+  });
+
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);

@@ -134,6 +134,12 @@ CREATE TABLE IF NOT EXISTS server_bans (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   banned_by text NOT NULL, reason text, created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (server_id, user_id));
+-- Reações com emoji.
+CREATE TABLE IF NOT EXISTS reactions (
+  message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (message_id, user_id, emoji));
 -- Não lidas. Na primeira vez, tudo o que já existe conta como lido (ninguém abre o app com 500 não lidas).
 DO $$
 BEGIN

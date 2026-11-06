@@ -172,3 +172,15 @@ export const serverBans = pgTable(
   },
   (t) => [primaryKey({ columns: [t.serverId, t.userId] })],
 );
+
+/** Reações com emoji nas mensagens (uma por pessoa e emoji). */
+export const reactions = pgTable(
+  "reactions",
+  {
+    messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.userId, t.emoji] })],
+);

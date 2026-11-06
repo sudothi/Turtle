@@ -48,6 +48,8 @@ export const messageSchema = z.object({
   /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
   replyToId: z.string().nullable().default(null),
   replyTo: replyPreviewSchema.nullable().default(null),
+  /** Reações agrupadas por emoji, na ordem em que apareceram. */
+  reactions: z.array(z.object({ emoji: z.string(), userIds: z.array(z.string()) })).default([]),
 });
 export type Message = z.infer<typeof messageSchema>;
 
@@ -375,3 +377,7 @@ export const serverEvent = z.discriminatedUnion("t", [
 export type ClientEvent = z.infer<typeof clientEvent>;
 export type ServerEvent = z.infer<typeof serverEvent>;
 export * from "./richtext.js";
+
+/** Máximo de emojis diferentes por mensagem e tamanho de um emoji (em caracteres). */
+export const MAX_REACTION_KINDS = 20;
+export const MAX_EMOJI_LENGTH = 16;

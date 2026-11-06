@@ -43,6 +43,8 @@ export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speake
   );
 }
 
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
+
 /** Desenha a formatação básica (negrito, itálico, código, spoiler, links) sem injetar HTML. */
 function Rich({ nodes }: { nodes: RichNode[] }) {
   return (
@@ -602,6 +604,12 @@ export function ChatView({
     if (ask && !window.confirm("Apagar esta mensagem? Não dá para desfazer.")) return;
     await api.deleteMessage(m.id).catch((err: Error) => window.alert(err.message));
   };
+  const [picking, setPicking] = useState<string>();
+  const toggleReaction = (m: Message, emoji: string) => {
+    setPicking(undefined);
+    const mine = m.reactions.find((r) => r.emoji === emoji)?.userIds.includes(meId) ?? false;
+    void api.react(m.id, emoji, !mine).catch((err: Error) => window.alert(err.message));
+  };
   const mentionsMe = (m: Message) => mentionedIds(m.content).includes(meId) || (m.replyTo?.userId === meId && m.userId !== meId);
 
   if (!channel) return <section className="chat" />;
@@ -614,6 +622,18 @@ export function ChatView({
         <button type="button" title="Responder" aria-label="Responder" onClick={() => startReply(m)}>
           <Icon name="reply" size={18} />
         </button>
+        <span className="react-pick-wrap">
+          <button type="button" title="Reagir" aria-label="Reagir" aria-expanded={picking === m.id} onClick={() => setPicking(picking === m.id ? undefined : m.id)}>
+            <span aria-hidden="true">🙂</span>
+          </button>
+          {picking === m.id && (
+            <div className="react-picker lino" role="menu" aria-label="Escolher reação">
+              {QUICK_REACTIONS.map((e) => (
+                <button key={e} type="button" role="menuitem" aria-label={`Reagir com ${e}`} onClick={() => toggleReaction(m, e)}>{e}</button>
+              ))}
+            </div>
+          )}
+        </span>
         {mine && m.content !== "" && (
           <button type="button" title="Editar" aria-label="Editar mensagem" onClick={() => setEditing(m.id)}>
             <Icon name="pencil" size={18} />
@@ -634,6 +654,19 @@ export function ChatView({
       <>
         <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
+        {m.reactions.length > 0 && (
+          <div className="reactions">
+            {m.reactions.map((r) => {
+              const mineR = r.userIds.includes(meId);
+              const who = r.userIds.map((id) => names.get(id) ?? "alguém").join(", ");
+              return (
+                <button key={r.emoji} type="button" className={`reaction${mineR ? " mine" : ""}`} title={who} aria-pressed={mineR} aria-label={`${r.emoji} ${r.userIds.length}: ${who}`} onClick={() => toggleReaction(m, r.emoji)}>
+                  <span aria-hidden="true">{r.emoji}</span> {r.userIds.length}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </>
     );
 

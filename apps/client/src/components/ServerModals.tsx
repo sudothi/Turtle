@@ -127,6 +127,10 @@ export function ServerSettingsModal({
   const [error, setError] = useState<string>();
   const [cropIcon, setCropIcon] = useState<File | null>(null);
   const iconInput = useRef<HTMLInputElement>(null);
+  const canModerate = isOwner || server.role === "admin";
+  const [bans, setBans] = useState<{ userId: string; username: string; displayName: string | null; reason: string | null }[]>([]);
+  const loadBans = () => { if (canModerate) api.bans(server.id).then(setBans).catch(() => {}); };
+  useEffect(loadBans, [server.id, canModerate]); // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, done?: () => void) => {
     setError(undefined);
     try {
@@ -228,10 +232,36 @@ export function ServerSettingsModal({
                     Expulsar
                   </Button>
                 )}
+                {canKick && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm !== `banir:${m.userId}`) return setConfirm(`banir:${m.userId}`);
+                      void run(async () => { await api.banMember(server.id, m.userId); loadBans(); });
+                    }}
+                  >
+                    {confirm === `banir:${m.userId}` ? "Confirmar banimento" : "Banir"}
+                  </Button>
+                )}
               </li>
             );
           })}
         </ul>
+
+        {canModerate && bans.length > 0 && (
+          <>
+            <h3 className="t-eyebrow">Banidos — {bans.length}</h3>
+            <ul className="settings-members">
+              {bans.map((b) => (
+                <li key={b.userId}>
+                  <span className="settings-name">{b.displayName ?? b.username}{b.reason && <span className="t-muted"> — {b.reason}</span>}</span>
+                  <Button variant="ghost" size="sm" onClick={() => void run(async () => { await api.unban(server.id, b.userId); loadBans(); })}>Desbanir</Button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
 
         {!isOwner && (
           <Button variant="ghost" onClick={() => window.confirm(`Sair de ${server.name}?`) && void run(() => api.removeMember(server.id, me.id), onGone)}>

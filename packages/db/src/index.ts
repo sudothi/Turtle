@@ -128,6 +128,12 @@ CREATE TABLE IF NOT EXISTS attachments (
   width integer, height integer, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS attachments_message_idx ON attachments (message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS attachments_key_idx ON attachments (file_key);
+-- Banimentos de servidor: quem foi banido não volta por convite.
+CREATE TABLE IF NOT EXISTS server_bans (
+  server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  banned_by text NOT NULL, reason text, created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (server_id, user_id));
 -- Não lidas. Na primeira vez, tudo o que já existe conta como lido (ninguém abre o app com 500 não lidas).
 DO $$
 BEGIN

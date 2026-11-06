@@ -334,6 +334,24 @@ describe("servidores", () => {
     expect((await patch(`/servers/${lagoa}`, { name: "Lagoa 2" }, ana)).status).toBe(200);
     expect((await get("/servers", bia)).body.find((x: any) => x.id === lagoa).name).toBe("Lagoa 2");
   });
+  it("banir: expulsa, não volta por convite, lista e desbane; admin não bane admin nem dono", async () => {
+    const code = (await post(`/servers/${lagoa}/invites`, {}, ana)).body.code;
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200); // caio volta (expulso, não banido)
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, {}, caio)).status).toBe(403); // membro não bane
+    expect((await post(`/servers/${lagoa}/bans/${anaId}`, {}, bia)).status).toBe(403); // admin não bane o dono
+    expect((await post(`/servers/${lagoa}/bans/${biaId}`, {}, bia)).status).toBe(400); // nem a si mesmo
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, { reason: "spam" }, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/channels`, caio)).status).toBe(404);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(403);
+    const list = (await get(`/servers/${lagoa}/bans`, bia)).body;
+    expect(list).toMatchObject([{ userId: caioId, username: "caio", reason: "spam" }]);
+    expect((await get(`/servers/${lagoa}/bans`, caio)).status).toBe(404); // fora do servidor
+    expect((await del(`/servers/${lagoa}/bans/${caioId}`, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/bans`, ana)).body).toEqual([]);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200);
+    expect((await del(`/servers/${lagoa}/members/${caioId}`, ana)).status).toBe(200); // deixa como estava
+  });
+
 
   it("dono não sai sem passar a posse; passar respeita o limite de 2 do novo dono", async () => {
     expect((await del(`/servers/${lagoa}/members/${anaId}`, ana)).status).toBe(403);

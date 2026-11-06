@@ -7,7 +7,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, isNull, lt, messages, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, isNull, lt, messages, or, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -804,6 +804,40 @@ export async function buildApp({
       return { ok: true };
     });
 
+    // Banimentos: mesmas regras de expulsar (dono bane qualquer um; admin só membro comum).
+    const canModerate = (role: ServerRole, target: ServerRole | undefined) => role === "owner" || (role === "admin" && (!target || target === "member"));
+    authed.get<{ Params: { id: string } }>("/servers/:id/bans", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      const rows = await db
+        .select({ userId: serverBans.userId, username: users.username, displayName: users.displayName, reason: serverBans.reason, createdAt: serverBans.createdAt })
+        .from(serverBans).innerJoin(users, eq(users.id, serverBans.userId)).where(eq(serverBans.serverId, req.params.id)).orderBy(desc(serverBans.createdAt));
+      return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+    });
+    authed.post<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      const role = await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin");
+      if (!role) return;
+      if (req.params.user === me(req).id) return reply.code(400).send({ error: "você não pode banir a si mesmo" });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (target === "owner") return reply.code(403).send({ error: "o dono não pode ser banido" });
+      if (!canModerate(role, target)) return reply.code(403).send({ error: "sem permissão" });
+      if (!(await db.select({ id: users.id }).from(users).where(eq(users.id, req.params.user)).limit(1)).length) return reply.code(404).send({ error: "pessoa não existe" });
+      const reason = typeof (req.body as any)?.reason === "string" ? (req.body as any).reason.trim().slice(0, 200) || null : null;
+      await db.insert(serverBans).values({ serverId: req.params.id, userId: req.params.user, bannedBy: me(req).id, reason }).onConflictDoNothing();
+      if (target) {
+        await db.delete(serverMembers).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, req.params.user)));
+        await dropFromCalls(req.params.id, req.params.user);
+        await refreshMemberships(req.params.user);
+        toUsers([req.params.user], { t: "sync" });
+        toServer(req.params.id, { t: "sync" });
+      }
+      return { ok: true };
+    });
+    authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      await db.delete(serverBans).where(and(eq(serverBans.serverId, req.params.id), eq(serverBans.userId, req.params.user)));
+      return { ok: true };
+    });
+
     authed.post<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const body = createInviteBody.safeParse(req.body ?? {});
@@ -818,6 +852,8 @@ export async function buildApp({
       const inv = await usableServerInvite(req.params.code);
       if (!inv) return reply.code(404).send({ error: "convite inválido ou vencido" });
       const server = (await findServer(inv.serverId))!;
+      if ((await db.select({ u: serverBans.userId }).from(serverBans).where(and(eq(serverBans.serverId, inv.serverId), eq(serverBans.userId, me(req).id))).limit(1)).length)
+        return reply.code(403).send({ error: "você foi banido deste servidor" });
       if (!(await roleIn(inv.serverId, me(req).id))) {
         await db.insert(serverMembers).values({ serverId: inv.serverId, userId: me(req).id, role: "member" });
         await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, inv.code));

@@ -148,3 +148,15 @@ export const blocks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.blocker, t.blocked] }), index("blocks_blocked_idx").on(t.blocked)],
 );
+
+export const serverBans = pgTable(
+  "server_bans",
+  {
+    serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    bannedBy: text("banned_by").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.userId] })],
+);

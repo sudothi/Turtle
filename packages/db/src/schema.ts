@@ -1,5 +1,5 @@
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -14,14 +14,25 @@ export const users = pgTable("users", {
   bannerKey: text("banner_key"),
   /** "online" ou "busy" (Não perturbe). */
   status: text("status", { enum: ["online", "busy"] }).notNull().default("online"),
+  /** Conta desativada pelo admin (bloqueia login e apaga as sessões). */
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const sessions = pgTable("sessions", {
-  tokenHash: text("token_hash").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    /** Id público da sessão (UUID aleatório, nunca derivado do token). */
+    id: text("id").notNull().default(sql`(gen_random_uuid()::text)`),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`(now() + interval '30 days')`),
+  },
+  (t) => [uniqueIndex("sessions_id_idx").on(t.id), index("sessions_user_idx").on(t.userId)],
+);
 
 export const invites = pgTable("invites", {
   code: text("code").primaryKey(),
@@ -82,8 +93,14 @@ export const messages = pgTable(
     content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
+    /** Mensagem respondida (do mesmo canal). Sem chave estrangeira: se a original for apagada, a resposta mostra "mensagem apagada". */
+    replyTo: text("reply_to"),
   },
-  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_channel_cursor_idx").on(t.channelId, t.createdAt, sql`${t.id} COLLATE "C"`)],
+  (t) => [
+    index("messages_channel_created_idx").on(t.channelId, t.createdAt),
+    index("messages_channel_cursor_idx").on(t.channelId, t.createdAt, sql`${t.id} COLLATE "C"`),
+    index("messages_reply_to_idx").on(t.replyTo),
+  ],
 );
 
 /** Idempotent sends survive message deletion; keep only a fingerprint of the original text. */
@@ -154,4 +171,28 @@ export const blocks = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.blocker, t.blocked] }), index("blocks_blocked_idx").on(t.blocked)],
+);
+
+export const serverBans = pgTable(
+  "server_bans",
+  {
+    serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    bannedBy: text("banned_by").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.userId] })],
+);
+
+/** Reações com emoji nas mensagens (uma por pessoa e emoji). */
+export const reactions = pgTable(
+  "reactions",
+  {
+    messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.userId, t.emoji] })],
 );

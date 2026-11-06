@@ -14,4 +14,4 @@
 .danger-zone { --lino-bg: var(--ink-2); --lino-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .danger-zone h3, .danger-zone p { margin: 0; }
 .member.offline { opacity: .55; }
-.role-badge { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-left: auto; }
+.role-badge { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin-left: auto; }

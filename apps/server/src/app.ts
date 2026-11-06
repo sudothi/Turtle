@@ -1,5 +1,5 @@
-import Fastify, { type FastifyRequest } from "fastify";
-import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
+import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOptions } from "fastify";
+import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "livekit-server-sdk";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { createReadStream } from "node:fs";
@@ -8,11 +8,17 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, isNull, lt, messages, messageReceipts, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
   type Attachment,
+  REPLY_PREVIEW_CHARS,
+  type ReplyPreview,
+  SESSION_TOUCH_MS,
+  SESSION_TTL_MS,
+  type SessionInfo,
+  changePasswordBody,
   editMessageBody,
   sendTextBody,
   sentMessageId,
@@ -32,7 +38,7 @@ import {
   setInviterBody,
   type Account,
   BANNER_MAX_BYTES,
-  MAX_OWNED_SERVERS,
+  MAX_EMOJI_LENGTH, MAX_OWNED_SERVERS, MAX_REACTION_KINDS,
   clientEvent,
   createChannelBody,
   createInviteBody,
@@ -55,7 +61,8 @@ import {
   type VoiceToken,
 } from "@turtle/protocol";
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
-import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
+import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
+import { attemptLimiter } from "./limiter.js";
 
 export interface AppOptions {
   db: Db;
@@ -67,7 +74,50 @@ export interface AppOptions {
   clientDir?: string;
   /** Pasta das fotos e banners enviados (precisa de volume em produção). Padrão: ./data/uploads. */
   uploadDir?: string;
+  /**
+   * De quem aceitar o X-Forwarded-For (o IP real de quem acessa, usado no limite de tentativas de login).
+   * Padrão: redes privadas e localhost, onde fica o Caddy em produção.
+   */
+  trustProxy?: string[] | boolean;
+  /** Tentativas de login/cadastro por IP a cada 10 min e erros de senha por nome a cada 15 min. Padrão: 20 e 8. */
+  authLimit?: { perIp: number; perName: number };
+  /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
+  heartbeatMs?: number;
+  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 2 GB. */
+  attachmentQuotaBytes?: number;
+  /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
+  voiceGraceMs?: number;
+  /** Só para testes: substitui o cliente da API de salas do LiveKit. */
+  roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
+  /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
+  logger?: FastifyServerOptions["logger"];
 }
+
+/** Esconde o token da sessão que o WebSocket leva na URL (`/ws?token=...`). */
+export const hideToken = (url: string) => url.replace(/([?&]token=)[^&]*/g, "$1***");
+
+/** Configuração dos logs de produção: JSON numa linha, sem o cabeçalho Authorization nem o token do WebSocket. */
+export function serverLogger(level = "info", stream?: { write(line: string): void }) {
+  return {
+    level,
+    ...(stream ? { stream } : {}),
+    redact: ["req.headers.authorization", "req.headers.cookie"],
+    serializers: {
+      req: (req: { method: string; url: string; ip?: string; headers?: Record<string, unknown> }) => ({
+        method: req.method,
+        url: hideToken(req.url),
+        ip: req.ip,
+        ua: req.headers?.["user-agent"],
+      }),
+    },
+  };
+}
+
+/** Hash de uma senha aleatória, para o login de um nome que não existe levar o mesmo tempo. */
+const DUMMY_HASH = await hashPassword(newToken());
+
+/** Endereços do proxy (Caddy na rede do Docker). */
+const PRIVATE_NETS = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
 
 export interface LiveKitConfig {
   /** URL que o cliente usa para conectar (ws://localhost:7880 local, wss://lk.ogturtle.xyz em produção). */
@@ -82,14 +132,20 @@ export const voiceRoomName = (channelId: string) => `voice-${channelId}`;
 interface Socket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  on(event: "message" | "close", cb: (...args: any[]) => void): void;
+  on(event: "message" | "close" | "pong", cb: (...args: any[]) => void): void;
+  ping?(): void;
+  terminate?(): void;
 }
 
 /** Cargos que podem gerir canais e expulsar membros. */
 const canManage = (role: ServerRole | undefined) => role === "owner" || role === "admin";
 
-export async function buildApp({ db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads" }: AppOptions) {
-  const app = Fastify({ logger: false });
+export async function buildApp({
+  db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
+  trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
+  heartbeatMs = 30_000, attachmentQuotaBytes = 2 * 1024 ** 3, voiceGraceMs = 30_000, roomService,
+}: AppOptions) {
+  const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);
@@ -111,10 +167,20 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   }
 
   const room = livekit
-    ? new RoomServiceClient(livekit.url.replace(/^ws/, "http"), livekit.apiKey, livekit.apiSecret)
+    ? (roomService ?? new RoomServiceClient(livekit.url.replace(/^ws/, "http"), livekit.apiKey, livekit.apiSecret))
     : undefined;
 
   const online = new Map<Socket, User>();
+  /** Sessão de cada conexão WebSocket: permite encerrar os sockets de uma sessão ou conta com 4401. */
+  const socketSessions = new Map<Socket, { userId: string; tokenHash: string; sessionId: string }>();
+  const closeSessions = (pred: (s: { userId: string; tokenHash: string; sessionId: string }) => boolean) => {
+    for (const [sock, info] of socketSessions) {
+      if (pred(info)) {
+        socketSessions.delete(sock);
+        sock.close(4401, "unauthorized");
+      }
+    }
+  };
   /** Servidores de que cada conexão faz parte: define o que ela pode receber. */
   const memberships = new Map<Socket, Set<string>>();
 
@@ -149,6 +215,14 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
   };
 
+  /** Nonces de envio recentes (10 min) por conta: o reenvio depois de uma queda não duplica a mensagem. */
+  const sentNonces = new Map<string, { id: string; at: number }>();
+  const rememberNonce = (key: string, id: string) => {
+    const now = Date.now();
+    if (sentNonces.size > 5000) for (const [k, v] of sentNonces) if (now - v.at > 10 * 60_000) sentNonces.delete(k);
+    sentNonces.set(key, { id, at: now });
+  };
+
   // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
   const voice = new Map<Socket, VoiceState>();
   const voiceStatesFor = (socket: Socket): ServerEvent => {
@@ -157,13 +231,43 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Toque de chamada em DM/grupo: um por canal; para quando alguém atende, quem ligou sai, recusam todos ou passam 30 s.
+  const RING_MS = 30_000;
+  const rings = new Map<string, { callerId: string; targets: Set<string>; timer: ReturnType<typeof setTimeout> }>();
+  const endRing = (channelId: string, only?: string) => {
+    const r = rings.get(channelId);
+    if (!r) return;
+    if (only) {
+      r.targets.delete(only);
+      toUsers([only], { t: "ringEnd", channelId });
+      if (r.targets.size) return;
+    } else toUsers(r.targets, { t: "ringEnd", channelId });
+    clearTimeout(r.timer);
+    rings.delete(channelId);
+  };
+  /** Chamado a cada mudança de voz: encerra o toque de quem já foi atendido ou cancelado. */
+  const syncRings = () => {
+    for (const [channelId, r] of rings) {
+      const inCall = [...voice.values()].filter((v) => v.channelId === channelId);
+      if (!inCall.some((v) => v.userId === r.callerId) || inCall.some((v) => v.userId !== r.callerId)) endRing(channelId);
+    }
+  };
   const broadcastVoice = () => {
+    syncRings();
     for (const s of online.keys()) s.send(JSON.stringify(voiceStatesFor(s)));
   };
   /** Tira da chamada quem deixou de ser membro (some das listas e perde a conexão de áudio). */
   const dropFromCalls = async (serverId: string, userId?: string) => {
     const gone: VoiceState[] = [];
     for (const [s, v] of voice) if (v.serverId === serverId && (!userId || v.userId === userId)) { gone.push(v); voice.delete(s); }
+    if (!gone.length) return;
+    broadcastVoice();
+    if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {})));
+  };
+  /** Tira uma conta de qualquer chamada (de servidor ou conversa direta). */
+  const dropUserFromCalls = async (userId: string) => {
+    const gone: VoiceState[] = [];
+    for (const [s, v] of voice) if (v.userId === userId) { gone.push(v); voice.delete(s); }
     if (!gone.length) return;
     broadcastVoice();
     if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {})));
@@ -236,17 +340,41 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   const toAttachment = ({ messageId: _m, ...a }: { id: string; messageId: string | null; key: string; name: string; size: number; mime: string; width: number | null; height: number | null }): Attachment => a;
   const messageCols = {
     id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey,
-    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt,
+    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt, replyTo: messages.replyTo,
   };
-  /** Linhas do banco (com o autor) viram mensagens com os anexos. */
-  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null }[]): Promise<Message[]> {
+  /** Prévias das mensagens respondidas (as que não existem mais ficam de fora). */
+  async function replyPreviews(ids: string[]): Promise<Map<string, ReplyPreview>> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return new Map();
+    const rows = await db
+      .select({ id: messages.id, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, content: messages.content })
+      .from(messages)
+      .innerJoin(users, eq(users.id, messages.userId))
+      .where(inArray(messages.id, unique));
+    const files = rows.length
+      ? await db.select({ messageId: attachments.messageId, n: count() }).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).groupBy(attachments.messageId)
+      : [];
+    return new Map(rows.map((r) => [r.id, { ...r, content: r.content.slice(0, REPLY_PREVIEW_CHARS), attachments: Number(files.find((f) => f.messageId === r.id)?.n ?? 0) }]));
+  }
+  const groupReactions = (rows: { emoji: string; userId: string }[]) => {
+    const by = new Map<string, string[]>();
+    for (const r of rows) by.set(r.emoji, [...(by.get(r.emoji) ?? []), r.userId]);
+    return [...by].map(([emoji, userIds]) => ({ emoji, userIds }));
+  };
+  /** Linhas do banco (com o autor) viram mensagens com os anexos e a prévia da resposta. */
+  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null; replyTo: string | null }[]): Promise<Message[]> {
     const files = rows.length ? await db.select(attachmentCols).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).orderBy(asc(attachments.createdAt)) : [];
-    return rows.map(({ isAdmin, canInvite, ...r }) => ({
+    const replies = await replyPreviews(rows.flatMap((r) => (r.replyTo ? [r.replyTo] : [])));
+    const reacts = rows.length ? await db.select().from(reactions).where(inArray(reactions.messageId, rows.map((r) => r.id))).orderBy(asc(reactions.createdAt)) : [];
+    return rows.map(({ isAdmin, canInvite, replyTo, ...r }) => ({
       ...r,
       staff: canInviteAccounts({ isAdmin, canInvite }),
       createdAt: r.createdAt.toISOString(),
       editedAt: r.editedAt?.toISOString() ?? null,
       attachments: files.filter((f) => f.messageId === r.id).map(toAttachment),
+      replyToId: replyTo,
+      replyTo: (replyTo && replies.get(replyTo)) || null,
+      reactions: groupReactions(reacts.filter((x) => x.messageId === r.id)),
     }));
   }
   const loadMessage = async (id: string) => {
@@ -272,7 +400,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   };
   const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
   sweeper.unref();
-  app.addHook("onClose", async () => clearInterval(sweeper));
+  app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
 
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
@@ -286,21 +414,45 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     return r ? toUser(r) : undefined;
   };
 
-  async function userFromToken(token: string | undefined): Promise<User | null> {
+  async function sessionFromToken(token: string | undefined): Promise<{ user: User; tokenHash: string; sessionId: string } | null> {
     if (!token) return null;
-    const rows = await db
-      .select(userCols)
-      .from(sessions)
-      .innerJoin(users, eq(users.id, sessions.userId))
-      .where(eq(sessions.tokenHash, hashToken(token)))
-      .limit(1);
-    return rows[0] ? toUser(rows[0]) : null;
+    const th = hashToken(token);
+    const row = (
+      await db
+        .select({ ...userCols, disabledAt: users.disabledAt, sessionId: sessions.id, lastUsedAt: sessions.lastUsedAt, expiresAt: sessions.expiresAt })
+        .from(sessions)
+        .innerJoin(users, eq(users.id, sessions.userId))
+        .where(eq(sessions.tokenHash, th))
+        .limit(1)
+    )[0];
+    if (!row) return null;
+    const now = Date.now();
+    if (row.disabledAt || row.expiresAt.getTime() <= now) {
+      if (row.expiresAt.getTime() <= now) await db.delete(sessions).where(eq(sessions.tokenHash, th));
+      return null;
+    }
+    // Validade deslizante (30 dias sem uso expira); escreve no banco no máximo uma vez por hora.
+    if (now - row.lastUsedAt.getTime() >= SESSION_TOUCH_MS) {
+      const at = new Date(now);
+      await db.update(sessions).set({ lastUsedAt: at, expiresAt: new Date(now + SESSION_TTL_MS) }).where(eq(sessions.tokenHash, th));
+    }
+    return { user: toUser(row), tokenHash: th, sessionId: row.sessionId };
   }
   const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer /, "");
 
-  async function startSession(userId: string) {
+  async function startSession(userId: string, req: FastifyRequest) {
     const token = newToken();
-    await db.insert(sessions).values({ tokenHash: hashToken(token), userId });
+    const now = new Date();
+    const ua = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"].trim().slice(0, 240) || null : null;
+    await db.insert(sessions).values({
+      tokenHash: hashToken(token),
+      id: newSessionId(),
+      userId,
+      userAgent: ua,
+      createdAt: now,
+      lastUsedAt: now,
+      expiresAt: new Date(now.getTime() + SESSION_TTL_MS),
+    });
     return token;
   }
 
@@ -313,9 +465,33 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     return inv;
   }
 
-  app.get("/health", async () => ({ ok: true }));
+  // Saúde de verdade: responde 503 se o banco não responde (o healthcheck do Docker e o monitor externo usam isto).
+  // logLevel warn: o healthcheck do Docker (a cada 30 s) não enche o log.
+  app.get("/health", { logLevel: "warn" }, async (req, reply) => {
+    try {
+      await db.execute(sql`select 1`);
+      return { ok: true };
+    } catch (err) {
+      req.log.error({ err }, "health: banco não responde");
+      return reply.code(503).send({ ok: false, error: "banco não responde" });
+    }
+  });
+
+  // Limite de tentativas: por IP (login e cadastro juntos) e por nome de usuário (só erros de senha).
+  // Login certo zera o contador do nome. Sem isso, qualquer um na internet testaria senhas sem parar.
+  const byIp = attemptLimiter({ max: authLimit.perIp, windowMs: 10 * 60_000 });
+  const byName = attemptLimiter({ max: authLimit.perName, windowMs: 15 * 60_000 });
+  const tooMany = (reply: any, seconds: number) =>
+    reply
+      .code(429)
+      .header("retry-after", String(seconds))
+      .send({ error: `muitas tentativas; tente de novo em ${seconds < 90 ? `${seconds} segundos` : `${Math.ceil(seconds / 60)} minutos`}` });
+  const nameKey = (name: string) => name.trim().toLocaleLowerCase("pt-BR");
 
   app.post("/auth/register", async (req, reply) => {
+    const wait = byIp.blockedFor(req.ip);
+    if (wait) return tooMany(reply, wait);
+    byIp.hit(req.ip);
     const body = registerBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
     const { inviteCode, username, password } = body.data;
@@ -324,24 +500,46 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     if (!accountInvite && (await usableServerInvite(inviteCode)))
       return reply.code(403).send({ error: "convite inválido: esse é de servidor e só vale para quem já tem conta" });
     if (!accountInvite || accountInvite.usedBy) return reply.code(403).send({ error: "convite inválido" });
-    if ((await db.select().from(users).where(eq(users.username, username)).limit(1)).length)
+    if ((await db.select({ id: users.id }).from(users).where(sql`lower(${users.username}) = lower(${username})`).limit(1)).length)
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
     const user: User = { id, username, isAdmin: isFirst, canInvite: false, displayName: null, bio: null, avatar: null, banner: null, status: "online" };
-    await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
+    try {
+      await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
+    } catch {
+      // dois cadastros com o mesmo nome ao mesmo tempo: o índice único segura o segundo
+      return reply.code(409).send({ error: "nome já em uso" });
+    }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
-    await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
-    return { token: await startSession(id), user };
+    // Marca o convite numa única operação: se dois cadastros usarem o mesmo código ao mesmo tempo, só um vence.
+    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code });
+    if (!claimed.length) {
+      await db.delete(users).where(eq(users.id, id));
+      return reply.code(403).send({ error: "convite inválido" });
+    }
+    return { token: await startSession(id, req), user };
   });
 
   app.post("/auth/login", async (req, reply) => {
     const body = loginBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
-    const row = (await db.select().from(users).where(eq(users.username, body.data.username)).limit(1))[0];
-    if (!row || !(await verifyPassword(body.data.password, row.passwordHash)))
+    const name = nameKey(body.data.username);
+    const wait = Math.max(byIp.blockedFor(req.ip), byName.blockedFor(name));
+    if (wait) return tooMany(reply, wait);
+    byIp.hit(req.ip);
+    // Sem diferenciar maiúsculas; se o banco antigo tiver dois nomes iguais nessa forma, vale a grafia exata.
+    const found = await db.select().from(users).where(sql`lower(${users.username}) = lower(${body.data.username})`).limit(5);
+    const row = found.find((u) => u.username === body.data.username) ?? (found.length === 1 ? found[0] : undefined);
+    // Sem a conta, compara com um hash qualquer: o tempo de resposta não revela quais nomes existem.
+    const ok = await verifyPassword(body.data.password, row?.passwordHash ?? DUMMY_HASH);
+    if (!row || !ok) {
+      byName.hit(name);
       return reply.code(401).send({ error: "usuário ou senha incorretos" });
-    return { token: await startSession(row.id), user: toUser(row) };
+    }
+    if (row.disabledAt) return reply.code(403).send({ error: "conta desativada" });
+    byName.reset(name);
+    return { token: await startSession(row.id, req), user: toUser(row) };
   });
 
   // Prévia pública de um convite de servidor (para a tela "entrar com convite").
@@ -379,13 +577,85 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   app.register(async (authed) => {
     authed.decorateRequest("user", null);
     authed.addHook("preHandler", async (req, reply) => {
-      const user = await userFromToken(bearer(req));
-      if (!user) return reply.code(401).send({ error: "não autenticado" });
-      (req as any).user = user;
+      const sess = await sessionFromToken(bearer(req));
+      if (!sess) return reply.code(401).send({ error: "não autenticado" });
+      (req as any).user = sess.user;
+      (req as any).tokenHash = sess.tokenHash;
+      (req as any).sessionId = sess.sessionId;
     });
     const me = (req: FastifyRequest) => (req as any).user as User;
+    const myTokenHash = (req: FastifyRequest) => (req as any).tokenHash as string;
+    const mySessionId = (req: FastifyRequest) => (req as any).sessionId as string;
 
     authed.get("/me", async (req) => (await loadUser(me(req).id)) ?? me(req));
+
+    /** Sair de verdade: apaga a sessão atual no banco e fecha os WebSockets dela com 4401. */
+    authed.post("/auth/logout", async (req) => {
+      const th = myTokenHash(req);
+      await db.delete(sessions).where(eq(sessions.tokenHash, th));
+      closeSessions((s) => s.tokenHash === th);
+      return { ok: true };
+    });
+
+    /** Lista as sessões ativas da conta (aparelho, último uso e qual é a atual). */
+    authed.get("/me/sessions", async (req) => {
+      const myId = me(req).id;
+      const curId = mySessionId(req);
+      const rows = await db
+        .select({ id: sessions.id, userAgent: sessions.userAgent, createdAt: sessions.createdAt, lastUsedAt: sessions.lastUsedAt })
+        .from(sessions)
+        .where(and(eq(sessions.userId, myId), gt(sessions.expiresAt, new Date())))
+        .orderBy(desc(sessions.lastUsedAt));
+      return rows.map((r): SessionInfo => ({
+        id: r.id,
+        userAgent: r.userAgent,
+        createdAt: r.createdAt.toISOString(),
+        lastUsedAt: r.lastUsedAt.toISOString(),
+        current: r.id === curId,
+      }));
+    });
+
+    /** Encerra uma sessão específica da conta ("sair deste") e fecha o WebSocket dela com 4401. */
+    authed.delete<{ Params: { id: string } }>("/me/sessions/:id", async (req, reply) => {
+      const myId = me(req).id;
+      const done = await db
+        .delete(sessions)
+        .where(and(eq(sessions.userId, myId), eq(sessions.id, req.params.id)))
+        .returning({ id: sessions.id });
+      if (!done.length) return reply.code(404).send({ error: "sessão não encontrada" });
+      closeSessions((s) => s.userId === myId && s.sessionId === req.params.id);
+      return { ok: true };
+    });
+
+    /** Encerra todas as sessões da conta ("sair de todos") e fecha os WebSockets com 4401. */
+    authed.delete("/me/sessions", async (req) => {
+      const myId = me(req).id;
+      await db.delete(sessions).where(eq(sessions.userId, myId));
+      closeSessions((s) => s.userId === myId);
+      return { ok: true };
+    });
+
+    /** Troca a senha, mantém a sessão atual e derruba todas as outras sessões da conta. */
+    authed.post("/me/password", async (req, reply) => {
+      const user = me(req);
+      const name = nameKey(user.username);
+      const wait = Math.max(byIp.blockedFor(req.ip), byName.blockedFor(name));
+      if (wait) return tooMany(reply, wait);
+      byIp.hit(req.ip);
+      const body = changePasswordBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "a nova senha precisa ter pelo menos 8 caracteres" });
+      const row = (await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, user.id)).limit(1))[0];
+      if (!row || !(await verifyPassword(body.data.currentPassword, row.passwordHash))) {
+        byName.hit(name);
+        return reply.code(401).send({ error: "senha atual incorreta" });
+      }
+      byName.reset(name);
+      const curHash = myTokenHash(req);
+      await db.update(users).set({ passwordHash: await hashPassword(body.data.newPassword) }).where(eq(users.id, user.id));
+      await db.delete(sessions).where(and(eq(sessions.userId, user.id), ne(sessions.tokenHash, curHash)));
+      closeSessions((s) => s.userId === user.id && s.tokenHash !== curHash);
+      return { ok: true };
+    });
 
     // ---- Perfil ----
     /** Propaga o perfil novo: conexões abertas, estado de voz e todo mundo rebusca membros/mensagens. */
@@ -685,6 +955,40 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       return { ok: true };
     });
 
+    // Banimentos: mesmas regras de expulsar (dono bane qualquer um; admin só membro comum).
+    const canModerate = (role: ServerRole, target: ServerRole | undefined) => role === "owner" || (role === "admin" && (!target || target === "member"));
+    authed.get<{ Params: { id: string } }>("/servers/:id/bans", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      const rows = await db
+        .select({ userId: serverBans.userId, username: users.username, displayName: users.displayName, reason: serverBans.reason, createdAt: serverBans.createdAt })
+        .from(serverBans).innerJoin(users, eq(users.id, serverBans.userId)).where(eq(serverBans.serverId, req.params.id)).orderBy(desc(serverBans.createdAt));
+      return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+    });
+    authed.post<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      const role = await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin");
+      if (!role) return;
+      if (req.params.user === me(req).id) return reply.code(400).send({ error: "você não pode banir a si mesmo" });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (target === "owner") return reply.code(403).send({ error: "o dono não pode ser banido" });
+      if (!canModerate(role, target)) return reply.code(403).send({ error: "sem permissão" });
+      if (!(await db.select({ id: users.id }).from(users).where(eq(users.id, req.params.user)).limit(1)).length) return reply.code(404).send({ error: "pessoa não existe" });
+      const reason = typeof (req.body as any)?.reason === "string" ? (req.body as any).reason.trim().slice(0, 200) || null : null;
+      await db.insert(serverBans).values({ serverId: req.params.id, userId: req.params.user, bannedBy: me(req).id, reason }).onConflictDoNothing();
+      if (target) {
+        await db.delete(serverMembers).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, req.params.user)));
+        await dropFromCalls(req.params.id, req.params.user);
+        await refreshMemberships(req.params.user);
+        toUsers([req.params.user], { t: "sync" });
+        toServer(req.params.id, { t: "sync" });
+      }
+      return { ok: true };
+    });
+    authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      await db.delete(serverBans).where(and(eq(serverBans.serverId, req.params.id), eq(serverBans.userId, req.params.user)));
+      return { ok: true };
+    });
+
     authed.post<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const body = createInviteBody.safeParse(req.body ?? {});
@@ -699,6 +1003,8 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       const inv = await usableServerInvite(req.params.code);
       if (!inv) return reply.code(404).send({ error: "convite inválido ou vencido" });
       const server = (await findServer(inv.serverId))!;
+      if ((await db.select({ u: serverBans.userId }).from(serverBans).where(and(eq(serverBans.serverId, inv.serverId), eq(serverBans.userId, me(req).id))).limit(1)).length)
+        return reply.code(403).send({ error: "você foi banido deste servidor" });
       if (!(await roleIn(inv.serverId, me(req).id))) {
         await db.insert(serverMembers).values({ serverId: inv.serverId, userId: me(req).id, role: "member" });
         await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, inv.code));
@@ -915,7 +1221,9 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
           : channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, me(req).id));
       if (!channel || !okChannel) return reply.code(404).send({ error: "canal de voz não existe" });
       const user = me(req);
-      const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "6h" });
+      // Token curto: só serve para entrar. Com a conexão aberta o LiveKit renova sozinho; quem foi expulso
+      // não consegue voltar com um token antigo.
+      const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "10m" });
       at.addGrant({
         room: voiceRoomName(channel.id),
         roomJoin: true,
@@ -938,16 +1246,35 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     // ---- Administração do app (só admin) ----
     authed.get("/admin/users", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
-      const rows = await db.select(userCols).from(users).orderBy(asc(users.createdAt));
-      return rows.map((r): Account => ({ id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey, isAdmin: r.isAdmin, canInvite: r.canInvite }));
+      const rows = await db.select({ ...userCols, disabledAt: users.disabledAt }).from(users).orderBy(asc(users.createdAt));
+      return rows.map((r): Account => ({
+        id: r.id,
+        username: r.username,
+        displayName: r.displayName,
+        avatar: r.avatarKey,
+        isAdmin: r.isAdmin,
+        canInvite: r.canInvite,
+        disabled: r.disabledAt !== null,
+      }));
     });
-    /** Dá ou tira o cargo Convidador. */
+    /** Dá ou tira o cargo Convidador e desativa ou reativa uma conta. */
     authed.patch<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
       const body = setInviterBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
-      const done = await db.update(users).set({ canInvite: body.data.canInvite }).where(eq(users.id, req.params.id)).returning({ id: users.id });
-      if (!done.length) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const target = (await db.select({ id: users.id, isAdmin: users.isAdmin }).from(users).where(eq(users.id, req.params.id)).limit(1))[0];
+      if (!target) return reply.code(404).send({ error: "pessoa não encontrada" });
+      if (body.data.disabled && (target.id === me(req).id || target.isAdmin))
+        return reply.code(403).send({ error: "não é possível desativar um administrador" });
+      const set: { canInvite?: boolean; disabledAt?: Date | null } = {};
+      if (body.data.canInvite !== undefined) set.canInvite = body.data.canInvite;
+      if (body.data.disabled !== undefined) set.disabledAt = body.data.disabled ? new Date() : null;
+      await db.update(users).set(set).where(eq(users.id, target.id));
+      if (body.data.disabled) {
+        await db.delete(sessions).where(eq(sessions.userId, target.id));
+        await dropUserFromCalls(target.id);
+        closeSessions((s) => s.userId === target.id);
+      }
       await profileChanged(req.params.id); // a tag TURTLE aparece/some para todo mundo
       return { ok: true };
     });
@@ -1004,6 +1331,31 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       },
     );
 
+    // ---- Busca ----
+    // Só em conversas que a pessoa vê: o canal pedido, ou todos os canais de texto de um servidor dela.
+    const searchIn = async (channelIds: string[], q: string) => {
+      if (!channelIds.length) return [];
+      const rows = await db
+        .select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId))
+        .where(and(inArray(messages.channelId, channelIds), sql`to_tsvector('portuguese', ${messages.content}) @@ websearch_to_tsquery('portuguese', ${q})`))
+        .orderBy(desc(messages.createdAt)).limit(25);
+      return toMessages(rows);
+    };
+    const searchQuery = (q: unknown) => (typeof q === "string" ? q.trim().slice(0, 100) : "");
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/channels/:id/search", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      const q = searchQuery(req.query.q);
+      return q.length < 2 ? [] : searchIn([channel.id], q);
+    });
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/servers/:id/search", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id))) return;
+      const q = searchQuery(req.query.q);
+      if (q.length < 2) return [];
+      const ids = (await db.select({ id: channels.id }).from(channels).where(and(eq(channels.serverId, req.params.id), eq(channels.kind, "text")))).map((c) => c.id);
+      return searchIn(ids, q);
+    });
+
     // ---- Não lidas ----
     /** Conversas com mensagens de outras pessoas depois da última leitura (canais de texto dos meus servidores e DMs). */
     authed.get("/unread", async (req) => {
@@ -1023,8 +1375,9 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             LEFT JOIN read_states r ON r.channel_id = c.id AND r.user_id = ${id}
             WHERE d.user_id = ${id})
         SELECT mine.id AS "channelId", mine.server_id AS "serverId", count(m.id)::int AS count,
-               (count(m.id) FILTER (WHERE m.content LIKE ${token}))::int AS mentions
+               (count(m.id) FILTER (WHERE m.content LIKE ${token} OR r.user_id = ${id}))::int AS mentions
           FROM mine JOIN messages m ON m.channel_id = mine.id AND m.created_at > mine.since AND m.user_id <> ${id}
+          LEFT JOIN messages r ON r.id = m.reply_to
           GROUP BY mine.id, mine.server_id`);
       const list = (Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows) as Unread[];
       return list.map((r) => ({ channelId: r.channelId, serverId: r.serverId ?? null, count: Number(r.count), mentions: Number(r.mentions) }) satisfies Unread);
@@ -1050,6 +1403,29 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       await toChannel(channel, { t: "messageUpdate", message });
       return message;
     });
+    // ---- Reações ----
+    const reactTo = (add: boolean) => async (req: FastifyRequest<{ Params: { id: string; emoji: string } }>, reply: FastifyReply) => {
+      const emoji = req.params.emoji.normalize("NFC");
+      // Só emoji de verdade: sem letras/dígitos soltos nem texto livre.
+      if (!emoji || [...emoji].length > MAX_EMOJI_LENGTH || emoji.length > 32 || !/^[\p{Extended_Pictographic}\p{Emoji_Component}\u200d\ufe0f]+$/u.test(emoji) || /^[\d#*]+$/.test(emoji))
+        return reply.code(400).send({ error: "emoji inválido" });
+      const row = (await db.select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+      const channel = row && (await findChannel(row.channelId));
+      if (!row || !channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "mensagem não existe" });
+      if (add) {
+        const kinds = (await db.selectDistinct({ e: reactions.emoji }).from(reactions).where(eq(reactions.messageId, req.params.id))).map((k) => k.e);
+        if (!kinds.includes(emoji) && kinds.length >= MAX_REACTION_KINDS) return reply.code(400).send({ error: "reações demais nessa mensagem" });
+        await db.insert(reactions).values({ messageId: req.params.id, userId: me(req).id, emoji }).onConflictDoNothing();
+      } else {
+        await db.delete(reactions).where(and(eq(reactions.messageId, req.params.id), eq(reactions.userId, me(req).id), eq(reactions.emoji, emoji)));
+      }
+      const message = (await loadMessage(req.params.id))!;
+      await toChannel(channel, { t: "messageUpdate", message });
+      return message;
+    };
+    authed.put<{ Params: { id: string; emoji: string } }>("/messages/:id/reactions/:emoji", reactTo(true));
+    authed.delete<{ Params: { id: string; emoji: string } }>("/messages/:id/reactions/:emoji", reactTo(false));
+
     /** Apaga a própria mensagem; em servidor, dono e admin também apagam a dos outros. */
     authed.delete<{ Params: { id: string } }>("/messages/:id", async (req, reply) => {
       const row = (await db.select({ userId: messages.userId, channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
@@ -1075,6 +1451,11 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       attachmentsBy.set(userId, recent);
       return true;
     };
+    const attachmentUsage = async (userId: string) =>
+      Number((await db.select({ n: sql<number>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(eq(attachments.userId, userId)))[0]?.n ?? 0);
+    const fmtMb = (b: number) => (b / 1024 / 1024).toFixed(b >= 10 * 1024 * 1024 ? 0 : 1);
+    /** Uso da cota de anexos da própria conta (mostrado em Configurações). */
+    authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));
     /** Envia um arquivo para usar na próxima mensagem do canal (evento "send" com `attachments`). */
     authed.post<{ Params: { id: string } }>("/channels/:id/attachments", async (req, reply) => {
       const channel = await findChannel(req.params.id);
@@ -1087,6 +1468,9 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
       if (!raw || part.file.truncated || raw.length > ATTACHMENT_MAX_BYTES) return reply.code(413).send({ error: `arquivo grande demais (máximo ${ATTACHMENT_MAX_BYTES / 1024 / 1024} MB)` });
       if (!raw.length) return reply.code(400).send({ error: "arquivo vazio" });
       const out = await processAttachment(raw);
+      const used = await attachmentUsage(me(req).id);
+      if (used + out.data.length > attachmentQuotaBytes)
+        return reply.code(413).send({ error: `cota de anexos cheia (${fmtMb(used)} de ${fmtMb(attachmentQuotaBytes)} MB); apague mensagens com arquivos para liberar espaço` });
       const name = (part.filename || "arquivo").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120) || "arquivo";
       const key = await files.save(out.data, out.ext);
       const att: Attachment = { id: newId(), key, name, size: out.data.length, mime: out.mime, width: out.width, height: out.height };
@@ -1095,23 +1479,147 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     });
   });
 
+  // Webhooks do LiveKit: o servidor confere quem está de fato nas salas (a lista de quem está na chamada vem do
+  // gateway, que só sabe o que o cliente avisou). Ligar no livekit.yaml: webhook.api_key + webhook.urls.
+  if (livekit && room) {
+    const receiver = new WebhookReceiver(livekit.apiKey, livekit.apiSecret);
+    const checks = new Set<ReturnType<typeof setTimeout>>();
+    app.addHook("onClose", async () => { for (const t of checks) clearTimeout(t); });
+    /** Pode estar nesta sala agora (mesma regra do token)? */
+    const mayJoin = async (channelId: string, userId: string) => {
+      const channel = await findChannel(channelId);
+      if (!channel) return false;
+      if (channel.kind === "dm") return (await isDmMember(channel.id, userId)) && !(await dmBlocked(channel.id));
+      return channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, userId));
+    };
+    const reported = (channelId: string, userId: string) => [...voice.values()].some((v) => v.channelId === channelId && v.userId === userId);
+    app.register(async (hook) => {
+      hook.addContentTypeParser("application/webhook+json", { parseAs: "string" }, (_req, body, done) => done(null, body));
+      hook.post("/livekit/webhook", async (req, reply) => {
+        let evt;
+        try {
+          evt = await receiver.receive(String(req.body ?? ""), req.headers.authorization);
+        } catch {
+          return reply.code(401).send({ error: "assinatura inválida" });
+        }
+        const name = evt.room?.name ?? "";
+        const identity = evt.participant?.identity;
+        if (!name.startsWith("voice-") || !identity) return { ok: true };
+        const channelId = name.slice("voice-".length);
+        if (evt.event === "participant_joined") {
+          // Entrou sem permissão (token antigo de quem foi expulso): sai na hora.
+          if (!(await mayJoin(channelId, identity))) {
+            await room.removeParticipant(name, identity).catch(() => {});
+            return { ok: true };
+          }
+          // Entrou e não avisou o gateway (ouvinte invisível): depois de um tempo, sai.
+          const t = setTimeout(() => {
+            checks.delete(t);
+            if (reported(channelId, identity)) return;
+            void (async () => {
+              const still = await room.getParticipant(name, identity).then(() => true, () => false);
+              if (still && !reported(channelId, identity)) await room.removeParticipant(name, identity).catch(() => {});
+            })();
+          }, voiceGraceMs);
+          t.unref?.();
+          checks.add(t);
+        }
+        if (evt.event === "participant_left" && reported(channelId, identity)) {
+          // Pode ter só trocado de aparelho: confirma com o LiveKit antes de tirar da lista.
+          const still = await room.getParticipant(name, identity).then(() => true, () => false);
+          if (!still) {
+            let changed = false;
+            for (const [s, v] of voice) if (v.channelId === channelId && v.userId === identity) { voice.delete(s); changed = true; }
+            if (changed) broadcastVoice();
+          }
+        }
+        return { ok: true };
+      });
+    });
+  }
+
   app.register(async (instance) => {
     instance.get<{ Querystring: { token?: string } }>("/ws", { websocket: true }, async (socket: Socket, req) => {
-      const connected = await userFromToken(req.query.token);
-      if (!connected) return socket.close(4401, "unauthorized");
+      // Escuta desde já: o que chega enquanto a conexão é preparada (consultas ao banco) fica numa fila.
+      // Antes, o estado de voz que o cliente reenvia ao reconectar podia se perder aqui.
+      const queue: Buffer[] = [];
+      let deliver: ((raw: Buffer) => void) | undefined;
+      let waiter: (() => void) | undefined;
+      socket.on("message", (raw: Buffer) => {
+        if (deliver) return deliver(raw);
+        queue.push(raw);
+        waiter?.();
+      });
+      // Fechou no meio da preparação: limpa assim que a preparação terminar.
+      let gone = false;
+      let cleanup: (() => void) | undefined;
+      socket.on("close", () => {
+        gone = true;
+        cleanup?.();
+      });
+      const nextQueued = (ms: number) =>
+        new Promise<Buffer | undefined>((resolve) => {
+          if (queue.length) return resolve(queue.shift());
+          const t = setTimeout(() => { waiter = undefined; resolve(undefined); }, ms);
+          waiter = () => { clearTimeout(t); waiter = undefined; resolve(queue.shift()); };
+        });
+      // Token na primeira mensagem ({ t: "auth", token }), para não ficar em URL nem em log; os apps
+      // antigos ainda mandam na URL (?token=).
+      let token = req.query.token;
+      if (!token) {
+        const first = await nextQueued(10_000);
+        try {
+          const e = first && JSON.parse(first.toString());
+          if (e?.t === "auth" && typeof e.token === "string") token = e.token;
+        } catch {
+          // primeira mensagem inválida: fica sem token
+        }
+      }
+      const sess = await sessionFromToken(token);
+      if (!sess) return socket.close(4401, "unauthorized");
+      const connected = sess.user;
+      if (gone) return;
       online.set(socket, connected);
+      socketSessions.set(socket, { userId: connected.id, tokenHash: sess.tokenHash, sessionId: sess.sessionId });
+      // Ping a cada heartbeatMs: quem não responde (notebook dormiu, Wi-Fi caiu sem fechar) é derrubado,
+      // e o close tira a pessoa da presença e da chamada. Qualquer mensagem também conta como sinal de vida.
+      let alive = true;
+      socket.on("pong", () => (alive = true));
+      const beat = setInterval(() => {
+        if (!alive) return socket.terminate ? socket.terminate() : socket.close(4000, "sem resposta");
+        alive = false;
+        socket.ping?.();
+      }, heartbeatMs);
+      beat.unref?.();
       memberships.set(socket, await loadMemberships(connected.id));
       dmSets.set(socket, await loadDmSet(connected.id));
-      presence();
-      socket.send(JSON.stringify(voiceStatesFor(socket)));
-      socket.on("close", () => {
+      cleanup = () => {
+        clearInterval(beat);
+        socketSessions.delete(socket);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
-      });
-      socket.on("message", async (raw: Buffer) => {
+      };
+      if (gone) return cleanup();
+      presence();
+      socket.send(JSON.stringify(voiceStatesFor(socket)));
+      deliver = (raw: Buffer) => {
+        alive = true;
+        // Um erro aqui (banco fora, por exemplo) não pode virar promessa rejeitada solta: isso derruba o processo.
+        handle(raw).catch((err) => {
+          req.log.error({ err, userId: connected.id }, "ws: erro ao tratar evento");
+          try {
+            socket.send(JSON.stringify({ t: "error", error: "erro no servidor; tente de novo" } satisfies ServerEvent));
+          } catch {
+            // conexão já fechada
+          }
+        });
+      };
+      const floodSecond = attemptLimiter({ max: 10, windowMs: 1_000 });
+      const floodWindow = attemptLimiter({ max: 60, windowMs: 10_000 });
+      const handle = async (raw: Buffer) => {
         let evt;
         try {
           evt = clientEvent.parse(JSON.parse(raw.toString()));
@@ -1121,6 +1629,28 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         // O perfil pode ter mudado desde que a conexão abriu.
         const user = online.get(socket) ?? connected;
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
+        // Contra flood: por conexão, no máximo 10 eventos por segundo e 60 a cada 10 s (ping não conta).
+        if (evt.t !== "auth") {
+          if (floodSecond.blockedFor("c") || floodWindow.blockedFor("c"))
+            return socket.send(JSON.stringify({ t: "error", error: "calma: eventos demais; tente de novo em instantes" } satisfies ServerEvent));
+          floodSecond.hit("c");
+          floodWindow.hit("c");
+        }
+        if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "typing") {
+          const ch = await findChannel(evt.channelId);
+          const ok = !ch ? false : ch.kind === "dm" ? await isDmMember(ch.id, user.id) : ch.kind === "text" && !!ch.serverId && !!memberships.get(socket)?.has(ch.serverId);
+          if (ch && ok) await toChannel(ch, { t: "typing", channelId: ch.id, userId: user.id });
+          return;
+        }
+        if (evt.t === "ringDecline") {
+          const r = rings.get(evt.channelId);
+          if (r?.targets.has(user.id)) {
+            toUsers([r.callerId], { t: "ringDeclined", channelId: evt.channelId, by: user.id });
+            endRing(evt.channelId, user.id);
+          }
+          return;
+        }
         if (evt.t === "voice") {
           if (evt.channelId === null) {
             if (voice.delete(socket)) broadcastVoice();
@@ -1136,11 +1666,35 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
+          // Primeira pessoa a entrar na chamada de uma DM/grupo: toca para as outras (só a quem está conectado).
+          const alreadyThere = [...voice.values()].some((v) => v.channelId === channel.id);
+          const ringTargets = channel.kind === "dm" && !alreadyThere && !rings.has(channel.id)
+            ? (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channel.id))).map((r) => r.id).filter((id) => id !== user.id)
+            : [];
           voice.set(socket, {
             userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId ?? "",
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
+          if (ringTargets.length) {
+            const from = { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar };
+            const targets = new Set(ringTargets);
+            const timer = setTimeout(() => endRing(channel.id), RING_MS);
+            timer.unref?.();
+            rings.set(channel.id, { callerId: user.id, targets, timer });
+            for (const s of online.keys()) {
+              const u = online.get(s)!;
+              if (targets.has(u.id)) s.send(JSON.stringify({ t: "ring", channelId: channel.id, from, silent: u.status === "busy" } satisfies ServerEvent));
+            }
+          }
           broadcastVoice();
+          return;
+        }
+        // Reenvio de algo que já entrou (a conexão caiu antes da confirmação): só confirma de novo.
+        const nonceKey = evt.nonce ? `${user.id}:${evt.nonce}` : undefined;
+        const already = nonceKey ? sentNonces.get(nonceKey) : undefined;
+        if (already) {
+          const prev = await loadMessage(already.id);
+          if (prev) socket.send(JSON.stringify({ t: "message", message: prev, nonce: evt.nonce } satisfies ServerEvent));
           return;
         }
         const channel = await findChannel(evt.channelId);
@@ -1151,26 +1705,37 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
             ? await isDmMember(channel.id, user.id)
             : channel.kind === "text" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
         if (!channel || !allowed)
-          return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "canal não existe" } satisfies ServerEvent));
         if (isDm && (await dmBlocked(channel.id)))
-          return socket.send(JSON.stringify({ t: "error", error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
         // Anexos: só os que a própria pessoa enviou para este canal e ainda não usou.
         const picked = evt.attachments.length
           ? await db.select(attachmentCols).from(attachments).where(and(inArray(attachments.id, evt.attachments), eq(attachments.userId, user.id), eq(attachments.channelId, channel.id), isNull(attachments.messageId)))
           : [];
         if (picked.length !== new Set(evt.attachments).size)
-          return socket.send(JSON.stringify({ t: "error", error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
+        // Resposta: só a uma mensagem que ainda existe no mesmo canal.
+        const replyTo = evt.replyTo ? (await replyPreviews([evt.replyTo])).get(evt.replyTo) : undefined;
+        if (evt.replyTo) {
+          const target = replyTo && (await db.select({ c: messages.channelId }).from(messages).where(eq(messages.id, evt.replyTo)).limit(1))[0];
+          if (!target || target.c !== channel.id)
+            return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
+        }
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(), editedAt: null,
           attachments: evt.attachments.map((id) => toAttachment(picked.find((f) => f.id === id)!)),
+          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null, reactions: [],
         };
-        await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });
+        await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));
+        if (nonceKey) rememberNonce(nonceKey, message.id);
         await markRead(user.id, channel.id);
-        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
-        else toServer(channel.serverId!, { t: "message", message });
-      });
+        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message, nonce: evt.nonce });
+        else toServer(channel.serverId!, { t: "message", message, nonce: evt.nonce });
+      };
+      // Pronto: entrega o que chegou durante a preparação, na ordem.
+      for (const raw of queue.splice(0)) deliver(raw);
     });
   });
 

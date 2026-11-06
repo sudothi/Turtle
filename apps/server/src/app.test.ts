@@ -28,7 +28,7 @@ beforeAll(async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")) });
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 } });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -335,6 +335,24 @@ describe("servidores", () => {
     expect((await patch(`/servers/${lagoa}`, { name: "Lagoa 2" }, ana)).status).toBe(200);
     expect((await get("/servers", bia)).body.find((x: any) => x.id === lagoa).name).toBe("Lagoa 2");
   });
+  it("banir: expulsa, não volta por convite, lista e desbane; admin não bane admin nem dono", async () => {
+    const code = (await post(`/servers/${lagoa}/invites`, {}, ana)).body.code;
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200); // caio volta (expulso, não banido)
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, {}, caio)).status).toBe(403); // membro não bane
+    expect((await post(`/servers/${lagoa}/bans/${anaId}`, {}, bia)).status).toBe(403); // admin não bane o dono
+    expect((await post(`/servers/${lagoa}/bans/${biaId}`, {}, bia)).status).toBe(400); // nem a si mesmo
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, { reason: "spam" }, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/channels`, caio)).status).toBe(404);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(403);
+    const list = (await get(`/servers/${lagoa}/bans`, bia)).body;
+    expect(list).toMatchObject([{ userId: caioId, username: "caio", reason: "spam" }]);
+    expect((await get(`/servers/${lagoa}/bans`, caio)).status).toBe(404); // fora do servidor
+    expect((await del(`/servers/${lagoa}/bans/${caioId}`, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/bans`, ana)).body).toEqual([]);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200);
+    expect((await del(`/servers/${lagoa}/members/${caioId}`, ana)).status).toBe(200); // deixa como estava
+  });
+
 
   it("dono não sai sem passar a posse; passar respeita o limite de 2 do novo dono", async () => {
     expect((await del(`/servers/${lagoa}/members/${anaId}`, ana)).status).toBe(403);
@@ -640,6 +658,84 @@ describe("amigos e mensagens diretas", () => {
     await post(`/friends/${aId}`, {}, c);
   });
 
+  it("chamada em DM toca para a outra pessoa; recusar avisa quem ligou; atender para o toque", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C, B] = await Promise.all([wsOpen(a), wsOpen(c), wsOpen(b)]);
+    const wait = () => new Promise((r) => setTimeout(r, 250));
+    const voiceEvt = (channelId: string | null) => JSON.stringify({ t: "voice", channelId, muted: false, deafened: false });
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.find((e) => e.t === "ring")).toMatchObject({ channelId: dm, from: { id: aId }, silent: false });
+    expect(B.events.some((e) => e.t === "ring")).toBe(false);
+    expect(A.events.some((e) => e.t === "ring")).toBe(false);
+    // recusar: quem ligou fica sabendo e o toque para
+    C.ws.send(JSON.stringify({ t: "ringDecline", channelId: dm }));
+    await wait();
+    expect(A.events.find((e) => e.t === "ringDeclined")).toMatchObject({ channelId: dm, by: cId });
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    // quem ligou sai e liga de novo: toca outra vez; atender para o toque
+    A.ws.send(voiceEvt(null));
+    await wait();
+    C.events.length = 0;
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ring")).toBe(true);
+    C.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
+  it("digitando: só quem está na conversa recebe o aviso", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C, B] = await Promise.all([wsOpen(a), wsOpen(c), wsOpen(b)]);
+    A.ws.send(JSON.stringify({ t: "typing", channelId: dm }));
+    B.ws.send(JSON.stringify({ t: "typing", channelId: dm })); // quem não está na conversa não consegue avisar
+    await new Promise((r) => setTimeout(r, 250));
+    expect(C.events.filter((e) => e.t === "typing")).toEqual([{ t: "typing", channelId: dm, userId: aId }]);
+    expect(B.events.some((e) => e.t === "typing")).toBe(false);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
+
+  it("reações: adicionar, remover, validar o emoji e só quem vê a conversa reage", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C] = await Promise.all([wsOpen(a), wsOpen(c)]);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "reaja a isto" }));
+    await new Promise((r) => setTimeout(r, 250));
+    const msg = C.events.find((e) => e.t === "message" && e.message.content === "reaja a isto").message;
+    const put = (id: string, emoji: string, token: string, method = "PUT") =>
+      fetch(base + `/messages/${id}/reactions/${encodeURIComponent(emoji)}`, { method, headers: { authorization: `Bearer ${token}` } });
+    expect((await put(msg.id, "👍", c)).status).toBe(200);
+    expect((await put(msg.id, "👍", c)).status).toBe(200); // repetir não duplica
+    expect((await put(msg.id, "👍", a)).status).toBe(200);
+    expect((await put(msg.id, "abc", a)).status).toBe(400);
+    expect((await put(msg.id, "1", a)).status).toBe(400);
+    expect((await put(msg.id, "👍", b)).status).toBe(404); // fora da conversa
+    await new Promise((r) => setTimeout(r, 200));
+    const upd = A.events.filter((e) => e.t === "messageUpdate" && e.message.id === msg.id).at(-1).message;
+    expect(upd.reactions).toEqual([{ emoji: "👍", userIds: [cId, aId] }]);
+    expect((await put(msg.id, "👍", c, "DELETE")).status).toBe(200);
+    const after = (await get(`/channels/${dm}/messages`, a)).body.find((m: any) => m.id === msg.id);
+    expect(after.reactions).toEqual([{ emoji: "👍", userIds: [aId] }]);
+    for (const x of [A, C]) x.ws.close();
+  });
+
+
+  it("busca: acha por palavra na conversa e não vaza para quem não participa", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const A = await wsOpen(a);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "vamos jogar sábado de noite" }));
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "outra coisa qualquer" }));
+    await new Promise((r) => setTimeout(r, 300));
+    const found = (await get(`/channels/${dm}/search?q=${encodeURIComponent("jogando sábado")}`, c)).body;
+    expect(found.map((m: any) => m.content)).toEqual(["vamos jogar sábado de noite"]);
+    expect((await get(`/channels/${dm}/search?q=sabado`, b)).status).toBe(404);
+    expect((await get(`/channels/${dm}/search?q=x`, a)).body).toEqual([]);
+    A.ws.close();
+  });
+
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);
@@ -792,7 +888,7 @@ describe("chat do dia a dia", () => {
     const d = await listen(dono);
     for (let i = 0; i < 12; i++) {
       say(d.ws, geral, `n${i}`);
-      await new Promise((r) => setTimeout(r, 3));
+      await new Promise((r) => setTimeout(r, 110)); // abaixo do limite de 10 eventos por segundo do WS
     }
     await settle();
     const last = (await get(`/channels/${geral}/messages?limit=5`, dono)).body;
@@ -829,6 +925,68 @@ describe("chat do dia a dia", () => {
     await settle();
     expect(m.events.some((e) => e.t === "messageDelete" && e.id === msg.id && e.channelId === geral)).toBe(true);
     expect((await get(`/channels/${geral}/messages`, dono)).body.some((x: any) => x.id === msg.id)).toBe(false);
+    d.close();
+    m.close();
+  });
+
+  it("responder: cita a mensagem do mesmo canal, conta como menção e mostra apagada quando somem", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    say(m.ws, geral, "pergunta do membro");
+    await settle();
+    const original = m.events.find((e) => e.t === "message" && e.message.content === "pergunta do membro").message;
+    expect(original.replyToId).toBeNull();
+    await post(`/channels/${geral}/read`, {}, membro);
+    d.ws.send(JSON.stringify({ t: "send", channelId: geral, content: "resposta do dono", replyTo: original.id }));
+    await settle();
+    const reply = m.events.find((e) => e.t === "message" && e.message.content === "resposta do dono").message;
+    expect(reply.replyToId).toBe(original.id);
+    expect(reply.replyTo).toMatchObject({ id: original.id, userId: membroId, username: "dia-membro", content: "pergunta do membro", attachments: 0 });
+    // responder a mim conta como menção nas não lidas
+    expect((await get("/unread", membro)).body.find((u: any) => u.channelId === geral)).toMatchObject({ count: 1, mentions: 1 });
+    // o histórico traz a prévia
+    const hist = (await get(`/channels/${geral}/messages`, dono)).body;
+    expect(hist.find((x: any) => x.id === reply.id).replyTo.content).toBe("pergunta do membro");
+    // não dá para responder a mensagem de outro canal nem a uma que não existe
+    const outro = (await post(`/servers/${serverId}/channels`, { name: "outro" }, dono)).body.id;
+    d.ws.send(JSON.stringify({ t: "send", channelId: outro, content: "x", replyTo: original.id }));
+    d.ws.send(JSON.stringify({ t: "send", channelId: geral, content: "y", replyTo: "naoexiste" }));
+    await settle();
+    expect(d.events.filter((e) => e.t === "error" && /respondida/.test(e.error))).toHaveLength(2);
+    // apagar a original: a resposta continua, sem a prévia
+    expect((await del(`/messages/${original.id}`, membro)).status).toBe(200);
+    const after = (await get(`/channels/${geral}/messages`, dono)).body.find((x: any) => x.id === reply.id);
+    expect(after).toMatchObject({ replyToId: original.id, replyTo: null });
+    await post(`/channels/${geral}/read`, {}, membro);
+    d.close();
+    m.close();
+  });
+
+  it("nonce: confirma o envio, reenvio não duplica e erro volta com o nonce", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    const msg = { t: "send", channelId: geral, content: "mensagem única", nonce: "n-123" };
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const first = d.events.find((e) => e.t === "message" && e.message.content === "mensagem única");
+    expect(first.nonce).toBe("n-123");
+    // a conexão caiu antes da confirmação: o cliente reenvia o mesmo nonce
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const confirms = d.events.filter((e) => e.t === "message" && e.nonce === "n-123");
+    expect(confirms).toHaveLength(2);
+    expect(confirms[1].message.id).toBe(first.message.id);
+    // os outros recebem uma vez só, e o histórico tem uma só
+    expect(m.events.filter((e) => e.t === "message" && e.message.content === "mensagem única")).toHaveLength(1);
+    expect((await get(`/channels/${geral}/messages`, dono)).body.filter((x: any) => x.content === "mensagem única")).toHaveLength(1);
+    // outra pessoa com o mesmo nonce não é confundida
+    m.ws.send(JSON.stringify({ ...msg, content: "do membro" }));
+    await settle();
+    expect(m.events.find((e) => e.t === "message" && e.nonce === "n-123" && e.message.content === "do membro")).toBeTruthy();
+    // falha: o erro diz qual envio foi
+    d.ws.send(JSON.stringify({ t: "send", channelId: "nao-existe", content: "x", nonce: "n-err" }));
+    await settle();
+    expect(d.events.find((e) => e.t === "error" && e.nonce === "n-err")).toBeTruthy();
     d.close();
     m.close();
   });
@@ -903,5 +1061,495 @@ describe("chat do dia a dia", () => {
     expect((await get("/servers", dono)).body.find((s: any) => s.id === serverId).icon).toBeNull();
     expect((await fetch(base + `/files/${r.body.icon}`)).status).toBe(404);
     expect(donoId).toBeTruthy();
+  });
+});
+
+describe("limite de tentativas de login", () => {
+  it("bloqueia o nome depois de 8 senhas erradas, o IP depois de 20 tentativas, e login certo zera o nome", async () => {
+    const db = await createDb();
+    const lim = await buildApp({ db: db.db, bootstrapInvite: "boot2" });
+    const url = await lim.listen({ port: 0, host: "127.0.0.1" });
+    const send = async (path: string, body: unknown, ip = "203.0.113.7") => {
+      // vem de 127.0.0.1 (proxy confiável), então o X-Forwarded-For vale como IP de quem tenta
+      const res = await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify(body) });
+      return { status: res.status, retry: res.headers.get("retry-after"), body: (await res.json()) as any };
+    };
+    expect((await send("/auth/register", { inviteCode: "boot2", username: "dona", password: "12345678" })).status).toBe(200);
+    // 7 erros e um acerto: o acerto zera o contador do nome
+    for (let i = 0; i < 7; i++) expect((await send("/auth/login", { username: "dona", password: "errada!!" })).status).toBe(401);
+    expect((await send("/auth/login", { username: "dona", password: "12345678" })).status).toBe(200);
+    // 8 erros seguidos (de IPs diferentes) travam o nome, inclusive com a senha certa e outra grafia
+    for (let i = 0; i < 8; i++) expect((await send("/auth/login", { username: "dona", password: "errada!!" }, `198.51.100.${i}`)).status).toBe(401);
+    const locked = await send("/auth/login", { username: "DONA", password: "12345678" }, "198.51.100.99");
+    expect(locked.status).toBe(429);
+    expect(Number(locked.retry)).toBeGreaterThan(0);
+    expect(locked.body.error).toMatch(/muitas tentativas/);
+    // o IP 203.0.113.7 já fez 9 tentativas; mais 11 em nomes que não existem e ele trava
+    for (let i = 0; i < 11; i++) expect((await send("/auth/login", { username: `ninguem${i}`, password: "x" })).status).toBe(401);
+    expect((await send("/auth/login", { username: "outro", password: "x" })).status).toBe(429);
+    expect((await send("/auth/register", { inviteCode: "x", username: "novo", password: "12345678" })).status).toBe(429);
+    // outro IP segue livre
+    expect((await send("/auth/login", { username: "outro", password: "x" }, "192.0.2.1")).status).toBe(401);
+    await lim.close();
+    await db.close();
+  });
+});
+
+describe("quem está de fato na chamada", () => {
+  const removed: string[] = [];
+  let present = new Set<string>();
+  const fakeRooms = {
+    removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
+    getParticipant: async (room: string, identity: string) => {
+      if (!present.has(`${room}:${identity}`)) throw new Error("not found");
+      return {} as any;
+    },
+  };
+  let h: DbHandle;
+  let srv: Awaited<ReturnType<typeof buildApp>>;
+  let url = "";
+  let dono = "";
+  let donoId = "";
+  let fora = "";
+  let foraId = "";
+  let sala = "";
+  const sign = async (body: string) => {
+    const { createHash } = await import("node:crypto");
+    const { AccessToken } = await import("livekit-server-sdk");
+    const at = new AccessToken(LK.apiKey, LK.apiSecret);
+    at.sha256 = createHash("sha256").update(body).digest("base64");
+    return at.toJwt();
+  };
+  const hook = async (event: string, identity: string, room = voiceRoomName(sala), auth?: string) => {
+    const body = JSON.stringify({ event, room: { name: room }, participant: { identity }, id: `${event}-${identity}-${Math.random()}`, createdAt: Math.floor(Date.now() / 1000) });
+    const res = await fetch(url + "/livekit/webhook", { method: "POST", headers: { "content-type": "application/webhook+json", authorization: auth ?? (await sign(body)) }, body });
+    return res.status;
+  };
+  const wsOpen = (token: string, opts: object = {}) =>
+    new Promise<{ ws: WebSocket; events: any[] }>((resolve, reject) => {
+      const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${token}`, opts);
+      const events: any[] = [];
+      ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+      ws.on("open", () => resolve({ ws, events }));
+      ws.on("error", reject);
+    });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const lastStates = (events: any[]) => events.filter((e) => e.t === "voiceStates").at(-1)?.states ?? [];
+
+  beforeAll(async () => {
+    h = await createDb();
+    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, roomService: fakeRooms });
+    url = await srv.listen({ port: 0, host: "127.0.0.1" });
+    const reg = async (inviteCode: string, username: string, token?: string) => {
+      const code = inviteCode || (await (await fetch(url + "/invites", { method: "POST", headers: { authorization: `Bearer ${token}` } })).json()).code;
+      return (await (await fetch(url + "/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inviteCode: code, username, password: "12345678" }) })).json()) as any;
+    };
+    const d = await reg("boot3", "voz-dono");
+    dono = d.token;
+    donoId = d.user.id;
+    const f = await reg("", "voz-fora", dono);
+    fora = f.token;
+    foraId = f.user.id;
+    const server = (await (await fetch(url + "/servers", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${dono}` }, body: JSON.stringify({ name: "Voz" }) })).json()) as any;
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    sala = chans.find((c) => c.kind === "voice").id;
+  });
+  afterAll(async () => {
+    await srv.close();
+    await h.close();
+  });
+
+  it("token de voz vale 10 minutos", async () => {
+    const r = (await (await fetch(url + `/voice/${sala}/token`, { method: "POST", headers: { authorization: `Bearer ${dono}` } })).json()) as any;
+    const claims = await new TokenVerifier(LK.apiKey, LK.apiSecret).verify(r.token);
+    expect(claims.exp! - claims.nbf!).toBeLessThanOrEqual(600);
+  });
+
+  it("conexão que não responde ao ping cai e sai da chamada", async () => {
+    const watcher = await wsOpen(dono);
+    const dead = await wsOpen(dono, { autoPong: false });
+    dead.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(80);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    const closed = new Promise((r) => dead.ws.on("close", r));
+    await wait(400);
+    await closed;
+    expect(lastStates(watcher.events)).toEqual([]);
+    // quem responde ao ping continua conectado
+    expect(watcher.ws.readyState).toBe(WebSocket.OPEN);
+    watcher.ws.close();
+  });
+
+  it("webhook: assinatura inválida é recusada", async () => {
+    expect(await hook("participant_joined", foraId, voiceRoomName(sala), "Bearer falso")).toBe(401);
+  });
+
+  it("webhook: quem entra sem permissão sai na hora; quem entra e não avisa o gateway sai depois", async () => {
+    removed.length = 0;
+    expect(await hook("participant_joined", foraId)).toBe(200);
+    expect(removed).toEqual([`${voiceRoomName(sala)}:${foraId}`]);
+    removed.length = 0;
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    expect(await hook("participant_joined", donoId)).toBe(200);
+    await wait(300);
+    expect(removed).toEqual([`${voiceRoomName(sala)}:${donoId}`]);
+    // avisando o gateway, fica
+    removed.length = 0;
+    const c = await wsOpen(dono);
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50);
+    expect(await hook("participant_joined", donoId)).toBe(200);
+    await wait(300);
+    expect(removed).toEqual([]);
+    c.ws.close();
+  });
+
+  it("webhook: participant_left tira da lista, a não ser que a pessoa ainda esteja na sala", async () => {
+    const watcher = await wsOpen(dono);
+    const c = await wsOpen(dono);
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    expect(await hook("participant_left", donoId)).toBe(200);
+    await wait(50);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    present = new Set();
+    expect(await hook("participant_left", donoId)).toBe(200);
+    await wait(50);
+    expect(lastStates(watcher.events)).toEqual([]);
+    c.ws.close();
+    watcher.ws.close();
+  });
+});
+
+describe("logs e saúde", () => {
+  it("/health responde 503 quando o banco não responde", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db });
+    expect((await a.inject({ url: "/health" })).statusCode).toBe(200);
+    await h.close();
+    const r = await a.inject({ url: "/health" });
+    expect(r.statusCode).toBe(503);
+    expect(r.json()).toMatchObject({ ok: false });
+    await a.close();
+  });
+
+  it("os logs não guardam o token (nem no cabeçalho nem na URL do WebSocket)", async () => {
+    const { serverLogger, hideToken } = await import("./app.js");
+    expect(hideToken("/ws?token=abc.def&x=1")).toBe("/ws?token=***&x=1");
+    const lines: string[] = [];
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-log", logger: serverLogger("info", { write: (l) => void lines.push(l) }) });
+    const reg = await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-log", username: "logado", password: "12345678" } });
+    const token = reg.json().token as string;
+    await a.inject({ url: "/me", headers: { authorization: `Bearer ${token}` } });
+    await a.inject({ url: `/ws?token=${token}` });
+    await a.close();
+    await h.close();
+    const all = lines.join("");
+    expect(all).toContain('"url":"/me"');
+    expect(all).toContain("token=***");
+    expect(all).not.toContain(token);
+  });
+});
+
+describe("conexão do WebSocket", () => {
+  it("token na primeira mensagem; o que chega durante a preparação não se perde; token errado fecha com 4401", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-ws" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const admin = (await json("/auth/register", { inviteCode: "boot-ws", username: "fila", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Fila" }, admin);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${admin}` } })).json()) as any[];
+    const sala = chans.find((c) => c.kind === "voice").id;
+    const open = async () => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      const events: any[] = [];
+      ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+      await new Promise((r) => ws.on("open", r));
+      return { ws, events };
+    };
+    const watcher = await open();
+    watcher.ws.send(JSON.stringify({ t: "auth", token: admin }));
+    const c = await open();
+    // auth e o estado de voz juntos, na hora (antes de o servidor terminar de preparar a conexão)
+    c.ws.send(JSON.stringify({ t: "auth", token: admin }));
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: true, deafened: false }));
+    await settle();
+    expect(c.events.some((e) => e.t === "presence")).toBe(true);
+    const states = watcher.events.filter((e) => e.t === "voiceStates").at(-1)?.states ?? [];
+    expect(states.find((s: any) => s.channelId === sala)).toMatchObject({ muted: true });
+    c.ws.close();
+    watcher.ws.close();
+    // token errado fecha com 4401
+    const bad = await open();
+    const closed = new Promise<number>((r) => bad.ws.on("close", (code) => r(code)));
+    bad.ws.send(JSON.stringify({ t: "auth", token: "falso" }));
+    expect(await closed).toBe(4401);
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("cota de anexos", () => {
+  it("recusa com 413 quando passa da cota e mostra o uso em /me/storage", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150 });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const token = (await json("/auth/register", { inviteCode: "boot-cota", username: "cota", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Cota" }, token);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    const text = chans.find((c) => c.kind === "text").id;
+    const send = async (n: number) => {
+      const form = new FormData();
+      form.append("file", new Blob(["x".repeat(n)], { type: "text/plain" }), "a.txt");
+      return fetch(url + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+    };
+    expect((await send(100)).status).toBe(200);
+    const over = await send(100);
+    expect(over.status).toBe(413);
+    expect(((await over.json()) as any).error).toMatch(/cota/);
+    const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+    expect(st).toEqual({ used: 100, quota: 150 });
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("flood no WebSocket", () => {
+  it("passa de 10 eventos por segundo e o servidor recusa o excesso; ping não conta", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-flood" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const token = ((await (await fetch(url + "/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inviteCode: "boot-flood", username: "flood", password: "12345678" }) })).json()) as any).token;
+    const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${token}`);
+    const events: any[] = [];
+    ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+    await new Promise((r) => ws.on("open", r));
+    await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "ping" }));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(events.filter((e) => e.t === "pong")).toHaveLength(30);
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "voice", channelId: null, muted: false, deafened: false }));
+    await settle();
+    expect(events.filter((e) => e.t === "error" && /eventos demais/.test(e.error)).length).toBeGreaterThanOrEqual(15);
+    ws.close();
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("nomes de usuário", () => {
+  it("não diferenciam maiúsculas no cadastro nem no login", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-nome" });
+    const reg = (body: Record<string, string>) => a.inject({ method: "POST", url: "/auth/register", payload: body });
+    expect((await reg({ inviteCode: "boot-nome", username: "Thiago", password: "12345678" })).statusCode).toBe(200);
+    const admin = (await a.inject({ method: "POST", url: "/auth/login", payload: { username: "thiago", password: "12345678" } })).json();
+    expect(admin.user.username).toBe("Thiago");
+    const inv = (await a.inject({ method: "POST", url: "/invites", headers: { authorization: `Bearer ${admin.token}` } })).json();
+    expect((await reg({ inviteCode: inv.code, username: "THIAGO", password: "12345678" })).statusCode).toBe(409);
+    // o convite não foi gasto com o cadastro recusado
+    expect((await reg({ inviteCode: inv.code, username: "outra", password: "12345678" })).statusCode).toBe(200);
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("sessões, senha e contas desativadas (#89)", () => {
+  it("migração mantém sessões antigas funcionando com UUID aleatório e validade de 30 dias", async () => {
+    const { sessions, eq, sql } = await import("@turtle/db");
+    const { hashToken } = await import("./auth.js");
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-old" });
+    const reg = (await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-old", username: "antigo", password: "12345678" } })).json();
+    const oldToken = "token-de-antes-da-migracao";
+    const oldHash = hashToken(oldToken);
+    // Insere só (token_hash, user_id), como o servidor antigo fazia antes do #89.
+    await h.db.execute(sql`INSERT INTO sessions (token_hash, user_id) VALUES (${oldHash}, ${reg.user.id})`);
+    const row = (await h.db.select().from(sessions).where(eq(sessions.tokenHash, oldHash)))[0]!;
+    expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(oldHash.startsWith(row.id.slice(0, 8))).toBe(false);
+    expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+    const me = await a.inject({ url: "/me", headers: { authorization: `Bearer ${oldToken}` } });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().username).toBe("antigo");
+    await a.close();
+    await h.close();
+  });
+
+  it("validade deslizante renova após 1 h e sessão vencida responde 401 e fecha o WebSocket com 4401", async () => {
+    const { sessions, eq } = await import("@turtle/db");
+    const { hashToken } = await import("./auth.js");
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const reg = (await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-exp", username: "expira", password: "12345678" } })).json();
+    const th = hashToken(reg.token);
+
+    // Há 2 horas sem gravar: o próximo pedido atualiza last_used_at e empurra expires_at para +30 dias.
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+    const soon = new Date(Date.now() + 3_600_000);
+    await h.db.update(sessions).set({ lastUsedAt: twoHoursAgo, expiresAt: soon }).where(eq(sessions.tokenHash, th));
+    expect((await a.inject({ url: "/me", headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(200);
+    const touched = (await h.db.select().from(sessions).where(eq(sessions.tokenHash, th)))[0]!;
+    expect(touched.lastUsedAt.getTime()).toBeGreaterThan(twoHoursAgo.getTime());
+    expect(touched.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+
+    // Sessão vencida: 401 na API, 4401 no WebSocket e linha apagada do banco.
+    await h.db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.tokenHash, th));
+    const wsCode = await new Promise<number>((resolve) => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      ws.on("open", () => ws.send(JSON.stringify({ t: "auth", token: reg.token })));
+      ws.on("close", (code) => resolve(code));
+    });
+    expect(wsCode).toBe(4401);
+    expect((await a.inject({ url: "/me", headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(401);
+    expect(await h.db.select().from(sessions).where(eq(sessions.tokenHash, th))).toEqual([]);
+    await a.close();
+    await h.close();
+  });
+
+  it("lista sessões, encerra outra sessão, faz logout real e troca a senha derrubando as outras (com limitador)", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-sess", heartbeatMs: 120, authLimit: { perIp: 1000, perName: 4 } });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const req = async (method: string, path: string, body?: unknown, token?: string, ua = "Mozilla/5.0 (Windows NT 10.0) Chrome/130.0") => {
+      const res = await fetch(url + path, {
+        method,
+        headers: {
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          "user-agent": ua,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const openWs = async (token: string) => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      const closed = new Promise<number>((r) => ws.on("close", (c) => r(c)));
+      const ready = new Promise<void>((r) => ws.on("message", (raw) => {
+        if (JSON.parse(raw.toString()).t === "presence") r();
+      }));
+      ws.on("open", () => ws.send(JSON.stringify({ t: "auth", token })));
+      await ready;
+      return { ws, closed };
+    };
+
+    const s1 = (await req("POST", "/auth/register", { inviteCode: "boot-sess", username: "bia", password: "12345678" }, undefined, "Electron/37 (Windows)")).body.token as string;
+    const s2 = (await req("POST", "/auth/login", { username: "bia", password: "12345678" }, undefined, "okhttp/4.12.0")).body.token as string;
+    const s3 = (await req("POST", "/auth/login", { username: "bia", password: "12345678" }, undefined, "Mozilla/5.0 Firefox/132.0")).body.token as string;
+
+    const list = (await req("GET", "/me/sessions", undefined, s1)).body as any[];
+    expect(list).toHaveLength(3);
+    expect(list.filter((x) => x.current)).toHaveLength(1);
+    const s2Info = list.find((x) => x.userAgent === "okhttp/4.12.0")!;
+    expect(s2Info.id).toMatch(/^[0-9a-f-]{36}$/i);
+
+    // Encerrar s2 fecha o WebSocket de s2 com 4401, enquanto s1 segue viva (respondendo ao heartbeat e enviando mensagens).
+    const ws1 = await openWs(s1);
+    const ws2 = await openWs(s2);
+    expect((await req("DELETE", `/me/sessions/${s2Info.id}`, undefined, s1)).status).toBe(200);
+    expect(await ws2.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s2)).status).toBe(401);
+    expect(ws1.ws.readyState).toBe(WebSocket.OPEN);
+
+    // Troca de senha: 4 erros travam pelo limitador; antes disso, acertar troca a senha, mantém s1 e derruba s3.
+    expect((await req("POST", "/me/password", { currentPassword: "errada", newPassword: "nova-senha-forte" }, s1)).status).toBe(401);
+    const ws3 = await openWs(s3);
+    expect((await req("POST", "/me/password", { currentPassword: "12345678", newPassword: "nova-senha-forte" }, s1)).status).toBe(200);
+    expect(await ws3.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s3)).status).toBe(401);
+    expect((await req("GET", "/me", undefined, s1)).status).toBe(200);
+    expect(ws1.ws.readyState).toBe(WebSocket.OPEN);
+    expect((await req("POST", "/auth/login", { username: "bia", password: "12345678" })).status).toBe(401);
+    expect((await req("POST", "/auth/login", { username: "bia", password: "nova-senha-forte" })).status).toBe(200);
+
+    // Limitador de tentativas vale também em POST /me/password (4 erros seguidos -> 429).
+    for (let i = 0; i < 4; i++) {
+      expect((await req("POST", "/me/password", { currentPassword: "errada", newPassword: "outra-senha-123" }, s1)).status).toBe(401);
+    }
+    expect((await req("POST", "/me/password", { currentPassword: "nova-senha-forte", newPassword: "outra-senha-123" }, s1)).status).toBe(429);
+
+    // POST /auth/logout apaga a sessão atual e fecha o WebSocket com 4401.
+    expect((await req("POST", "/auth/logout", {}, s1)).status).toBe(200);
+    expect(await ws1.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s1)).status).toBe(401);
+
+    await a.close();
+    await h.close();
+  });
+
+  it("admin desativa e reativa conta (derrubando sessões e chamadas), mas não pode desativar a si mesmo nem o dono do app", async () => {
+    const { users, eq } = await import("@turtle/db");
+    const removed: string[] = [];
+    const fakeRooms = {
+      removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
+      getParticipant: async () => ({}) as any,
+    };
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-dis", livekit: LK, roomService: fakeRooms });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const req = async (method: string, path: string, body?: unknown, token?: string) => {
+      const res = await fetch(url + path, {
+        method,
+        headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+
+    const owner = (await req("POST", "/auth/register", { inviteCode: "boot-dis", username: "dono", password: "12345678" })).body;
+    const inv1 = (await req("POST", "/invites", {}, owner.token)).body.code;
+    const admin2 = (await req("POST", "/auth/register", { inviteCode: inv1, username: "admin2", password: "12345678" })).body;
+    await h.db.update(users).set({ isAdmin: true }).where(eq(users.id, admin2.user.id));
+    const inv2 = (await req("POST", "/invites", {}, owner.token)).body.code;
+    const membro = (await req("POST", "/auth/register", { inviteCode: inv2, username: "membro", password: "12345678" })).body;
+
+    // Caso 1: admin não pode desativar a si mesmo.
+    expect((await req("PATCH", `/admin/users/${owner.user.id}`, { disabled: true }, owner.token)).status).toBe(403);
+    // Caso 2: outro admin também não pode desativar o dono do app (isAdmin = true).
+    expect((await req("PATCH", `/admin/users/${owner.user.id}`, { disabled: true }, admin2.token)).status).toBe(403);
+
+    // Coloca o membro num servidor e numa chamada de voz, com WebSocket aberto.
+    const srv = (await req("POST", "/servers", { name: "Casa" }, owner.token)).body;
+    const sInv = (await req("POST", `/servers/${srv.id}/invites`, {}, owner.token)).body.code;
+    await req("POST", `/invites/${sInv}/join`, {}, membro.token);
+    const chans = (await req("GET", `/servers/${srv.id}/channels`, undefined, owner.token)).body as any[];
+    const sala = chans.find((c) => c.kind === "voice").id;
+
+    const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+    const closed = new Promise<number>((r) => ws.on("close", (c) => r(c)));
+    const inCall = new Promise<void>((r) => ws.on("message", (raw) => {
+      const e = JSON.parse(raw.toString());
+      if (e.t === "voiceStates" && e.states.some((s: any) => s.userId === membro.user.id)) r();
+    }));
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ t: "auth", token: membro.token }));
+      ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    });
+    await inCall;
+
+    // Desativar conta apaga sessões, fecha WS com 4401, tira da chamada no LiveKit e bloqueia login.
+    expect((await req("PATCH", `/admin/users/${membro.user.id}`, { disabled: true }, owner.token)).status).toBe(200);
+    expect(await closed).toBe(4401);
+    expect(removed).toContain(`${voiceRoomName(sala)}:${membro.user.id}`);
+    expect((await req("GET", "/me", undefined, membro.token)).status).toBe(401);
+    const blockedLogin = await req("POST", "/auth/login", { username: "membro", password: "12345678" });
+    expect(blockedLogin.status).toBe(403);
+    expect(blockedLogin.body.error).toMatch(/desativada/);
+    expect((await req("GET", "/admin/users", undefined, owner.token)).body.find((u: any) => u.id === membro.user.id).disabled).toBe(true);
+
+    // Reativar permite entrar de novo.
+    expect((await req("PATCH", `/admin/users/${membro.user.id}`, { disabled: false }, owner.token)).status).toBe(200);
+    expect((await req("POST", "/auth/login", { username: "membro", password: "12345678" })).status).toBe(200);
+
+    await a.close();
+    await h.close();
   });
 });

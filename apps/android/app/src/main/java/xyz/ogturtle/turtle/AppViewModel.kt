@@ -56,6 +56,8 @@ data class UiState(
     val uploading: Boolean = false,
     /** Quem está em cada chamada de voz (de todos os meus servidores e conversas). */
     val voiceStates: List<VoiceState> = emptyList(),
+    /** Chamadas tocando agora (DM e grupo). */
+    val ringing: List<ServerEvent.Ring> = emptyList(),
     /** A chamada em que estou agora (null = fora de chamada). */
     val call: CallUi? = null,
 )
@@ -72,7 +74,7 @@ internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
-    val api = Api(BuildConfig.SERVER_URL) { session.token }
+    val api = Api(BuildConfig.SERVER_URL, onUnauthorized = ::clearSession) { session.token }
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -89,6 +91,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
         },
+        onUnauthorized = ::clearSession,
     )
 
     val voice = VoiceController(app, viewModelScope)
@@ -189,11 +192,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CallService.stop(getApplication())
     }
 
-    fun logout() {
+    private fun clearSession() {
         leaveCall()
         realtime.stop()
         session.token = null
         _state.value = UiState(booting = false)
+    }
+
+    fun logout() {
+        val tok = session.token
+        clearSession()
+        if (tok != null) viewModelScope.launch { runCatching { api.logout(tok) } }
     }
 
     /** Busca servidores, canais, conversas diretas, amigos e não lidas. */
@@ -327,9 +336,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 block()
             } catch (e: ApiException) {
-                _state.update { it.copy(error = e.message) }
+                if (e.status != 401) _state.update { it.copy(error = e.message) }
             }
         }
+    }
+
+    private fun endRing(channelId: String) {
+        _state.update { it.copy(ringing = it.ringing.filterNot { r -> r.channelId == channelId }) }
+        Ringer.stop(getApplication(), channelId)
+    }
+
+    /** Atendi (a tela abre a chamada) ou fechei o cartão: para de tocar aqui. */
+    fun dismissRing(channelId: String) = endRing(channelId)
+
+    fun declineRing(channelId: String) {
+        realtime.sendRingDecline(channelId)
+        endRing(channelId)
     }
 
     private fun onEvent(e: ServerEvent) {
@@ -354,6 +376,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is ServerEvent.MessageDelete -> applyDelete(e.channelId, e.id)
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
             is ServerEvent.VoiceStates -> _state.update { it.copy(voiceStates = e.states) }
+            is ServerEvent.Ring -> {
+                _state.update { it.copy(ringing = it.ringing.filterNot { r -> r.channelId == e.channelId } + e) }
+                Ringer.ring(getApplication(), e)
+            }
+            is ServerEvent.RingEnd -> endRing(e.channelId)
+            is ServerEvent.RingDeclined -> _state.update { it.copy(error = "Chamada recusada") }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }

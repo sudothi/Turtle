@@ -19,6 +19,8 @@ export interface AudioPrefs {
   screenProfile: ScreenProfileId;
   /** Incluir o áudio do computador ao transmitir. Começa desligado para evitar eco da chamada. */
   screenAudio: boolean;
+  /** Publicar também uma versão pequena da tela (960×540, 15 fps) para quem tem rede fraca. Custa CPU/GPU de quem transmite. */
+  screenSimulcast: boolean;
 }
 
 export type ScreenProfileId = "1080p30" | "720p60" | "1080p60";
@@ -46,7 +48,7 @@ const KEY = "turtle.audio";
 const validNoise = new Set<NoiseMode>(["gtcrn", "rnnoise", "speex", "browser", "off"]);
 const defaults: AudioPrefs = {
   inputId: "default", outputId: "default", noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1,
-  volumes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false,
+  volumes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false, screenSimulcast: false,
 };
 
 export function loadPrefs(): AudioPrefs {

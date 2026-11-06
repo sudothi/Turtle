@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS message_receipts (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   request_id text NOT NULL, channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   body_hash text NOT NULL, PRIMARY KEY (user_id, request_id));
+-- Nome de usuário único sem diferenciar maiúsculas ("Thiago" e "thiago" não podem coexistir).
+-- Só cria o índice se o banco ainda não tem nomes repetidos nessa forma (senão o servidor não subiria).
+DO $$
+BEGIN
+  IF to_regclass('users_username_lower_idx') IS NULL
+     AND NOT EXISTS (SELECT 1 FROM users GROUP BY lower(username) HAVING count(*) > 1) THEN
+    CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
+  END IF;
+END $$;
+-- Responder a uma mensagem (sem chave estrangeira: a resposta continua quando a original é apagada).
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to text;
+CREATE INDEX IF NOT EXISTS messages_reply_to_idx ON messages (reply_to);
 -- Anexos do chat (os arquivos ficam na pasta de uploads).
 CREATE TABLE IF NOT EXISTS attachments (
   id text PRIMARY KEY,
@@ -121,6 +133,20 @@ CREATE TABLE IF NOT EXISTS attachments (
   width integer, height integer, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS attachments_message_idx ON attachments (message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS attachments_key_idx ON attachments (file_key);
+-- Banimentos de servidor: quem foi banido não volta por convite.
+CREATE TABLE IF NOT EXISTS server_bans (
+  server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  banned_by text NOT NULL, reason text, created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (server_id, user_id));
+-- Reações com emoji.
+CREATE TABLE IF NOT EXISTS reactions (
+  message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (message_id, user_id, emoji));
+-- Busca de mensagens (texto, português).
+CREATE INDEX IF NOT EXISTS messages_fts_idx ON messages USING gin (to_tsvector('portuguese', content));
 -- Não lidas. Na primeira vez, tudo o que já existe conta como lido (ninguém abre o app com 500 não lidas).
 DO $$
 BEGIN
@@ -136,6 +162,18 @@ BEGIN
       ON CONFLICT DO NOTHING;
   END IF;
 END $$;
+
+-- Validade deslizante das sessões (30 dias sem uso), aparelho/último uso e contas desativadas (#89).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at timestamptz;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS id text DEFAULT (gen_random_uuid()::text);
+UPDATE sessions SET id = gen_random_uuid()::text WHERE id IS NULL;
+ALTER TABLE sessions ALTER COLUMN id SET DEFAULT (gen_random_uuid()::text);
+ALTER TABLE sessions ALTER COLUMN id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_id_idx ON sessions (id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days');
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 `;
 
 export interface DbHandle {

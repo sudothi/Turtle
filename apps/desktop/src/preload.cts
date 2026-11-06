@@ -33,4 +33,13 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
   focus() {
     ipcRenderer.send("win:focus");
   },
+  /** Atalhos globais (funcionam com o jogo em tela cheia). Aceleradores do Electron; "" desliga. */
+  setShortcuts(s: { mute: string; deafen: string }) {
+    ipcRenderer.send("shortcuts:set", s);
+  },
+  onShortcut(cb: (which: "mute" | "deafen") => void) {
+    const h = (_: unknown, which: "mute" | "deafen") => cb(which);
+    ipcRenderer.on("shortcut:fired", h);
+    return () => void ipcRenderer.removeListener("shortcut:fired", h);
+  },
 });

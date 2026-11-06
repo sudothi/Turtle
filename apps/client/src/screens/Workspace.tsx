@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MENTION_RE, dmTitle, mentionedIds, serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
-import { Button, Icon, IconButton } from "@turtle/ui";
+import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
+import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
+import { desktop, loadShortcuts } from "../desktop";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -10,7 +11,7 @@ import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
-import { ChatView } from "../components/ChatView";
+import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
@@ -23,6 +24,10 @@ import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../comp
 
 const MEMBERS_KEY = "turtle.membersOpen";
 /** Página do histórico (o servidor manda até 50 por vez). */
+/** Evento de envio de uma mensagem da fila. */
+const sendEvent = (o: Outgoing) => ({
+  t: "send", channelId: o.channelId, content: o.content, attachments: o.attachments, nonce: o.nonce, ...(o.replyTo ? { replyTo: o.replyTo } : {}),
+});
 const PAGE = 50;
 const DM_PANEL_KEY = "turtle.dmPanel";
 const SERVER_KEY = "turtle.server";
@@ -52,6 +57,11 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [busy, setBusy] = useState<string[]>([]);
   /** Ainda há mensagens mais antigas no canal aberto. */
   const [hasMore, setHasMore] = useState(false);
+  /** Mensagens enviadas ainda sem confirmação do servidor (ou que falharam). */
+  const [outbox, setOutbox] = useState<Outgoing[]>([]);
+  const outboxRef = useRef(outbox);
+  outboxRef.current = outbox;
+  const reconnectNow = useRef<() => void>(() => {});
   const [editingChannel, setEditingChannel] = useState<Channel>();
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
@@ -278,6 +288,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     };
   }, [markRead]);
   useEffect(() => askNotificationsOnFirstClick(), []);
+  // Atalhos globais do app desktop: registra os guardados e reage ao aperto (o som sai do efeito de mudo/ensurdecer).
+  useEffect(() => {
+    const d = desktop();
+    if (!d?.setShortcuts || !d.onShortcut) return;
+    d.setShortcuts(loadShortcuts());
+    return d.onShortcut((which) => void (which === "mute" ? voice.toggleMute() : voice.toggleDeafen()));
+  }, [voice]);
 
   // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
   const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });
@@ -289,6 +306,25 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     lastSnap.current = { muted: snap.muted, deafened: snap.deafened, screen: snap.screen };
   }, [snap.muted, snap.deafened, snap.screen]);
   useEffect(() => setSoundOutput(snap.prefs.outputId), [snap.prefs.outputId]);
+
+  // ---- Aviso falado (leitor de tela) de quem entra/sai da chamada e de mudo/ensurdecido ----
+  const [liveNote, setLiveNote] = useState("");
+  const lastCall = useRef<{ ids: Map<string, string>; muted: boolean; deafened: boolean; channelId: string | undefined }>({ ids: new Map(), muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId });
+  useEffect(() => {
+    const prev = lastCall.current;
+    const ids = new Map(snap.participants.map((p) => [p.id, p.name] as const));
+    const notes: string[] = [];
+    if (snap.channelId && snap.channelId === prev.channelId) {
+      for (const [id, name] of ids) if (!prev.ids.has(id) && !snap.participants.find((p) => p.id === id)?.isLocal) notes.push(`${name} entrou na chamada`);
+      for (const [id, name] of prev.ids) if (!ids.has(id)) notes.push(`${name} saiu da chamada`);
+    }
+    if (snap.channelId) {
+      if (snap.deafened !== prev.deafened) notes.push(snap.deafened ? "Você ensurdeceu" : "Você voltou a ouvir");
+      else if (snap.muted !== prev.muted) notes.push(snap.muted ? "Você está mudo" : "Você está com o microfone ligado");
+    }
+    lastCall.current = { ids, muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId };
+    if (notes.length) setLiveNote(notes.join(". "));
+  }, [snap.participants, snap.muted, snap.deafened, snap.channelId]);
 
   // Título da janela com o que está esperando você (aparece na barra de tarefas).
   const waiting = Object.values(unread).reduce((n, u) => n + (u.serverId === null ? 1 : u.mentions), 0);
@@ -308,22 +344,53 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   useEffect(() => {
     let closed = false;
     let retry: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    let opened = false;
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      const s = new WebSocket(`${proto}://${location.host}/ws?token=${getToken()}`);
+      // O token vai na primeira mensagem, não na URL (assim não aparece em log de proxy nem de servidor).
+      const s = new WebSocket(`${proto}://${location.host}/ws`);
       ws.current = s;
       s.onopen = () => {
+        s.send(JSON.stringify({ t: "auth", token: getToken() ?? "" }));
+        attempts = 0;
         voice.resendState();
         void loadUnread().catch(() => {});
+        // Reenvia o que ficou sem confirmação (o servidor ignora o que já tinha entrado, pelo nonce).
+        for (const o of outboxRef.current) if (o.status === "sending") s.send(JSON.stringify(sendEvent(o)));
+        // Reconectou: busca a última página da conversa aberta (chegou mensagem durante a queda).
+        if (opened && currentRef.current) {
+          const id = currentRef.current;
+          api.messages(id).then((fresh) => {
+            if (currentRef.current !== id) return;
+            setMessages((old) => {
+              const byId = new Map(fresh.map((m) => [m.id, m]));
+              const cut = fresh[0]?.createdAt ?? "";
+              return [...old.filter((m) => m.createdAt < cut && !byId.has(m.id)), ...fresh];
+            });
+          }).catch(() => {});
+        }
+        opened = true;
       };
       s.onmessage = (ev) => {
         const parsed = serverEvent.safeParse(JSON.parse(ev.data));
         if (!parsed.success) return;
         const evt = parsed.data;
-        if (evt.t === "message") onMessage.current(evt.message);
-        if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current)
-          setMessages((l) => l.map((x) => (x.id === evt.message.id ? evt.message : x)));
-        if (evt.t === "messageDelete" && evt.channelId === currentRef.current) setMessages((l) => l.filter((x) => x.id !== evt.id));
+        if (evt.t === "message") {
+          if (evt.nonce) setOutbox((l) => (l.some((o) => o.nonce === evt.nonce) ? l.filter((o) => o.nonce !== evt.nonce) : l));
+          onMessage.current(evt.message);
+        }
+        if (evt.t === "error" && evt.nonce) {
+          const nonce = evt.nonce;
+          setOutbox((l) => l.map((o) => (o.nonce === nonce ? { ...o, status: "failed", error: evt.error } : o)));
+        }
+        if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current) {
+          const m = evt.message;
+          // Atualiza a mensagem e a prévia dela nas respostas.
+          setMessages((l) => l.map((x) => (x.id === m.id ? m : x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, content: m.content.slice(0, REPLY_PREVIEW_CHARS) } } : x)));
+        }
+        if (evt.t === "messageDelete" && evt.channelId === currentRef.current)
+          setMessages((l) => l.filter((x) => x.id !== evt.id).map((x) => (x.replyTo?.id === evt.id ? { ...x, replyTo: null } : x)));
         if (evt.t === "read") setUnread((u) => {
           if (!u[evt.channelId]) return u;
           const n = { ...u };
@@ -353,20 +420,79 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           setBusy(evt.busy);
         }
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
+        if (evt.t === "typing") setTypingBy((all) => ({ ...all, [evt.channelId]: { ...all[evt.channelId], [evt.userId]: Date.now() } }));
+        if (evt.t === "message") setTypingBy((all) => {
+          const who = all[evt.message.channelId];
+          if (!who?.[evt.message.userId]) return all;
+          const { [evt.message.userId]: _gone, ...rest } = who;
+          return { ...all, [evt.message.channelId]: rest };
+        });
+        if (evt.t === "ring") onRing.current(evt);
+        if (evt.t === "ringEnd") setRings((l) => l.filter((x) => x.channelId !== evt.channelId));
+        if (evt.t === "ringDeclined") setLiveNote("Chamada recusada");
       };
       s.onclose = (ev) => {
-        if (ev.code === 4401) return onLogout();
-        if (!closed) retry = setTimeout(connect, 2000);
+        if (ev.code === 4401) {
+          closed = true;
+          clearTimeout(retry);
+          return onLogout();
+        }
+        // Espera crescente (1, 2, 4… até 10 s) com um pouco de sorteio, para todos não voltarem juntos.
+        const wait = Math.min(10_000, 1000 * 2 ** attempts++) * (0.75 + Math.random() * 0.5);
+        if (!closed) retry = setTimeout(connect, wait);
       };
     };
     connect();
-    return () => { closed = true; clearTimeout(retry); ws.current?.close(); };
+    // Rede voltou, app voltou para a frente ou a pessoa pediu para reenviar: tenta na hora, sem esperar a vez.
+    reconnectNow.current = () => {
+      const st = ws.current?.readyState;
+      if (closed || st === WebSocket.OPEN || st === WebSocket.CONNECTING) return;
+      clearTimeout(retry);
+      attempts = 0;
+      connect();
+    };
+    const wake = () => { if (document.visibilityState === "visible") reconnectNow.current(); };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      closed = true;
+      clearTimeout(retry);
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      ws.current?.close();
+    };
   }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
 
-  const send = useCallback((content: string, attachments: string[] = []) => {
+  /** Envia pelo WebSocket se estiver aberto; senão fica na fila e vai quando reconectar. */
+  const transmit = useCallback((o: Outgoing) => {
+    const s = ws.current;
+    if (s?.readyState === WebSocket.OPEN) s.send(JSON.stringify(sendEvent(o)));
+    else reconnectNow.current();
+  }, []);
+  // Sem confirmação em 15 s: marca como não enviada (a pessoa escolhe reenviar ou descartar).
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now();
+      if (outboxRef.current.some((o) => o.status === "sending" && now - o.at > 15_000))
+        setOutbox((l) => l.map((o) => (o.status === "sending" && now - o.at > 15_000 ? { ...o, status: "failed", error: "sem conexão com o servidor" } : o)));
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
+  const send = useCallback((content: string, attachments: string[] = [], replyTo?: string) => {
     if (!activeId) return;
-    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content, attachments }));
-  }, [activeId]);
+    const o: Outgoing = { nonce: crypto.randomUUID(), channelId: activeId, content, attachments, replyTo, status: "sending", at: Date.now() };
+    setOutbox((l) => [...l, o]);
+    transmit(o);
+  }, [activeId, transmit]);
+  const retrySend = useCallback((nonce: string) => {
+    const o = outboxRef.current.find((x) => x.nonce === nonce);
+    if (!o) return;
+    const again = { ...o, status: "sending" as const, error: undefined, at: Date.now() };
+    setOutbox((l) => l.map((x) => (x.nonce === nonce ? again : x)));
+    transmit(again);
+  }, [transmit]);
+  const discardSend = useCallback((nonce: string) => setOutbox((l) => l.filter((x) => x.nonce !== nonce)), []);
+  const pendingHere = outbox.filter((o) => o.channelId === activeId);
 
   const openDm = useCallback((dm: Dm) => {
     setHome(true);
@@ -385,6 +511,54 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   }, [chooseServer, showContent]);
 
   // Mensagem nova chegando: lista, não lidas, som e notificação. Fica num ref para ver o estado atual sem reconectar.
+  // ---- Chamadas tocando (DM e grupo) ----
+  const [rings, setRings] = useState<Extract<ServerEvent, { t: "ring" }>[]>([]);
+  // "Digitando…": quem avisou nos últimos 6 s, por canal.
+  const [typingBy, setTypingBy] = useState<Record<string, Record<string, number>>>({});
+  const typingIds = (channelId?: string) => (channelId ? Object.keys(typingBy[channelId] ?? {}) : []);
+  useEffect(() => {
+    if (!Object.keys(typingBy).length) return;
+    const t = setInterval(() => setTypingBy((all) => {
+      const now = Date.now();
+      const next: typeof all = {};
+      for (const [c, who] of Object.entries(all)) {
+        const alive = Object.fromEntries(Object.entries(who).filter(([, at]) => now - at < 6000));
+        if (Object.keys(alive).length) next[c] = alive;
+      }
+      return Object.keys(next).length === Object.keys(all).length && Object.entries(next).every(([c, w]) => Object.keys(w).length === Object.keys(all[c]!).length) ? all : next;
+    }), 1000);
+    return () => clearInterval(t);
+  }, [typingBy]);
+  const sendTyping = useCallback((channelId: string) => {
+    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "typing", channelId }));
+  }, []);
+  const onRing = useRef<(r: Extract<ServerEvent, { t: "ring" }>) => void>(() => {});
+  onRing.current = (r) => {
+    setRings((l) => [...l.filter((x) => x.channelId !== r.channelId), r]);
+    if (r.silent && appFocused()) return;
+    const dm = dms.find((d) => d.channelId === r.channelId);
+    if (!appFocused() || r.silent)
+      showNotification(`${shownName(r.from)} está te ligando`, dm?.group ? dmTitle(dm) : "Chamada de voz", fileUrl(r.from.avatar), () => {
+        if (dm) openDm(dm);
+      });
+  };
+  useEffect(() => {
+    if (!rings.some((r) => !r.silent)) return;
+    playSound("ring");
+    const t = setInterval(() => playSound("ring"), 2500);
+    return () => clearInterval(t);
+  }, [rings]);
+  const answerRing = (r: Extract<ServerEvent, { t: "ring" }>) => {
+    setRings((l) => l.filter((x) => x.channelId !== r.channelId));
+    const dm = dms.find((d) => d.channelId === r.channelId);
+    if (dm) openDm(dm);
+    setDmCall(true);
+    void voice.join(r.channelId);
+  };
+  const declineRing = (r: Extract<ServerEvent, { t: "ring" }>) => {
+    setRings((l) => l.filter((x) => x.channelId !== r.channelId));
+    ws.current?.send(JSON.stringify({ t: "ringDecline", channelId: r.channelId }));
+  };
   const onMessage = useRef<(m: Message) => void>(() => {});
   onMessage.current = (m: Message) => {
     if (m.channelId === currentRef.current) setMessages((l) => (l.some((x) => x.id === m.id) ? l : [...l, m]));
@@ -398,7 +572,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     }
     if (m.userId === user.id) return;
     if (m.channelId === readingRef.current && appFocused()) return markRead(m.channelId);
-    const mention = mentionedIds(m.content).includes(user.id);
+    // Responder a uma mensagem minha conta como menção (como no Discord).
+    const mention = mentionedIds(m.content).includes(user.id) || m.replyTo?.userId === user.id;
     setUnread((u) => {
       const prev = u[m.channelId];
       return { ...u, [m.channelId]: { channelId: m.channelId, serverId: ch?.serverId ?? null, count: (prev?.count ?? 0) + 1, mentions: (prev?.mentions ?? 0) + (mention ? 1 : 0) } };
@@ -549,6 +724,19 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
+      {rings.length > 0 && (
+        <div className="ring-stack" role="alertdialog" aria-label="Chamada recebida">
+          {rings.map((r) => (
+            <div key={r.channelId} className="ring-card lino">
+              <Avatar name={shownName(r.from)} src={fileUrl(r.from.avatar)} size={40} />
+              <span><b>{shownName(r.from)}</b> está te ligando{r.silent ? " (Não perturbe)" : ""}</span>
+              <Button size="sm" onClick={() => answerRing(r)}>Atender</Button>
+              <Button size="sm" variant="ghost" onClick={() => declineRing(r)}>Recusar</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveNote}</div>
       <ServerRail
         servers={servers}
         activeId={serverId}
@@ -613,10 +801,16 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             <ChatView
               dm
               channel={dmChannel}
+              typing={typingIds(dmChannel?.id)}
+              onTyping={() => dmChannel && sendTyping(dmChannel.id)}
               messages={messages}
               members={dmMembers}
               meId={user.id}
               onSend={send}
+              outbox={pendingHere}
+              onRetry={retrySend}
+              onDiscard={discardSend}
+              me={user}
               membersOpen={false}
               onToggleMembers={() => {}}
               canInvite={false}
@@ -658,10 +852,16 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         ) : (
           <ChatView
             channel={textChannel}
+            typing={typingIds(textChannel?.id)}
+            onTyping={() => textChannel && sendTyping(textChannel.id)}
             messages={messages}
             members={members}
             meId={user.id}
             onSend={send}
+            outbox={pendingHere}
+            onRetry={retrySend}
+            onDiscard={discardSend}
+            me={user}
             membersOpen={mobile ? drawer : membersOpen}
             onToggleMembers={toggleMembers}
             canInvite
@@ -694,7 +894,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         />
       )}
       {fullProfile && <ProfileModal userId={fullProfile} role={home ? undefined : members.find((m) => m.userId === fullProfile)?.role} h={profileHandlers} onOpenUser={setFullProfile} onClose={closeFull} />}
-      {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
+      {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onLogout={() => { void voice.leave(); onLogout(); }} onClose={() => setSettings(null)} />}
       {editingChannel && <EditChannelModal channel={editingChannel} onClose={() => setEditingChannel(undefined)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}

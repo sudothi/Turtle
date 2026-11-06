@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sentMessageId, type Message, type Person } from "@turtle/protocol";
+import { messageSchema, sentMessageId, type Message, type Person } from "@turtle/protocol";
 import { ApiError } from "../api";
 import { ChatStore } from "./store";
 import { chooseMention, editDraft, emptyDraft, encodeDraft, mentionQuery } from "./draft";
 
 const uuid = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc";
-const message = (n: number, patch: Partial<Message> = {}): Message => ({ id: String(n).padStart(4, "0"), channelId: "a", userId: "other", username: "friend", displayName: "Amiga", avatar: null, staff: false, content: `texto ${n}`, createdAt: new Date(1_700_000_000_000 + n * 1000).toISOString(), editedAt: null, attachments: [], ...patch });
+const message = (n: number, patch: Partial<Message> = {}): Message => messageSchema.parse({ id: String(n).padStart(4, "0"), channelId: "a", userId: "other", username: "friend", displayName: "Amiga", avatar: null, staff: false, content: `texto ${n}`, createdAt: new Date(1_700_000_000_000 + n * 1000).toISOString(), editedAt: null, attachments: [], ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 const stores: ChatStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.dispose(); });

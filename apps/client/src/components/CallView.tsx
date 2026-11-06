@@ -160,6 +160,19 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
             <Icon name="screen" size={18} />
           </IconButton>
           {!v.isLocal && (
+            <select
+              className="watch-quality"
+              aria-label="Qualidade da transmissão"
+              defaultValue="auto"
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => voice.setWatchQuality(v.userId, e.target.value as "auto" | "high" | "low")}
+            >
+              <option value="auto">Automática</option>
+              <option value="high">Alta</option>
+              <option value="low">Baixa</option>
+            </select>
+          )}
+          {!v.isLocal && (
             <IconButton label="Parar de assistir" onClick={(e) => { e.stopPropagation(); voice.unwatch(v.userId); }}>
               <Icon name="close" size={18} />
             </IconButton>

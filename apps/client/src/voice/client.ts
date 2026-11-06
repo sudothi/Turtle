@@ -11,7 +11,9 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPreset,
   VideoPresets,
+  VideoQuality,
 } from "livekit-client";
 import { api } from "../api";
 import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfiles, usesWasmNoise, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
@@ -108,6 +110,17 @@ const disconnectMessage = (reason?: DisconnectReason) => {
   }
 };
 
+/** Quedas em que vale tentar voltar sozinho (não foi a pessoa que saiu, nem foi removida ou entrou em outro lugar). */
+const NO_RETRY = new Set<DisconnectReason | undefined>([
+  DisconnectReason.CLIENT_INITIATED,
+  DisconnectReason.DUPLICATE_IDENTITY,
+  DisconnectReason.PARTICIPANT_REMOVED,
+  DisconnectReason.ROOM_DELETED,
+  (DisconnectReason as unknown as Record<string, DisconnectReason | undefined>).ROOM_CLOSED,
+].filter((r) => r !== undefined));
+/** Esperas entre as tentativas de voltar (somam pouco mais de 2 minutos). */
+const REJOIN_DELAYS = [1000, 2000, 4000, 8000, 15_000, 30_000, 30_000, 30_000];
+
 /**
  * Uma chamada de voz por vez. A UI lê o estado com useSyncExternalStore.
  * Áudio: Opus 48 kHz mono, 64 kb/s, DTX (não manda nada no silêncio) e RED (redundância contra perda de pacote).
@@ -128,8 +141,17 @@ export class VoiceClient {
   private statsTimer?: ReturnType<typeof setInterval>;
   private lastBytes?: { bytes: number; at: number };
   private lastDims = { width: 0, height: 0 };
+  /** Voltando sozinho para a chamada depois de uma queda. */
+  private rejoin?: { channelId: string; attempt: number; timer?: ReturnType<typeof setTimeout> };
 
-  constructor(private report: VoiceReporter) {}
+  constructor(private report: VoiceReporter) {
+    // A rede voltou: tenta já, sem esperar a vez.
+    if (typeof window !== "undefined") window.addEventListener("online", () => {
+      if (!this.rejoin) return;
+      clearTimeout(this.rejoin.timer);
+      void this.join(this.rejoin.channelId, true);
+    });
+  }
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -152,12 +174,14 @@ export class VoiceClient {
     if (this.snap.channelId && this.snap.status !== "idle") this.reportState();
   }
 
-  async join(channelId: string) {
-    if (this.snap.channelId === channelId && this.snap.status !== "idle") return;
+  /** `retrying`: tentativa automática de voltar depois de uma queda (mantém "Reconectando…"). */
+  async join(channelId: string, retrying = false) {
+    if (!retrying && this.snap.channelId === channelId && this.snap.status !== "idle") return;
+    if (!retrying) this.stopRejoin();
     if (this.room) await this.leave();
     const seq = ++this.joinSeq;
     const prefs = this.snap.prefs;
-    this.set({ status: "connecting", channelId, error: undefined, participants: [], videos: [], camera: false, screen: false });
+    this.set({ status: retrying ? "reconnecting" : "connecting", channelId, error: undefined, participants: [], videos: [], camera: false, screen: false });
     if (usesWasmNoise(prefs.noise)) void preloadNoiseWasm(prefs.noise).catch(() => {});
 
     preferHardwareH264();
@@ -187,6 +211,7 @@ export class VoiceClient {
         this.applyVolume(p);
         this.syncSubscriptions(p);
       }
+      this.rejoin = undefined;
       this.set({ status: "connected" });
       this.reportState(channelId);
 
@@ -206,12 +231,41 @@ export class VoiceClient {
       this.mic = undefined;
       this.room = undefined;
       await room.disconnect();
+      // Voltando de uma queda: tenta de novo mais tarde, até desistir.
+      if (retrying && this.rejoin?.channelId === channelId) return this.scheduleRejoin(channelId, this.rejoin.attempt + 1);
       this.resetCall({ error: `Não deu para entrar na chamada: ${(err as Error).message}` });
       this.reportState(null);
     }
   }
 
+  private stopRejoin() {
+    clearTimeout(this.rejoin?.timer);
+    this.rejoin = undefined;
+  }
+
+  /**
+   * A chamada caiu sem a pessoa sair (rede trocou, Wi-Fi voltou, servidor reiniciou): tenta voltar sozinho,
+   * com espera crescente, mantendo mudo/ensurdecer e as transmissões que estava assistindo. A câmera e a tela
+   * não voltam sozinhas.
+   */
+  private scheduleRejoin(channelId: string, attempt: number) {
+    clearTimeout(this.rejoin?.timer);
+    const delay = REJOIN_DELAYS[attempt];
+    if (delay === undefined) {
+      this.rejoin = undefined;
+      this.resetCall({ error: "A chamada caiu e não deu para voltar. Confira a internet e entre de novo." });
+      this.reportState(null);
+      return;
+    }
+    this.stopStats();
+    this.asked.clear();
+    this.set({ status: "reconnecting", channelId, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false });
+    const timer = setTimeout(() => void this.join(channelId, true), delay);
+    this.rejoin = { channelId, attempt, timer };
+  }
+
   async leave() {
+    this.stopRejoin();
     this.joinSeq++;
     const room = this.room;
     this.room = undefined;
@@ -301,7 +355,7 @@ export class VoiceClient {
   async startScreen() {
     const room = this.room;
     if (!room || this.snap.status === "idle" || room.localParticipant.isScreenShareEnabled) return;
-    const { screenProfile, screenAudio } = this.snap.prefs;
+    const { screenProfile, screenAudio, screenSimulcast } = this.snap.prefs;
     const prof = screenProfiles[screenProfile];
     try {
       await room.localParticipant.setScreenShareEnabled(
@@ -319,7 +373,9 @@ export class VoiceClient {
         {
           // H.264: no Windows o Chromium usa o encoder da placa de vídeo (NVENC, QuickSync, AMF).
           videoCodec: supportsH264() ? "h264" : "vp8",
-          simulcast: false,
+          // Opcional (Configurações da transmissão): camada extra pequena para quem assiste com rede fraca.
+          simulcast: screenSimulcast,
+          screenShareSimulcastLayers: screenSimulcast ? [new VideoPreset(960, 540, 800_000, 15)] : [],
           screenShareEncoding: { maxBitrate: prof.bitrate, maxFramerate: prof.fps, priority: "high" },
           degradationPreference: prof.degradation,
           // Valem só para o áudio da tela: estéreo, sem DTX nem RED, 128 kb/s (música e jogo).
@@ -359,6 +415,17 @@ export class VoiceClient {
 
   setScreenAudio(screenAudio: boolean) {
     this.savePrefs({ screenAudio });
+  }
+
+  setScreenSimulcast(screenSimulcast: boolean) {
+    this.savePrefs({ screenSimulcast });
+  }
+
+  /** Quem assiste escolhe a qualidade da transmissão de outra pessoa (só muda algo se ela publicou a camada pequena). */
+  setWatchQuality(userId: string, quality: "auto" | "high" | "low") {
+    const p = this.room?.remoteParticipants.get(userId);
+    const pub = p?.getTrackPublication(Track.Source.ScreenShare) as RemoteTrackPublication | undefined;
+    pub?.setVideoQuality(quality === "low" ? VideoQuality.LOW : VideoQuality.HIGH);
   }
 
   async setCamera(cameraId: string) {
@@ -622,6 +689,8 @@ export class VoiceClient {
         this.room = undefined;
         this.mic?.stop();
         this.mic = undefined;
+        const channelId = this.snap.channelId;
+        if (channelId && !NO_RETRY.has(reason)) return this.scheduleRejoin(channelId, 0);
         this.resetCall({ error: disconnectMessage(reason) });
         this.reportState(null);
       });

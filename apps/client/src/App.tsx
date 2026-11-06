@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@turtle/protocol";
 import { LinoDefs, TurtleMark } from "@turtle/ui";
-import { api, getToken, setToken } from "./api";
+import { api, getToken, setOnUnauthorized, setToken } from "./api";
 import { AuthScreen } from "./screens/AuthScreen";
 import { Workspace } from "./screens/Workspace";
 import { Landing } from "./screens/Landing";
@@ -34,7 +34,18 @@ export function App() {
     api.me().then(setUser).catch(() => setToken(null)).finally(() => setReady(true));
   }, []);
   const [path, go] = usePath();
-  const logout = useCallback(() => { setToken(null); setUser(null); }, []);
+  const clearSession = useCallback(() => {
+    setToken(null);
+    setUser(null);
+  }, []);
+  useEffect(() => {
+    setOnUnauthorized(clearSession);
+    return () => setOnUnauthorized(undefined);
+  }, [clearSession]);
+  const logout = useCallback(() => {
+    if (getToken()) void api.logout().catch(() => {});
+    clearSession();
+  }, [clearSession]);
   const onAuth = useCallback((u: User) => {
     // Depois de entrar, a barra de endereço volta para a raiz (o app).
     if (location.pathname === "/login") history.replaceState(null, "", "/");

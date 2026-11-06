@@ -5,7 +5,7 @@
  * - ensurdecer: duas bolhas descendo; voltar o som: duas subindo
  * - transmissão: uma onda chegando (e indo embora, ao parar)
  */
-export type SoundName = "message" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff";
+export type SoundName = "message" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff" | "ring";
 
 const KEY = "turtle.sounds";
 export interface SoundPrefs {
@@ -127,6 +127,11 @@ export function playSound(name: SoundName) {
       break;
     case "screenOff":
       wave(c, out, t, 2000, 300, 0.55, 0.4);
+      break;
+    case "ring": // toque de chamada: três bolhas subindo (repetido pelo app enquanto toca)
+      bubble(c, out, t, 500, 900, 0.14, 0.6);
+      bubble(c, out, t + 0.18, 600, 1100, 0.14, 0.6);
+      bubble(c, out, t + 0.36, 700, 1300, 0.18, 0.6);
       break;
   }
   // Solta os nós quando o som acaba.

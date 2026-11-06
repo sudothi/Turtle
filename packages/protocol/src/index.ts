@@ -16,6 +16,21 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 /** Imagem que o app mostra direto no chat (o resto vira um cartão de download). */
 export const isInlineImage = (a: Pick<Attachment, "mime">) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime);
 
+/** Prévia da mensagem respondida (texto cortado, para desenhar a linha acima da resposta). */
+export const replyPreviewSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  content: z.string(),
+  /** Quantos arquivos a mensagem respondida tem (mostra "clique para ver o anexo" quando não há texto). */
+  attachments: z.number().int().default(0),
+});
+export type ReplyPreview = z.infer<typeof replyPreviewSchema>;
+/** Tamanho máximo do texto da prévia da resposta. */
+export const REPLY_PREVIEW_CHARS = 200;
+
 export const messageSchema = z.object({
   id: z.string(),
   channelId: z.string(),
@@ -30,6 +45,11 @@ export const messageSchema = z.object({
   /** Quando foi editada pela última vez (mostra "(editado)"). */
   editedAt: z.string().nullable().default(null),
   attachments: z.array(attachmentSchema).default([]),
+  /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
+  replyToId: z.string().nullable().default(null),
+  replyTo: replyPreviewSchema.nullable().default(null),
+  /** Reações agrupadas por emoji, na ordem em que apareceram. */
+  reactions: z.array(z.object({ emoji: z.string(), userIds: z.array(z.string()) })).default([]),
 });
 export type Message = z.infer<typeof messageSchema>;
 
@@ -87,9 +107,12 @@ export const accountSchema = z.object({
   avatar: z.string().nullable().default(null),
   isAdmin: z.boolean(),
   canInvite: z.boolean(),
+  disabled: z.boolean().default(false),
 });
 export type Account = z.infer<typeof accountSchema>;
-export const setInviterBody = z.object({ canInvite: z.boolean() });
+export const setInviterBody = z
+  .object({ canInvite: z.boolean().optional(), disabled: z.boolean().optional() })
+  .refine((b) => b.canInvite !== undefined || b.disabled !== undefined, { message: "nada para alterar" });
 
 /** Menção no texto da mensagem: `<@id>`. O cliente mostra o nome de exibição atual da pessoa. */
 export const mentionToken = (userId: string) => `<@${userId}>`;
@@ -144,7 +167,50 @@ export const usernameSchema = z.string().trim().min(2).max(32).regex(/^[\p{L}\p{
 export const passwordSchema = z.string().min(8).max(200);
 
 export const registerBody = z.object({ inviteCode: z.string().min(1), username: usernameSchema, password: passwordSchema });
-export const loginBody = z.object({ username: z.string(), password: z.string() });
+export const loginBody = z.object({ username: z.string().max(64), password: z.string().max(200) });
+export const changePasswordBody = z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema });
+
+/** Validade deslizante da sessão: 30 dias sem uso expira; `lastUsedAt` é gravado no máximo uma vez por hora. */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const SESSION_TOUCH_MS = 60 * 60 * 1000;
+export const sessionInfoSchema = z.object({
+  id: z.string(),
+  userAgent: z.string().nullable().default(null),
+  createdAt: z.string(),
+  lastUsedAt: z.string(),
+  current: z.boolean(),
+});
+export type SessionInfo = z.infer<typeof sessionInfoSchema>;
+/** Nome legível do aparelho/navegador a partir do User-Agent salvo na sessão. */
+export function describeDevice(ua: string | null | undefined): string {
+  if (!ua) return "Aparelho desconhecido";
+  if (/okhttp/i.test(ua)) return "App Android";
+  const os = /Windows/i.test(ua)
+    ? "Windows"
+    : /Android/i.test(ua)
+      ? "Android"
+      : /iPhone|iPad|iOS/i.test(ua)
+        ? "iPhone"
+        : /Mac OS X|Macintosh/i.test(ua)
+          ? "macOS"
+          : /Linux/i.test(ua)
+            ? "Linux"
+            : null;
+  if (/Electron/i.test(ua)) return os ? `App desktop (${os})` : "App desktop";
+  const browser = /Edg\//i.test(ua)
+    ? "Edge"
+    : /OPR\//i.test(ua)
+      ? "Opera"
+      : /Chrome\//i.test(ua)
+        ? "Chrome"
+        : /Firefox\//i.test(ua)
+          ? "Firefox"
+          : /Safari\//i.test(ua)
+            ? "Safari"
+            : null;
+  if (browser && os) return `${browser} no ${os}`;
+  return browser ?? os ?? (ua.slice(0, 48).trim() || "Aparelho desconhecido");
+}
 /** Quantos servidores uma conta pode ter como dona. */
 export const MAX_OWNED_SERVERS = 2;
 
@@ -258,10 +324,23 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** Estou digitando neste canal (o cliente manda no máximo a cada 3 s). */
+  z.object({ t: z.literal("typing"), channelId: z.string() }),
+  /** Recusar a chamada que está tocando numa DM ou grupo (quem ligou fica sabendo). */
+  z.object({ t: z.literal("ringDecline"), channelId: z.string() }),
+  /** Primeira mensagem da conexão: o token da sessão (em vez de ir na URL do WebSocket). */
+  z.object({ t: z.literal("auth"), token: z.string().max(200) }),
   /** Texto e/ou anexos já enviados por POST /channels/:id/attachments. */
   z.object({
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
+    /** Responder a uma mensagem do mesmo canal. */
+    replyTo: z.string().max(64).optional(),
+    /**
+     * Id gerado pelo cliente: volta no evento `message` (ou `error`) para confirmar o envio, e o servidor
+     * ignora o reenvio do mesmo nonce (quando a conexão caiu antes da confirmação).
+     */
+    nonce: z.string().max(64).optional(),
   }),
   /** channelId null = saiu da voz. */
   z.object({
@@ -273,7 +352,7 @@ export const clientEvent = z.discriminatedUnion("t", [
 });
 export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),
-  z.object({ t: z.literal("message"), message: messageSchema }),
+  z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
   z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
   /** Você leu a conversa em outro aparelho: tira a marca de não lida. */
@@ -287,8 +366,22 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
-  z.object({ t: z.literal("error"), error: z.string() }),
+  /** Alguém está digitando no canal (some sozinho depois de uns 6 s sem novo aviso). */
+  z.object({ t: z.literal("typing"), channelId: z.string(), userId: z.string() }),
+  /** Alguém está te ligando numa DM ou grupo. `silent`: você está em Não perturbe (só notificar, sem tocar). */
+  z.object({ t: z.literal("ring"), channelId: z.string(), from: z.object({ id: z.string(), username: z.string(), displayName: z.string().nullable(), avatar: z.string().nullable() }), silent: z.boolean().default(false) }),
+  /** A chamada parou de tocar: atendida, cancelada, recusada ou passou de 30 s. */
+  z.object({ t: z.literal("ringEnd"), channelId: z.string() }),
+  /** Quem você ligou recusou (`busy`: estava em Não perturbe ou recusou na hora). */
+  z.object({ t: z.literal("ringDeclined"), channelId: z.string(), by: z.string() }),
+  /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
+  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
 ]);
 
 export type ClientEvent = z.infer<typeof clientEvent>;
 export type ServerEvent = z.infer<typeof serverEvent>;
+export * from "./richtext.js";
+
+/** Máximo de emojis diferentes por mensagem e tamanho de um emoji (em caracteres). */
+export const MAX_REACTION_KINDS = 20;
+export const MAX_EMOJI_LENGTH = 16;

@@ -23,7 +23,7 @@
 .status-item { align-items: center; }
 .status-item-label { display: flex; align-items: center; gap: 10px; }
 .status-item-label > span:last-child { display: flex; flex-direction: column; }
-.status-item small { font-size: 11px; font-weight: 500; }
+.status-item small { font-size: 12px; font-weight: 500; }
 .menu-item:hover .status-item-label small { color: var(--ink-3); }
 .t-status-inline { width: 12px; height: 12px; border-radius: 50%; background: var(--paper); flex: none; box-shadow: 0 0 0 2px var(--ink-0); }
 .t-status-inline.busy { background: linear-gradient(var(--ink-0), var(--ink-0)) center / 58% 26% no-repeat, var(--paper); }
@@ -42,7 +42,7 @@
 .msg-actions button { display: grid; place-items: center; width: 30px; height: 28px; border: none; border-radius: 4px; background: transparent; color: var(--text-muted); }
 .msg-actions button:hover { background: var(--paper); color: var(--ink-0); }
 .msg.editing { background: rgba(255, 255, 255, 0.03); }
-.msg-edited { font-size: 11px; color: var(--text-faint); }
+.msg-edited { font-size: 12px; color: var(--text-faint); }
 .msg-edit { padding: 4px 0; }
 .msg-edit textarea {
   --lino-bg: var(--ink-4); --lino-radius: 8px;
@@ -93,7 +93,7 @@
 .pending-file img { width: 100%; height: 90px; object-fit: cover; border-radius: 4px; }
 .pending-file > svg { height: 90px; width: 100%; color: var(--paper-dim); }
 .pending-name { font-size: 12px; font-weight: 600; color: var(--paper); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pending-state { font-size: 11px; }
+.pending-state { font-size: 12px; }
 .pending-file.failed .pending-state { color: var(--paper); }
 .pending-file.failed { box-shadow: inset 0 0 0 2px var(--paper); }
 .pending-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--paper); transition: width 0.15s linear; }
@@ -125,3 +125,21 @@
 .server-icon-actions { display: flex; flex-direction: column; gap: 4px; }
 .server-icon-actions > div { display: flex; gap: 6px; margin-top: 4px; }
 .msg.head > .plain-btn { align-self: start; }
+.msg-text a { color: var(--paper); text-decoration: underline; }
+.msg-code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 1px 5px; border-radius: 3px; }
+.msg-codeblock { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 8px 10px; border-radius: 4px; margin: 4px 0; overflow-x: auto; white-space: pre; }
+.msg-codeblock code { font: inherit; }
+.msg-spoiler { cursor: pointer; background: var(--paper-dim); color: transparent; border-radius: 3px; user-select: none; }
+.msg-spoiler.shown { background: var(--ink-3, #222); color: inherit; cursor: auto; user-select: auto; }
+.typing-line { min-height: 18px; font-size: 12px; color: var(--text-muted); padding: 0 16px 2px; }
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction { font-size: 13px; padding: 1px 8px; border: 1px solid var(--text-muted); border-radius: 10px; background: transparent; color: var(--paper-dim); cursor: pointer; }
+.reaction.mine { border-color: var(--paper); color: var(--paper); background: var(--ink-3, #222); }
+.react-pick-wrap { position: relative; display: inline-flex; }
+.react-picker { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; gap: 2px; padding: 4px; background: var(--ink-2); }
+.react-picker button { font-size: 18px; padding: 4px 6px; background: transparent; border: 0; cursor: pointer; }
+.search-panel { margin: 8px 16px; padding: 10px; background: var(--ink-2); }
+.search-row { display: flex; gap: 8px; }
+.search-row input { flex: 1; min-width: 0; }
+.search-results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; display: grid; gap: 8px; }
+.search-text { color: var(--paper-dim); white-space: pre-wrap; overflow-wrap: anywhere; }

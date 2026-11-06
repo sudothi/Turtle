@@ -20,7 +20,7 @@ win:
       arch: [x64]
   icon: build/icon.ico
   executableName: Turtle
-  # Sem certificado de assinatura por enquanto: o Windows mostra o aviso do SmartScreen
+  # Decisão do thiago: o instalador não é assinado. O Windows mostra o SmartScreen
   # ("Mais informações > Executar assim mesmo") na primeira instalação.
   signAndEditExecutable: true
 

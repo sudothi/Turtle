@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -20,4 +20,5 @@ export async function verifyPassword(password: string, stored: string): Promise<
 export const newToken = () => randomBytes(32).toString("base64url");
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 export const newId = () => randomBytes(12).toString("base64url");
+export const newSessionId = () => randomUUID();
 export const newInviteCode = () => randomBytes(6).toString("base64url");

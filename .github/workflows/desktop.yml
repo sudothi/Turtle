@@ -17,6 +17,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @turtle/desktop typecheck
       - run: pnpm desktop:dist
+      # O instalador não é assinado (decisão do thiago): o SHA-256 do instalador vai no resumo da execução para conferência.
+      - name: SHA-256 do instalador
+        shell: bash
+        run: |
+          cd apps/desktop/release
+          { echo '### SHA-256'; echo '```'; sha256sum Turtle-Setup-*.exe; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: turtle-windows

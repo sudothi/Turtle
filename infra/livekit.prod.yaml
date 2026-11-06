@@ -9,3 +9,9 @@ turn:
   enabled: true
   udp_port: 3478
   domain: lk.ogturtle.xyz
+# Webhooks: o app confere quem está de fato nas salas (tira quem entrou sem permissão ou sem avisar o gateway,
+# e tira da lista quem caiu do LiveKit). Para ligar, troque CHAVE pela chave (`LIVEKIT_API_KEY` do `.env`).
+# webhook:
+#   api_key: CHAVE
+#   urls:
+#     - https://app.ogturtle.xyz/livekit/webhook

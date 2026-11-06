@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AVATAR_MAX_BYTES, BANNER_MAX_BYTES, BIO_MAX, type User } from "@turtle/protocol";
 import { Button, TextField } from "@turtle/ui";
 import { api } from "../api";
@@ -6,6 +6,7 @@ import { ProfileCard } from "./ProfileCard";
 import { ImageCropper } from "./ImageCropper";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+const fmtSize = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 / 1024)} MB`);
 const mb = (n: number) => `${n / 1024 / 1024} MB`;
 
 /** Configurações > Perfil: nome de exibição, bio, foto e banner, com prévia do cartão. */
@@ -15,6 +16,8 @@ export function ProfileSettings({ user, onChanged }: { user: User; onChanged: (u
   const [bio, setBio] = useState(user.bio ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [storage, setStorage] = useState<{ used: number; quota: number }>();
+  useEffect(() => { api.storage().then(setStorage).catch(() => {}); }, []);
   const [saved, setSaved] = useState(false);
   const [crop, setCrop] = useState<{ kind: "avatar" | "banner"; file: File } | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
@@ -91,6 +94,11 @@ export function ProfileSettings({ user, onChanged }: { user: User; onChanged: (u
             </div>
             <span className="t-field-hint">Até {mb(BANNER_MAX_BYTES)}. Vira 960×320 (proporção 3:1, o centro é mantido).</span>
             <input ref={bannerInput} type="file" accept={ACCEPT} hidden aria-label="Arquivo do banner" onChange={pick("banner", BANNER_MAX_BYTES)} />
+          </div>
+          <div className="t-field">
+            <span className="t-field-label">Armazenamento de anexos</span>
+            <span className="t-field-hint">{storage ? `${fmtSize(storage.used)} de ${fmtSize(storage.quota)} usados` : "Calculando…"}</span>
+            {storage && <progress value={storage.used} max={storage.quota} aria-label="Uso do armazenamento de anexos" />}
           </div>
           {error && <div className="err" role="alert">{error}</div>}
           <div className="profile-actions">

@@ -734,13 +734,15 @@ describe("chat do dia a dia", () => {
     const channel = (await post(`/servers/${serverId}/channels`, { name: "cursor-history" }, dono)).body.id;
     const { messages, eq } = await import("@turtle/db");
     const url = `/channels/${channel}/messages`;
-    const created = await Promise.all(Array.from({ length: 5 }, () => post(url, { requestId: randomUUID(), content: "mesmo horário" }, dono)));
+    const created = await Promise.all(Array.from({ length: 5 }, (_, i) => post(url, { requestId: randomUUID(), content: "mesmo horário" }, i % 2 ? membro : dono)));
     const at = new Date("2030-01-01T00:00:00.123Z");
     for (const r of created) await handle.db.update(messages).set({ createdAt: at }).where(eq(messages.id, r.body.id));
     const collected: string[] = [];
     let query = "?limit=2";
+    const ordered = created.map(r => r.body.id as string).sort();
     for (let i = 0; i < 3; i++) {
       const page = (await get(url + query, dono)).body as any[];
+      expect(page.filter(m => m.content === "mesmo horário").map(m => m.id)).toEqual(ordered.slice(Math.max(0, ordered.length - (i + 1) * 2), ordered.length - i * 2));
       collected.push(...page.filter(m => m.content === "mesmo horário").map(m => m.id));
       query = `?limit=2&before=${encodeURIComponent(page[0]!.createdAt)}&beforeId=${encodeURIComponent(page[0]!.id)}`;
     }

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS messages (
   user_id text NOT NULL REFERENCES users(id), content text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS messages_channel_created_idx ON messages (channel_id, created_at);
-CREATE INDEX IF NOT EXISTS messages_channel_cursor_idx ON messages (channel_id, created_at, id);
+CREATE INDEX IF NOT EXISTS messages_channel_cursor_idx ON messages (channel_id, created_at, id COLLATE "C");
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
 
 -- Perfil (nome de exibição, bio, foto e banner).

@@ -1,4 +1,5 @@
 import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -82,7 +83,7 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
   },
-  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_channel_cursor_idx").on(t.channelId, t.createdAt, t.id)],
+  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_channel_cursor_idx").on(t.channelId, t.createdAt, sql`${t.id} COLLATE "C"`)],
 );
 
 /** Idempotent sends survive message deletion; keep only a fingerprint of the original text. */

@@ -988,15 +988,17 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         const before = req.query.before ? new Date(req.query.before) : undefined;
         if (before && Number.isNaN(before.getTime())) return reply.code(400).send({ error: "data inválida" });
         if (req.query.beforeId && !before) return reply.code(400).send({ error: "beforeId exige before" });
+        // Match the binary ID ordering used by clients, regardless of the database locale.
+        const orderedId = sql`${messages.id} COLLATE "C"`;
         const cursor = before ? req.query.beforeId
-          ? or(lt(messages.createdAt, before), and(eq(messages.createdAt, before), lt(messages.id, req.query.beforeId)))
+          ? or(lt(messages.createdAt, before), and(eq(messages.createdAt, before), lt(orderedId, req.query.beforeId)))
           : lt(messages.createdAt, before) : undefined;
         const rows = await db
           .select(messageCols)
           .from(messages)
           .innerJoin(users, eq(users.id, messages.userId))
           .where(and(eq(messages.channelId, req.params.id), cursor))
-          .orderBy(desc(messages.createdAt), desc(messages.id))
+          .orderBy(desc(messages.createdAt), desc(orderedId))
           .limit(limit);
         return toMessages(rows.reverse());
       },

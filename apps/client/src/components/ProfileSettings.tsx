@@ -97,7 +97,7 @@ export function ProfileSettings({ user, onChanged }: { user: User; onChanged: (u
           </div>
           <div className="t-field">
             <span className="t-field-label">Armazenamento de anexos</span>
-            <span className="t-field-hint">{storage ? `${fmtSize(storage.used)} de ${fmtSize(storage.quota)} usados` : "Calculando…"}</span>
+            <span className="t-field-hint">{storage ? `${fmtSize(storage.used)} de ${fmtSize(storage.quota)} usados · Anexos de mensagens expiram após 7 dias` : "Calculando…"}</span>
             {storage && <progress value={storage.used} max={storage.quota} aria-label="Uso do armazenamento de anexos" />}
           </div>
           {error && <div className="err" role="alert">{error}</div>}

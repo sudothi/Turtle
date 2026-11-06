@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   width integer, height integer, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS attachments_message_idx ON attachments (message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS attachments_key_idx ON attachments (file_key);
+CREATE INDEX IF NOT EXISTS attachments_created_idx ON attachments (created_at);
 -- Banimentos de servidor: quem foi banido não volta por convite.
 CREATE TABLE IF NOT EXISTS server_bans (
   server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,

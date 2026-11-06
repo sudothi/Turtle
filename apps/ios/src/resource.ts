@@ -1,4 +1,5 @@
 import { errorText } from "./session";
+import { ApiError } from "./api";
 
 export interface ResourceState<T> { data: T; loading: boolean; error?: string }
 
@@ -8,7 +9,7 @@ export class Resource<T> {
   private generation = 0;
   private disposed = false;
   private listeners = new Set<() => void>();
-  constructor(initial: T, private readonly load: () => Promise<T>, private readonly rejected: (error: unknown) => Promise<boolean>) {
+  constructor(private readonly initial: T, private readonly load: () => Promise<T>, private readonly rejected: (error: unknown) => Promise<boolean>) {
     this.state = { data: initial, loading: true };
   }
   getSnapshot = () => this.state;
@@ -26,6 +27,7 @@ export class Resource<T> {
       if (!this.disposed && generation === this.generation) this.set({ data });
     } catch (error) {
       if (this.disposed || generation !== this.generation) return;
+      if (error instanceof ApiError && (error.status === 403 || error.status === 404)) this.set({ data: this.initial });
       try {
         if (!(await this.rejected(error)) && !this.disposed && generation === this.generation) this.set({ error: errorText(error) });
       } catch (rejectionError) {

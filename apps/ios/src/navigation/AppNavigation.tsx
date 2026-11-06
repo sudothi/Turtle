@@ -11,7 +11,9 @@ import { useCall, useWorkspaceState } from "../workspace-context";
 import HomeScreen from "../screens/HomeScreen";
 import SettingsScreen from "../screens/SettingsScreen";
 import CallScreen from "../screens/CallScreen";
-import { ChannelsScreen, ServersScreen } from "../screens/ServersScreen";
+import { ChannelsScreen, MembersAction, ServerActions, ServersScreen } from "../screens/ServersScreen";
+import ConversationScreen from "../screens/ConversationScreen";
+import MembersScreen from "../screens/MembersScreen";
 
 const Root = createNativeStackNavigator<RootRoutes>();
 const Home = createNativeStackNavigator<HomeRoutes>();
@@ -21,12 +23,16 @@ const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: colors.
 const header = { headerStyle: { backgroundColor: colors.panel }, headerTintColor: colors.paper, contentStyle: { backgroundColor: colors.background }, headerBackTitle: "Voltar" };
 
 function HomeStack() {
-  return <Home.Navigator screenOptions={header}><Home.Screen name="Home" component={HomeScreen} options={{ title: "turtle." }} /></Home.Navigator>;
+  return <Home.Navigator screenOptions={header}>
+    <Home.Screen name="Home" component={HomeScreen} options={{ title: "turtle." }} />
+    <Home.Screen name="Conversation" component={ConversationScreen} getId={({ params }) => params.channelId} options={({ route }) => ({ title: route.params.title })} />
+  </Home.Navigator>;
 }
 function ServerStack() {
   return <Servers.Navigator screenOptions={header}>
     <Servers.Screen name="Servers" component={ServersScreen} options={{ title: "Servidores" }} />
-    <Servers.Screen name="Channels" component={ChannelsScreen} options={({ route }) => ({ title: route.params.title })} />
+    <Servers.Screen name="Channels" component={ChannelsScreen} options={({ route }) => ({ title: route.params.title, headerRight: () => <ServerActions serverId={route.params.serverId} title={route.params.title} /> })} />
+    <Servers.Screen name="Conversation" component={ConversationScreen} getId={({ params }) => params.channelId} options={({ route }) => ({ title: route.params.title, headerRight: () => route.params.serverId ? <MembersAction serverId={route.params.serverId} title={route.params.title} /> : null })} />
   </Servers.Navigator>;
 }
 function MainTabs() {
@@ -49,6 +55,7 @@ export default function AppNavigation() {
       <Root.Navigator screenOptions={header}>
         <Root.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
         <Root.Screen name="Call" component={CallScreen} options={({ navigation }) => ({ title: "Chamada", presentation: "modal", headerLeft: () => <ToolbarButton label="Fechar" onPress={() => navigation.goBack()} /> })} />
+        <Root.Screen name="Members" component={MembersScreen} getId={({ params }) => params.serverId} options={({ navigation }) => ({ title: "Membros", presentation: "modal", headerLeft: () => <ToolbarButton label="Fechar" onPress={() => navigation.goBack()} /> })} />
       </Root.Navigator>
       {(state.error || (call.status === "idle" && call.error)) && <View style={{ padding: 12 }}><Notice>{state.error || call.error}</Notice></View>}
     </View>

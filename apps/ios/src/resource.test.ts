@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Resource } from "./resource";
+import { ApiError } from "./api";
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -43,5 +44,11 @@ describe("screen HTTP resources", () => {
     expect(resource.getSnapshot().data).toEqual(["one"]);
     expect(first).not.toHaveBeenCalled();
     await resource.refresh(); expect(next).toHaveBeenCalled();
+  });
+  it.each([403, 404])("removes cached content when a conversation becomes inaccessible (%s)", async status => {
+    const load = vi.fn().mockResolvedValueOnce(["private message"]).mockRejectedValueOnce(new ApiError(status, "sem acesso"));
+    const resource = new Resource<string[]>([], load, async () => false);
+    await resource.refresh(); await resource.refresh();
+    expect(resource.getSnapshot()).toEqual({ data: [], loading: false, error: "sem acesso" });
   });
 });

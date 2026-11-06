@@ -1257,6 +1257,32 @@ describe("cota de anexos", () => {
   });
 });
 
+describe("busca no servidor", () => {
+  it("acha em todos os canais de texto e recusa quem não é membro", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-busca" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const dono = (await json("/auth/register", { inviteCode: "boot-busca", username: "busca", password: "12345678" })).token;
+    const outro = (await json("/auth/register", { inviteCode: (await json("/invites", {}, dono)).code, username: "alheio", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Busca" }, dono);
+    const sala = await json(`/servers/${server.id}/channels`, { name: "extra" }, dono);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${dono}`);
+    await new Promise((r) => ws.on("open", r));
+    for (const c of [chans.find((x) => x.kind === "text").id, sala.id])
+      ws.send(JSON.stringify({ t: "send", channelId: c, content: "tartaruga gigante" }));
+    await new Promise((r) => setTimeout(r, 400));
+    const found = (await (await fetch(url + `/servers/${server.id}/search?q=tartarugas`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    expect(found).toHaveLength(2);
+    expect((await fetch(url + `/servers/${server.id}/search?q=tartaruga`, { headers: { authorization: `Bearer ${outro}` } })).status).toBe(404);
+    ws.close();
+    await a.close();
+    await h.close();
+  });
+});
+
 describe("flood no WebSocket", () => {
   it("passa de 10 eventos por segundo e o servidor recusa o excesso; ping não conta", async () => {
     const h = await createDb();

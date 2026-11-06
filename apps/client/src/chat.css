@@ -143,3 +143,4 @@
 .search-row input { flex: 1; min-width: 0; }
 .search-results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; display: grid; gap: 8px; }
 .search-text { color: var(--paper-dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+.search-scope { display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }

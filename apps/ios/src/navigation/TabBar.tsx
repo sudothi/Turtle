@@ -1,6 +1,8 @@
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import type { NavigationProp } from "@react-navigation/native";
+import type { RootRoutes } from "./types";
 import { CallDock } from "./call-access";
 import { colors } from "../ui/theme";
 
@@ -10,7 +12,7 @@ const icons: Record<string, string> = { HomeTab: "⌂", ServersTab: "☷", Setti
 export default function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { fontScale } = useWindowDimensions();
   return <SafeAreaView edges={["left", "right", "bottom"]} style={s.safe}>
-    <CallDock />
+    <CallDock onOpen={() => navigation.getParent<NavigationProp<RootRoutes>>()?.navigate("Call")} />
     <View style={s.tabs}>
       {state.routes.map((route, index) => {
         const options = descriptors[route.key]!.options;

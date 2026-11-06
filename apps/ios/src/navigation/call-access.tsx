@@ -27,13 +27,12 @@ export function useJoinCall() {
   };
 }
 
-export function CallDock() {
+export function CallDock({ onOpen }: { onOpen: () => void }) {
   const call = useCall();
   const { workspace } = useWorkspace();
-  const navigation = useAppNavigation();
   if (call.status === "idle") return null;
   return <View style={s.dock}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Abrir chamada ${call.channelName}. ${callStatus(call.status)}. ${call.muted ? "Microfone fechado" : "Microfone aberto"}`} onPress={() => navigation.navigate("Call")} style={s.open}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Abrir chamada ${call.channelName}. ${callStatus(call.status)}. ${call.muted ? "Microfone fechado" : "Microfone aberto"}`} onPress={onOpen} style={s.open}>
       <Text style={text.caption}>{callStatus(call.status)}</Text><Text style={text.label}>{call.channelName}</Text>
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={call.muted ? "Abrir microfone" : "Fechar microfone"} accessibilityState={{ disabled: call.status !== "connected" || call.busy || call.deafened }} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} style={s.control}>

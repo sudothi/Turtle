@@ -15,7 +15,7 @@ class Socket {
   receive(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
 }
 let gateway: Gateway;
-beforeEach(() => { vi.useFakeTimers(); Socket.all = []; vi.stubGlobal("WebSocket", Socket); gateway = new Gateway({ gatewayUrl: () => "wss://test/ws" } as Api, vi.fn(), vi.fn()); });
+beforeEach(() => { vi.useFakeTimers(); Socket.all = []; vi.stubGlobal("WebSocket", Socket); gateway = new Gateway({ gatewayUrl: () => "wss://test/ws", authenticateGateway: (socket: Socket) => socket.send(JSON.stringify({ t: "auth", token: "session" })) } as Api, vi.fn(), vi.fn()); });
 afterEach(() => { gateway.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it("forwards validated chat events, detaches screens and ignores replaced sockets", () => {
   const events = vi.fn(); const off = gateway.subscribeEvents(events);
@@ -37,4 +37,10 @@ it("reconnection preserves the voice report independently of chat subscribers", 
   const next = Socket.all[1]!; next.open();
   expect(next.send).toHaveBeenCalledWith(JSON.stringify(voice));
   expect(gateway.getSnapshot().connected).toBe(true);
+});
+
+it("authenticates before reporting voice, without putting credentials in the URL", () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open();
+  expect(JSON.parse(socket.send.mock.calls[0]![0])).toEqual({ t: "auth", token: "session" });
+  expect(JSON.parse(socket.send.mock.calls[1]![0])).toMatchObject({ t: "voice" });
 });

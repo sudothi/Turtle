@@ -20,6 +20,10 @@ const initial = (): VoiceSnapshot => ({ status: "idle", channelId: null, channel
 export class Voice {
   private room?: Room;
   private generation = 0;
+  private retry?: ReturnType<typeof setTimeout>;
+  private recoveringSince = 0;
+  private attempts = 0;
+  private recoveryMicrophone = false;
   private joining?: Promise<void>;
   private leaving?: Promise<void>;
   private state = initial();
@@ -56,13 +60,13 @@ export class Voice {
     return task;
   }
 
-  private async connect(generation: number, channelId: string, microphone: boolean) {
+  private async connect(generation: number, channelId: string, microphone: boolean, recovering = false) {
     let room: Room | undefined;
     try {
       const token = await this.api.voiceToken(channelId);
       if (generation !== this.generation) return;
       await AudioSession.configureAudio({ ios: { defaultOutput: "speaker" } });
-      await AudioSession.setDefaultRemoteAudioTrackVolume(1);
+      await AudioSession.setDefaultRemoteAudioTrackVolume(this.state.deafened ? 0 : 1);
       await AudioSession.startAudioSession();
       if (generation !== this.generation) return;
       room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, publishDefaults: { dtx: true } });
@@ -78,16 +82,21 @@ export class Voice {
       room.on(RoomEvent.Reconnecting, () => this.set({ status: "reconnecting" }));
       room.on(RoomEvent.Reconnected, () => { this.set({ status: "connected" }); this.refresh(); });
       room.on(RoomEvent.Disconnected, reason => {
-        if (generation !== this.generation) return;
-        const message = reason === DisconnectReason.DUPLICATE_IDENTITY ? "Sua conta entrou na chamada em outro aparelho." : "A chamada foi encerrada. Entre novamente para continuar.";
-        void this.leave(message);
+        if (generation !== this.generation || this.state.status === "connecting") return;
+        const terminal = [DisconnectReason.CLIENT_INITIATED, DisconnectReason.PARTICIPANT_REMOVED, DisconnectReason.DUPLICATE_IDENTITY, DisconnectReason.ROOM_DELETED].includes(reason!);
+        if (terminal) { void this.leave(reason === DisconnectReason.DUPLICATE_IDENTITY ? "Sua conta entrou na chamada em outro aparelho." : "A chamada foi encerrada."); return; }
+        room?.removeAllListeners();
+        this.room = undefined;
+        if (!this.recoveringSince) { this.recoveryMicrophone = !this.state.muted && !this.state.deafened; this.recoveringSince = Date.now(); this.attempts = 0; }
+        this.scheduleRecovery(generation, channelId);
       });
       await room.connect(token.url, token.token, { autoSubscribe: false });
       if (generation !== this.generation) return;
       for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
         if (publication.kind === Track.Kind.Audio && publication.source === Track.Source.Microphone) publication.setSubscribed(true);
       }
-      this.set({ status: "connected" });
+      this.recoveringSince = 0;
+      this.set({ status: "connected", error: undefined });
       if (microphone && this.active()) {
         try { await room.localParticipant.setMicrophoneEnabled(true); }
         catch { this.set({ error: "Microfone indisponível. Você está só ouvindo. Confira a permissão do Turtle nos Ajustes." }); }
@@ -100,14 +109,35 @@ export class Voice {
       this.room = undefined;
       await AudioSession.stopAudioSession().catch(() => {});
       // Backend errors are handled by the caller (including a revoked session).
-      this.set({ ...initial(), error: "Não foi possível entrar na chamada. Confira sua conexão e tente novamente." });
+      this.set(recovering ? { status: "reconnecting", busy: false, members: [] } : { ...initial(), error: "Não foi possível entrar na chamada. Confira sua conexão e tente novamente." });
       throw error;
     }
+  }
+
+  private scheduleRecovery(generation: number, channelId: string) {
+    if (generation !== this.generation || this.retry) return;
+    this.set({ status: "reconnecting", members: [], busy: false });
+    const remaining = 120_000 - (Date.now() - this.recoveringSince);
+    if (remaining <= 0) { void this.leave("Não foi possível recuperar a chamada. Entre novamente para continuar."); return; }
+    this.retry = setTimeout(() => {
+      this.retry = undefined;
+      if (generation !== this.generation) return;
+      if (Date.now() - this.recoveringSince >= 120_000) { void this.leave("Não foi possível recuperar a chamada. Entre novamente para continuar."); return; }
+      const task = this.connect(generation, channelId, this.recoveryMicrophone, true);
+      this.joining = task;
+      void task.catch(error => {
+        if (generation !== this.generation) return;
+        if (typeof error === "object" && error && "status" in error && [401, 403, 404].includes(Number(error.status))) {
+          void this.leave("Você não tem mais acesso à chamada. Entre novamente para conferir sua sessão.");
+        } else this.scheduleRecovery(generation, channelId);
+      });
+    }, Math.min(remaining, 1_000 * 2 ** Math.min(this.attempts++, 4)));
   }
 
   leave(error?: string): Promise<void> {
     if (this.leaving) return this.leaving;
     ++this.generation;
+    clearTimeout(this.retry); this.retry = undefined;
     this.set({ status: "leaving", muted: true, error });
     const room = this.room;
     this.room = undefined;

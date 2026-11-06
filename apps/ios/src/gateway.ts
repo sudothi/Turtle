@@ -41,6 +41,7 @@ export class Gateway {
     this.socket = socket;
     socket.onopen = () => {
       if (this.socket !== socket || this.stopped) return;
+      this.api.authenticateGateway(socket);
       this.attempts = 0;
       this.set({ connected: true, states: [], revision: this.state.revision + 1 });
       this.send(this.report);

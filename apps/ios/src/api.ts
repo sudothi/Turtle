@@ -26,8 +26,11 @@ export class Api {
   gatewayUrl() {
     const url = new URL("/ws", this.origin);
     url.protocol = "wss:";
-    url.searchParams.set("token", this.token ?? "");
     return url.toString();
+  }
+
+  authenticateGateway(socket: Pick<WebSocket, "send">) {
+    socket.send(JSON.stringify({ t: "auth", token: this.token ?? "" }));
   }
 
   private async request<Schema extends z.ZodTypeAny>(path: string, schema: Schema, body?: unknown, method = body === undefined ? "GET" : "POST"): Promise<z.output<Schema>> {

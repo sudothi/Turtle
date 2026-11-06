@@ -138,3 +138,8 @@
 .react-pick-wrap { position: relative; display: inline-flex; }
 .react-picker { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; gap: 2px; padding: 4px; background: var(--ink-2); }
 .react-picker button { font-size: 18px; padding: 4px 6px; background: transparent; border: 0; cursor: pointer; }
+.search-panel { margin: 8px 16px; padding: 10px; background: var(--ink-2); }
+.search-row { display: flex; gap: 8px; }
+.search-row input { flex: 1; min-width: 0; }
+.search-results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; display: grid; gap: 8px; }
+.search-text { color: var(--paper-dim); white-space: pre-wrap; overflow-wrap: anywhere; }

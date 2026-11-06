@@ -1295,6 +1295,31 @@ export async function buildApp({
       },
     );
 
+    // ---- Busca ----
+    // Só em conversas que a pessoa vê: o canal pedido, ou todos os canais de texto de um servidor dela.
+    const searchIn = async (channelIds: string[], q: string) => {
+      if (!channelIds.length) return [];
+      const rows = await db
+        .select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId))
+        .where(and(inArray(messages.channelId, channelIds), sql`to_tsvector('portuguese', ${messages.content}) @@ websearch_to_tsquery('portuguese', ${q})`))
+        .orderBy(desc(messages.createdAt)).limit(25);
+      return toMessages(rows);
+    };
+    const searchQuery = (q: unknown) => (typeof q === "string" ? q.trim().slice(0, 100) : "");
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/channels/:id/search", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      const q = searchQuery(req.query.q);
+      return q.length < 2 ? [] : searchIn([channel.id], q);
+    });
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/servers/:id/search", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id))) return;
+      const q = searchQuery(req.query.q);
+      if (q.length < 2) return [];
+      const ids = (await db.select({ id: channels.id }).from(channels).where(and(eq(channels.serverId, req.params.id), eq(channels.kind, "text")))).map((c) => c.id);
+      return searchIn(ids, q);
+    });
+
     // ---- Não lidas ----
     /** Conversas com mensagens de outras pessoas depois da última leitura (canais de texto dos meus servidores e DMs). */
     authed.get("/unread", async (req) => {

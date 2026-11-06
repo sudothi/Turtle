@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS reactions (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   emoji text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (message_id, user_id, emoji));
+-- Busca de mensagens (texto, português).
+CREATE INDEX IF NOT EXISTS messages_fts_idx ON messages USING gin (to_tsvector('portuguese', content));
 -- Não lidas. Na primeira vez, tudo o que já existe conta como lido (ninguém abre o app com 500 não lidas).
 DO $$
 BEGIN

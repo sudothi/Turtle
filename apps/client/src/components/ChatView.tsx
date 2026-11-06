@@ -45,6 +45,35 @@ export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speake
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
 
+/** Busca nesta conversa: digite 2 letras ou mais; mostra as 25 mais recentes que combinam. */
+function SearchPanel({ channelId, names, onClose }: { channelId: string; names: Map<string, string>; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Message[] | null>(null);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) return setResults(null);
+    const t = setTimeout(() => api.searchChannel(channelId, term).then(setResults).catch(() => setResults([])), 300);
+    return () => clearTimeout(t);
+  }, [q, channelId]);
+  return (
+    <div className="search-panel lino" role="search">
+      <div className="search-row">
+        <input autoFocus type="search" value={q} placeholder="Buscar nesta conversa" aria-label="Buscar nesta conversa" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
+        <button type="button" className="plain-btn" onClick={onClose}>Fechar</button>
+      </div>
+      <ul className="search-results" aria-live="polite">
+        {results?.length === 0 && <li className="t-muted">Nada encontrado.</li>}
+        {results?.map((m) => (
+          <li key={m.id}>
+            <b>{names.get(m.userId) ?? m.displayName ?? m.username}</b> <time className="t-muted" dateTime={m.createdAt}>{stamp(m.createdAt)}</time>
+            <div className="search-text">{decodeMentions(m.content, names)}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Desenha a formatação básica (negrito, itálico, código, spoiler, links) sem injetar HTML. */
 function Rich({ nodes }: { nodes: RichNode[] }) {
   return (
@@ -605,6 +634,7 @@ export function ChatView({
     await api.deleteMessage(m.id).catch((err: Error) => window.alert(err.message));
   };
   const [picking, setPicking] = useState<string>();
+  const [searching, setSearching] = useState(false);
   const toggleReaction = (m: Message, emoji: string) => {
     setPicking(undefined);
     const mine = m.reactions.find((r) => r.emoji === emoji)?.userIds.includes(meId) ?? false;
@@ -679,6 +709,9 @@ export function ChatView({
     >
       <ChannelHeader icon={dm ? "users" : "hash"} name={channel.name}>
         {headerExtra}
+        <IconButton label="Buscar mensagens" active={searching} onClick={() => setSearching((v) => !v)}>
+          <span aria-hidden="true">🔍</span>
+        </IconButton>
         {!dm && canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />
@@ -688,6 +721,7 @@ export function ChatView({
           <Icon name="users" />
         </IconButton>}
       </ChannelHeader>
+      {searching && <SearchPanel channelId={channel.id} names={names} onClose={() => setSearching(false)} />}
 
       <div ref={list} className="messages" role="log" aria-label={dm ? `Conversa com ${channel.name}` : `Mensagens em #${channel.name}`} onScroll={onScroll}>
         {hasMore ? (

@@ -713,6 +713,20 @@ describe("amigos e mensagens diretas", () => {
   });
 
 
+  it("busca: acha por palavra na conversa e não vaza para quem não participa", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const A = await wsOpen(a);
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "vamos jogar sábado de noite" }));
+    A.ws.send(JSON.stringify({ t: "send", channelId: dm, content: "outra coisa qualquer" }));
+    await new Promise((r) => setTimeout(r, 300));
+    const found = (await get(`/channels/${dm}/search?q=${encodeURIComponent("jogando sábado")}`, c)).body;
+    expect(found.map((m: any) => m.content)).toEqual(["vamos jogar sábado de noite"]);
+    expect((await get(`/channels/${dm}/search?q=sabado`, b)).status).toBe(404);
+    expect((await get(`/channels/${dm}/search?q=x`, a)).body).toEqual([]);
+    A.ws.close();
+  });
+
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);

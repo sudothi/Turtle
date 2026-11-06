@@ -44,3 +44,19 @@ it("authenticates before reporting voice, without putting credentials in the URL
   expect(JSON.parse(socket.send.mock.calls[0]![0])).toEqual({ t: "auth", token: "session" });
   expect(JSON.parse(socket.send.mock.calls[1]![0])).toMatchObject({ t: "voice" });
 });
+
+it("replaces activities and clears them after reconnect to avoid stale presence", () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open();
+  socket.receive({ t: "presence", online: ["friend"], busy: [], activities: { friend: { game: "lol", phase: null, detail: null } } });
+  expect(gateway.getSnapshot().activities.friend?.game).toBe("lol");
+  gateway.resume();
+  expect(gateway.getSnapshot().activities).toEqual({});
+  const next = Socket.all[1]!; next.open(); next.receive({ t: "presence", online: [] });
+  expect(gateway.getSnapshot().activities).toEqual({});
+});
+it("invalidates visible profiles after a userUpdate", () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open();
+  const before = gateway.getSnapshot().revision;
+  socket.receive({ t: "userUpdate", user: { id: "friend", username: "friend", displayName: "Novo nome" } });
+  expect(gateway.getSnapshot().revision).toBe(before + 1);
+});

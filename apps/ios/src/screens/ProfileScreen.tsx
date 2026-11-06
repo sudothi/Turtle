@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { Alert, Image, Text } from "react-native";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { dmTitle, shownName, type ProfileView } from "@turtle/protocol";
-import { useRead, useWorkspace } from "../workspace-context";
+import { usePersonDetail, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation, type RootRoutes } from "../navigation/types";
 import { Avatar, Content, Page, ReadStatus } from "../ui/layout";
 import { Button, Notice } from "../ui/components";
@@ -14,6 +14,7 @@ export default function ProfileScreen() {
   const { workspace, user } = useWorkspace();
   const navigation = useAppNavigation();
   const profile = useRead<ProfileView | null>(null, useCallback(() => workspace.api.profile(params.userId), [workspace, params.userId]));
+  const detail = usePersonDetail(params.userId);
   const operation = useMutation();
   const person = profile.data;
   const change = (action: () => Promise<unknown>) => { void operation.run(async () => { await action(); await profile.refresh(); }); };
@@ -25,6 +26,7 @@ export default function ProfileScreen() {
       <Avatar name={shownName(person)} uri={workspace.api.fileUrl(person.avatar)} size={80} />
       <Text accessibilityRole="header" style={text.title}>{shownName(person)}</Text>
       <Text style={text.caption}>@{person.username}{person.staff ? " · Equipe Turtle" : ""}</Text>
+      <Text style={text.caption}>{detail}</Text>
       {!!person.bio && <Text selectable style={text.body}>{person.bio}</Text>}
       <Text style={text.caption}>No Turtle desde {new Date(person.createdAt).toLocaleDateString("pt-BR")}</Text>
       {!!person.mutualServers.length && <><Text style={text.serverTitle}>Servidores em comum</Text>{person.mutualServers.map(server => <Text key={server.id} style={text.body}>{server.name}</Text>)}</>}

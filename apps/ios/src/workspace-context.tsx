@@ -3,7 +3,7 @@ import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { randomUUID } from "expo-crypto";
 import { useFocusEffect } from "@react-navigation/native";
-import type { User } from "@turtle/protocol";
+import { gamePhaseLabel, games, type User } from "@turtle/protocol";
 import type { Api } from "./api";
 import { Resource } from "./resource";
 import { session } from "./runtime";
@@ -61,4 +61,19 @@ export function useRead<T>(initial: T, load: () => Promise<T>) {
   useFocusEffect(useCallback(() => { void resource.refresh(); }, [resource, revision]));
   const state = useSyncExternalStore(resource.subscribe, resource.getSnapshot);
   return { ...state, refresh: resource.refresh };
+}
+
+/** Same activity and voice labels as web, with no information beyond gateway visibility. */
+export function usePersonDetail(id: string) {
+  const presence = usePresence();
+  const directory = useDirectory();
+  const activity = presence.activities[id];
+  if (activity) return `Jogando ${games[activity.game]}${activity.phase ? ` · ${gamePhaseLabel[activity.phase]}` : ""}${activity.detail ? ` · ${activity.detail}` : ""}`;
+  const voice = presence.states.find(state => state.userId === id);
+  if (voice) {
+    const entry = directory.data.find(item => item.channels.some(channel => channel.id === voice.channelId));
+    const channel = entry?.channels.find(channel => channel.id === voice.channelId);
+    return channel ? `Em chamada em #${channel.name} · ${entry!.server.name}` : "Em chamada";
+  }
+  return presence.busy.includes(id) ? "Não perturbe" : presence.online.includes(id) ? "Online" : "Offline";
 }

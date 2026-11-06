@@ -1,8 +1,8 @@
-import { serverEvent, type ClientEvent, type ServerEvent, type VoiceState } from "@turtle/protocol";
+import { serverEvent, type ClientEvent, type ServerEvent, type VoiceState, type Activity } from "@turtle/protocol";
 import type { Api } from "./api";
 
 export type VoiceReport = Extract<ClientEvent, { t: "voice" }>;
-export interface GatewayState { connected: boolean; states: VoiceState[]; online: string[]; busy: string[]; revision: number }
+export interface GatewayState { connected: boolean; states: VoiceState[]; online: string[]; busy: string[]; activities: Record<string, Activity>; revision: number }
 
 /** Best-effort gateway presence. Native media owns the call independently. */
 export class Gateway {
@@ -11,7 +11,7 @@ export class Gateway {
   private heartbeat?: ReturnType<typeof setInterval>;
   private stopped = true;
   private attempts = 0;
-  private state: GatewayState = { connected: false, states: [], online: [], busy: [], revision: 0 };
+  private state: GatewayState = { connected: false, states: [], online: [], busy: [], activities: {}, revision: 0 };
   private listeners = new Set<() => void>();
   private events = new Set<(event: ServerEvent) => void>();
   private report: VoiceReport = { t: "voice", channelId: null, muted: true, deafened: false, camera: false, screen: false };
@@ -31,7 +31,7 @@ export class Gateway {
     // Replace a socket that can look OPEN after iOS suspended its transport.
     clearTimeout(this.retry);
     this.release();
-    this.set({ connected: false, states: [], online: [], busy: [] });
+    this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
     this.connect();
   }
 
@@ -54,7 +54,7 @@ export class Gateway {
         const parsed = serverEvent.safeParse(JSON.parse(String(event.data)));
         if (!parsed.success) return;
         if (parsed.data.t === "voiceStates") this.set({ ...this.state, states: parsed.data.states });
-        if (parsed.data.t === "presence") this.set({ online: parsed.data.online, busy: parsed.data.busy });
+        if (parsed.data.t === "presence") this.set({ online: parsed.data.online, busy: parsed.data.busy, activities: parsed.data.activities });
         if (parsed.data.t === "sync") this.sync();
         if (["sync", "friends", "message", "messageUpdate", "messageDelete", "channel", "userUpdate", "read"].includes(parsed.data.t)) this.set({ revision: this.state.revision + 1 });
         this.events.forEach(fn => fn(parsed.data));
@@ -65,7 +65,7 @@ export class Gateway {
       if (this.socket !== socket) return;
       clearInterval(this.heartbeat);
       this.socket = undefined;
-      this.set({ connected: false, states: [], online: [], busy: [] });
+      this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
       if (event.code === 4401) { this.stop(); this.expired(); return; }
       if (!this.stopped) {
         const delay = Math.min(30_000, 1_000 * 2 ** this.attempts++) + Math.random() * 500;
@@ -90,6 +90,6 @@ export class Gateway {
     this.stopped = true;
     clearTimeout(this.retry);
     this.release();
-    this.set({ connected: false, states: [], online: [], busy: [] });
+    this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
   }
 }

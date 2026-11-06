@@ -29,6 +29,7 @@ services:
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET}"
+      LIVEKIT_WEBHOOK_API_KEY: "${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY}"
       LIVEKIT_TURN_CERT: "/caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_LK:-lk.ogturtle.xyz}/${DOMAIN_LK:-lk.ogturtle.xyz}.crt"
       LIVEKIT_TURN_KEY: "/caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_LK:-lk.ogturtle.xyz}/${DOMAIN_LK:-lk.ogturtle.xyz}.key"
     volumes:

@@ -1,0 +1,66 @@
+name: Publish desktop (VPS)
+# Publica o instalador do Windows em https://app.ogturtle.xyz/desktop/ (página de download do site
+# e auto-update do app desktop). Só manual: Actions > Publish desktop (VPS) > Run workflow.
+#
+# Usa o instalador gerado pelo workflow "Desktop (Windows)" (artefato turtle-windows). Deixe
+# "run_id" vazio para usar a última execução bem-sucedida na main. Reaproveita a chave e os
+# secrets do Environment "production" (ver deploy.yml); o que roda na VPS é o ramo
+# "publish-desktop" de infra/deploy.sh, que só aceita Turtle-Setup-*.exe, .blockmap e latest.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID da execução de 'Desktop (Windows)' (vazio = última com sucesso na main)"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Baixar o instalador
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RUN: ${{ inputs.run_id }}
+        run: |
+          run="$INPUT_RUN"
+          if [ -z "$run" ]; then
+            run="$(gh api "repos/${{ github.repository }}/actions/workflows/desktop.yml/runs?branch=main&status=success&per_page=1" --jq '.workflow_runs[0].id')"
+          fi
+          [ -n "$run" ] && [ "$run" != "null" ] || { echo "::error::Nenhuma execução bem-sucedida de 'Desktop (Windows)' na main."; exit 1; }
+          echo "Execução usada: $run" >> "$GITHUB_STEP_SUMMARY"
+          mkdir pacote
+          gh run download "$run" --repo "${{ github.repository }}" --name turtle-windows --dir pacote
+          ls -l pacote
+          test -f pacote/latest.yml
+          ls pacote/Turtle-Setup-*.exe pacote/Turtle-Setup-*.exe.blockmap
+          cat pacote/latest.yml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enviar para a VPS
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          tar -czf - -C pacote . \
+            | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+                -o ServerAliveInterval=30 "kyo@$HOST" "publish-desktop"
+
+      - name: Conferir de fora
+        run: |
+          curl -fsS --retry 5 --retry-delay 3 https://app.ogturtle.xyz/desktop/latest.yml | tee latest.yml
+          f="$(sed -n 's/^path: *//p' latest.yml | tr -d '\r')"
+          curl -fsSI --retry 5 "https://app.ogturtle.xyz/desktop/$f" | head -1

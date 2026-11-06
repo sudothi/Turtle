@@ -6,7 +6,7 @@
 # Assim a chave só consegue rodar este script, nunca um terminal ou outro comando.
 #
 # Entrada: SSH_ORIGINAL_COMMAND="deploy <sha de 40 caracteres>" e o código daquele commit
-# como .tar.gz (git archive) na entrada padrão.
+# como .tar.gz (git archive) na entrada padrão. Também aceita "publish-desktop" (ver abaixo).
 #
 # Passos: backup, extrair o código, build de turtle-app:<sha> (pula se a imagem já existe,
 # o que torna o rollback para um sha antigo rápido), trocar a tag do serviço api no compose,
@@ -24,8 +24,42 @@ HEALTH_TIMEOUT=120
 log() { echo "[deploy $(date -u +%H:%M:%S)] $*"; }
 die() { log "ERRO: $*"; exit 1; }
 
-# Só aceita exatamente "deploy <sha>"; qualquer outra coisa é recusada.
 read -r cmd sha extra <<<"${SSH_ORIGINAL_COMMAND:-}" || true
+
+# Publicar o instalador do desktop (.github/workflows/publish-desktop.yml): recebe um .tar.gz
+# com Turtle-Setup-<versão>.exe, o .blockmap e o latest.yml e coloca em $BASE/desktop, que o
+# Caddy serve em /desktop/. Só aceita esses três tipos de nome; o latest.yml entra por último
+# (e de forma atômica) para o auto-update nunca apontar para um arquivo que ainda não chegou.
+if [[ "${cmd:-}" == "publish-desktop" && -z "${sha:-}" ]]; then
+  dest="$BASE/desktop"
+  mkdir -p "$dest"
+  tmp="$(mktemp -d "$BASE/.desktop-XXXXXX")"
+  trap 'rm -rf "$tmp"' EXIT
+  tar -xzf - -C "$tmp" --no-same-owner --no-same-permissions
+  shopt -s nullglob dotglob
+  files=("$tmp"/*)
+  [[ ${#files[@]} -ge 3 ]] || die "esperava .exe, .blockmap e latest.yml"
+  for f in "${files[@]}"; do
+    n="$(basename "$f")"
+    [[ -f "$f" && ! -L "$f" ]] || die "entrada inválida: $n"
+    [[ "$n" =~ ^Turtle-Setup-[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?\.(exe|exe\.blockmap)$ || "$n" == "latest.yml" ]] \
+      || die "nome não permitido: $n"
+  done
+  [[ -f "$tmp/latest.yml" ]] || die "faltou o latest.yml"
+  for f in "${files[@]}"; do
+    n="$(basename "$f")"
+    [[ "$n" == "latest.yml" ]] && continue
+    install -m 644 "$f" "$dest/$n.part" && mv -f "$dest/$n.part" "$dest/$n"
+    log "publicado: $n"
+  done
+  install -m 644 "$tmp/latest.yml" "$dest/latest.yml.part" && mv -f "$dest/latest.yml.part" "$dest/latest.yml"
+  # Mantém só as 3 últimas versões do instalador.
+  ls -t "$dest"/Turtle-Setup-*.exe 2>/dev/null | tail -n +4 | while read -r old; do rm -f "$old" "$old.blockmap"; done
+  log "desktop publicado"
+  exit 0
+fi
+
+# Só aceita exatamente "deploy <sha>"; qualquer outra coisa é recusada.
 [[ "${cmd:-}" == "deploy" && -z "${extra:-}" && "${sha:-}" =~ ^[0-9a-f]{40}$ ]] \
   || die "comando inválido; esperado: deploy <sha de 40 caracteres>"
 short="${sha:0:7}"

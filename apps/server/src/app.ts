@@ -76,6 +76,8 @@ export interface AppOptions {
   authLimit?: { perIp: number; perName: number };
   /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
   heartbeatMs?: number;
+  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 2 GB. */
+  attachmentQuotaBytes?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
@@ -134,7 +136,7 @@ const canManage = (role: ServerRole | undefined) => role === "owner" || role ===
 export async function buildApp({
   db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
-  heartbeatMs = 30_000, voiceGraceMs = 30_000, roomService,
+  heartbeatMs = 30_000, attachmentQuotaBytes = 2 * 1024 ** 3, voiceGraceMs = 30_000, roomService,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
@@ -1162,6 +1164,11 @@ export async function buildApp({
       attachmentsBy.set(userId, recent);
       return true;
     };
+    const attachmentUsage = async (userId: string) =>
+      Number((await db.select({ n: sql<number>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(eq(attachments.userId, userId)))[0]?.n ?? 0);
+    const fmtMb = (b: number) => (b / 1024 / 1024).toFixed(b >= 10 * 1024 * 1024 ? 0 : 1);
+    /** Uso da cota de anexos da própria conta (mostrado em Configurações). */
+    authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));
     /** Envia um arquivo para usar na próxima mensagem do canal (evento "send" com `attachments`). */
     authed.post<{ Params: { id: string } }>("/channels/:id/attachments", async (req, reply) => {
       const channel = await findChannel(req.params.id);
@@ -1174,6 +1181,9 @@ export async function buildApp({
       if (!raw || part.file.truncated || raw.length > ATTACHMENT_MAX_BYTES) return reply.code(413).send({ error: `arquivo grande demais (máximo ${ATTACHMENT_MAX_BYTES / 1024 / 1024} MB)` });
       if (!raw.length) return reply.code(400).send({ error: "arquivo vazio" });
       const out = await processAttachment(raw);
+      const used = await attachmentUsage(me(req).id);
+      if (used + out.data.length > attachmentQuotaBytes)
+        return reply.code(413).send({ error: `cota de anexos cheia (${fmtMb(used)} de ${fmtMb(attachmentQuotaBytes)} MB); apague mensagens com arquivos para liberar espaço` });
       const name = (part.filename || "arquivo").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120) || "arquivo";
       const key = await files.save(out.data, out.ext);
       const att: Attachment = { id: newId(), key, name, size: out.data.length, mime: out.mime, width: out.width, height: out.height };

@@ -1134,6 +1134,33 @@ describe("conexão do WebSocket", () => {
   });
 });
 
+describe("cota de anexos", () => {
+  it("recusa com 413 quando passa da cota e mostra o uso em /me/storage", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150 });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const token = (await json("/auth/register", { inviteCode: "boot-cota", username: "cota", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Cota" }, token);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    const text = chans.find((c) => c.kind === "text").id;
+    const send = async (n: number) => {
+      const form = new FormData();
+      form.append("file", new Blob(["x".repeat(n)], { type: "text/plain" }), "a.txt");
+      return fetch(url + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+    };
+    expect((await send(100)).status).toBe(200);
+    const over = await send(100);
+    expect(over.status).toBe(413);
+    expect(((await over.json()) as any).error).toMatch(/cota/);
+    const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+    expect(st).toEqual({ used: 100, quota: 150 });
+    await a.close();
+    await h.close();
+  });
+});
+
 describe("flood no WebSocket", () => {
   it("passa de 10 eventos por segundo e o servidor recusa o excesso; ping não conta", async () => {
     const h = await createDb();

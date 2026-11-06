@@ -8,6 +8,19 @@ import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
 import { useMobile, useMobileBack } from "../mobile";
 
+/** Mensagem enviada que o servidor ainda não confirmou (ou que falhou). */
+export interface Outgoing {
+  nonce: string;
+  channelId: string;
+  content: string;
+  attachments: string[];
+  replyTo?: string;
+  status: "sending" | "failed";
+  error?: string;
+  /** Quando foi (re)enviada, em ms. */
+  at: number;
+}
+
 /** Botão "voltar" do celular (só aparece no layout de uma tela por vez). */
 export function BackButton() {
   const back = useMobileBack();
@@ -195,6 +208,10 @@ export function ChatView({
   members,
   meId,
   onSend,
+  outbox = [],
+  onRetry,
+  onDiscard,
+  me,
   membersOpen,
   onToggleMembers,
   canInvite,
@@ -216,6 +233,12 @@ export function ChatView({
   meId: string;
   /** `replyTo`: id da mensagem respondida. */
   onSend: (content: string, attachments: string[], replyTo?: string) => void;
+  /** Envios desta conversa ainda sem confirmação; aparecem no fim da lista. */
+  outbox?: Outgoing[];
+  onRetry?: (nonce: string) => void;
+  onDiscard?: (nonce: string) => void;
+  /** Quem está usando o app (nome e foto nas mensagens pendentes). */
+  me?: { username: string; displayName?: string | null; avatar?: string | null };
   membersOpen: boolean;
   onToggleMembers: () => void;
   canInvite: boolean;
@@ -318,6 +341,10 @@ export function ChatView({
     ro.observe(el);
     return () => ro.disconnect();
   }, [channel?.id]);
+  // Mensagem nova na fila de envio: desce até ela.
+  useLayoutEffect(() => {
+    if (outbox.length && atBottom.current) toBottom();
+  }, [outbox.length, toBottom]);
   const onMediaLoad = () => {
     if (atBottom.current) toBottom();
   };
@@ -630,6 +657,27 @@ export function ChatView({
             </article>
           ),
         )}
+        {outbox.map((o) => (
+          <article key={o.nonce} className={`msg head outgoing ${o.status}`} aria-busy={o.status === "sending"}>
+            <Avatar name={me ? shownName(me) : "?"} src={fileUrl(me?.avatar ?? null)} size={40} />
+            <div className="msg-body">
+              <div className="msg-meta">
+                <b className="msg-author">{me ? shownName(me) : "Você"}</b>
+                <span className="msg-status">{o.status === "sending" ? "Enviando…" : "Não enviada"}</span>
+              </div>
+              <MessageText content={o.content} names={names} onProfile={onProfile} />
+              {o.attachments.length > 0 && <p className="t-muted">{o.attachments.length === 1 ? "1 arquivo" : `${o.attachments.length} arquivos`}</p>}
+              {o.status === "failed" && (
+                <p className="msg-failed" role="alert">
+                  {o.error ? `${o.error[0]!.toUpperCase()}${o.error.slice(1)}. ` : ""}
+                  <button type="button" className="plain-btn link" onClick={() => onRetry?.(o.nonce)}>Reenviar</button>
+                  {" · "}
+                  <button type="button" className="plain-btn link" onClick={() => onDiscard?.(o.nonce)}>Descartar</button>
+                </p>
+              )}
+            </div>
+          </article>
+        ))}
         <div className="messages-end" />
       </div>
 

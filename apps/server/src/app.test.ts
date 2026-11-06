@@ -803,6 +803,35 @@ describe("chat do dia a dia", () => {
     m.close();
   });
 
+  it("nonce: confirma o envio, reenvio não duplica e erro volta com o nonce", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    const msg = { t: "send", channelId: geral, content: "mensagem única", nonce: "n-123" };
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const first = d.events.find((e) => e.t === "message" && e.message.content === "mensagem única");
+    expect(first.nonce).toBe("n-123");
+    // a conexão caiu antes da confirmação: o cliente reenvia o mesmo nonce
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const confirms = d.events.filter((e) => e.t === "message" && e.nonce === "n-123");
+    expect(confirms).toHaveLength(2);
+    expect(confirms[1].message.id).toBe(first.message.id);
+    // os outros recebem uma vez só, e o histórico tem uma só
+    expect(m.events.filter((e) => e.t === "message" && e.message.content === "mensagem única")).toHaveLength(1);
+    expect((await get(`/channels/${geral}/messages`, dono)).body.filter((x: any) => x.content === "mensagem única")).toHaveLength(1);
+    // outra pessoa com o mesmo nonce não é confundida
+    m.ws.send(JSON.stringify({ ...msg, content: "do membro" }));
+    await settle();
+    expect(m.events.find((e) => e.t === "message" && e.nonce === "n-123" && e.message.content === "do membro")).toBeTruthy();
+    // falha: o erro diz qual envio foi
+    d.ws.send(JSON.stringify({ t: "send", channelId: "nao-existe", content: "x", nonce: "n-err" }));
+    await settle();
+    expect(d.events.find((e) => e.t === "error" && e.nonce === "n-err")).toBeTruthy();
+    d.close();
+    m.close();
+  });
+
   it("anexos: imagem sem metadados, arquivo baixável, só no próprio canal, e somem com a mensagem", async () => {
     const sharp = (await import("sharp")).default;
     const jpg = new Uint8Array(await sharp({ create: { width: 40, height: 20, channels: 3, background: "#123" } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: "segredo" } } }).toBuffer());
@@ -1062,5 +1091,62 @@ describe("logs e saúde", () => {
     expect(all).toContain('"url":"/me"');
     expect(all).toContain("token=***");
     expect(all).not.toContain(token);
+  });
+});
+
+describe("conexão do WebSocket", () => {
+  it("token na primeira mensagem; o que chega durante a preparação não se perde; token errado fecha com 4401", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-ws" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const admin = (await json("/auth/register", { inviteCode: "boot-ws", username: "fila", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Fila" }, admin);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${admin}` } })).json()) as any[];
+    const sala = chans.find((c) => c.kind === "voice").id;
+    const open = async () => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      const events: any[] = [];
+      ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+      await new Promise((r) => ws.on("open", r));
+      return { ws, events };
+    };
+    const watcher = await open();
+    watcher.ws.send(JSON.stringify({ t: "auth", token: admin }));
+    const c = await open();
+    // auth e o estado de voz juntos, na hora (antes de o servidor terminar de preparar a conexão)
+    c.ws.send(JSON.stringify({ t: "auth", token: admin }));
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: true, deafened: false }));
+    await settle();
+    expect(c.events.some((e) => e.t === "presence")).toBe(true);
+    const states = watcher.events.filter((e) => e.t === "voiceStates").at(-1)?.states ?? [];
+    expect(states.find((s: any) => s.channelId === sala)).toMatchObject({ muted: true });
+    c.ws.close();
+    watcher.ws.close();
+    // token errado fecha com 4401
+    const bad = await open();
+    const closed = new Promise<number>((r) => bad.ws.on("close", (code) => r(code)));
+    bad.ws.send(JSON.stringify({ t: "auth", token: "falso" }));
+    expect(await closed).toBe(4401);
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("nomes de usuário", () => {
+  it("não diferenciam maiúsculas no cadastro nem no login", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-nome" });
+    const reg = (body: Record<string, string>) => a.inject({ method: "POST", url: "/auth/register", payload: body });
+    expect((await reg({ inviteCode: "boot-nome", username: "Thiago", password: "12345678" })).statusCode).toBe(200);
+    const admin = (await a.inject({ method: "POST", url: "/auth/login", payload: { username: "thiago", password: "12345678" } })).json();
+    expect(admin.user.username).toBe("Thiago");
+    const inv = (await a.inject({ method: "POST", url: "/invites", headers: { authorization: `Bearer ${admin.token}` } })).json();
+    expect((await reg({ inviteCode: inv.code, username: "THIAGO", password: "12345678" })).statusCode).toBe(409);
+    // o convite não foi gasto com o cadastro recusado
+    expect((await reg({ inviteCode: inv.code, username: "outra", password: "12345678" })).statusCode).toBe(200);
+    await a.close();
+    await h.close();
   });
 });

@@ -196,6 +196,14 @@ export async function buildApp({
     broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
   };
 
+  /** Nonces de envio recentes (10 min) por conta: o reenvio depois de uma queda não duplica a mensagem. */
+  const sentNonces = new Map<string, { id: string; at: number }>();
+  const rememberNonce = (key: string, id: string) => {
+    const now = Date.now();
+    if (sentNonces.size > 5000) for (const [k, v] of sentNonces) if (now - v.at > 10 * 60_000) sentNonces.delete(k);
+    sentNonces.set(key, { id, at: now });
+  };
+
   // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
   const voice = new Map<Socket, VoiceState>();
   const voiceStatesFor = (socket: Socket): ServerEvent => {
@@ -412,12 +420,17 @@ export async function buildApp({
     if (!accountInvite && (await usableServerInvite(inviteCode)))
       return reply.code(403).send({ error: "convite inválido: esse é de servidor e só vale para quem já tem conta" });
     if (!accountInvite || accountInvite.usedBy) return reply.code(403).send({ error: "convite inválido" });
-    if ((await db.select().from(users).where(eq(users.username, username)).limit(1)).length)
+    if ((await db.select({ id: users.id }).from(users).where(sql`lower(${users.username}) = lower(${username})`).limit(1)).length)
       return reply.code(409).send({ error: "nome já em uso" });
     const isFirst = (await db.select({ id: users.id }).from(users).limit(1)).length === 0;
     const id = newId();
     const user: User = { id, username, isAdmin: isFirst, canInvite: false, displayName: null, bio: null, avatar: null, banner: null, status: "online" };
-    await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
+    try {
+      await db.insert(users).values({ id, username, passwordHash: await hashPassword(password), isAdmin: isFirst });
+    } catch {
+      // dois cadastros com o mesmo nome ao mesmo tempo: o índice único segura o segundo
+      return reply.code(409).send({ error: "nome já em uso" });
+    }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
     return { token: await startSession(id), user };
@@ -430,7 +443,9 @@ export async function buildApp({
     const wait = Math.max(byIp.blockedFor(req.ip), byName.blockedFor(name));
     if (wait) return tooMany(reply, wait);
     byIp.hit(req.ip);
-    const row = (await db.select().from(users).where(eq(users.username, body.data.username)).limit(1))[0];
+    // Sem diferenciar maiúsculas; se o banco antigo tiver dois nomes iguais nessa forma, vale a grafia exata.
+    const found = await db.select().from(users).where(sql`lower(${users.username}) = lower(${body.data.username})`).limit(5);
+    const row = found.find((u) => u.username === body.data.username) ?? (found.length === 1 ? found[0] : undefined);
     // Sem a conta, compara com um hash qualquer: o tempo de resposta não revela quais nomes existem.
     const ok = await verifyPassword(body.data.password, row?.passwordHash ?? DUMMY_HASH);
     if (!row || !ok) {
@@ -1223,8 +1238,44 @@ export async function buildApp({
 
   app.register(async (instance) => {
     instance.get<{ Querystring: { token?: string } }>("/ws", { websocket: true }, async (socket: Socket, req) => {
-      const connected = await userFromToken(req.query.token);
+      // Escuta desde já: o que chega enquanto a conexão é preparada (consultas ao banco) fica numa fila.
+      // Antes, o estado de voz que o cliente reenvia ao reconectar podia se perder aqui.
+      const queue: Buffer[] = [];
+      let deliver: ((raw: Buffer) => void) | undefined;
+      let waiter: (() => void) | undefined;
+      socket.on("message", (raw: Buffer) => {
+        if (deliver) return deliver(raw);
+        queue.push(raw);
+        waiter?.();
+      });
+      // Fechou no meio da preparação: limpa assim que a preparação terminar.
+      let gone = false;
+      let cleanup: (() => void) | undefined;
+      socket.on("close", () => {
+        gone = true;
+        cleanup?.();
+      });
+      const nextQueued = (ms: number) =>
+        new Promise<Buffer | undefined>((resolve) => {
+          if (queue.length) return resolve(queue.shift());
+          const t = setTimeout(() => { waiter = undefined; resolve(undefined); }, ms);
+          waiter = () => { clearTimeout(t); waiter = undefined; resolve(queue.shift()); };
+        });
+      // Token na primeira mensagem ({ t: "auth", token }), para não ficar em URL nem em log; os apps
+      // antigos ainda mandam na URL (?token=).
+      let token = req.query.token;
+      if (!token) {
+        const first = await nextQueued(10_000);
+        try {
+          const e = first && JSON.parse(first.toString());
+          if (e?.t === "auth" && typeof e.token === "string") token = e.token;
+        } catch {
+          // primeira mensagem inválida: fica sem token
+        }
+      }
+      const connected = await userFromToken(token);
       if (!connected) return socket.close(4401, "unauthorized");
+      if (gone) return;
       online.set(socket, connected);
       // Ping a cada heartbeatMs: quem não responde (notebook dormiu, Wi-Fi caiu sem fechar) é derrubado,
       // e o close tira a pessoa da presença e da chamada. Qualquer mensagem também conta como sinal de vida.
@@ -1238,17 +1289,18 @@ export async function buildApp({
       beat.unref?.();
       memberships.set(socket, await loadMemberships(connected.id));
       dmSets.set(socket, await loadDmSet(connected.id));
-      presence();
-      socket.send(JSON.stringify(voiceStatesFor(socket)));
-      socket.on("close", () => {
+      cleanup = () => {
         clearInterval(beat);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
-      });
-      socket.on("message", (raw: Buffer) => {
+      };
+      if (gone) return cleanup();
+      presence();
+      socket.send(JSON.stringify(voiceStatesFor(socket)));
+      deliver = (raw: Buffer) => {
         alive = true;
         // Um erro aqui (banco fora, por exemplo) não pode virar promessa rejeitada solta: isso derruba o processo.
         handle(raw).catch((err) => {
@@ -1259,7 +1311,7 @@ export async function buildApp({
             // conexão já fechada
           }
         });
-      });
+      };
       const handle = async (raw: Buffer) => {
         let evt;
         try {
@@ -1270,6 +1322,7 @@ export async function buildApp({
         // O perfil pode ter mudado desde que a conexão abriu.
         const user = online.get(socket) ?? connected;
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
+        if (evt.t === "auth") return; // já autenticado (token veio na URL)
         if (evt.t === "voice") {
           if (evt.channelId === null) {
             if (voice.delete(socket)) broadcastVoice();
@@ -1292,6 +1345,14 @@ export async function buildApp({
           broadcastVoice();
           return;
         }
+        // Reenvio de algo que já entrou (a conexão caiu antes da confirmação): só confirma de novo.
+        const nonceKey = evt.nonce ? `${user.id}:${evt.nonce}` : undefined;
+        const already = nonceKey ? sentNonces.get(nonceKey) : undefined;
+        if (already) {
+          const prev = await loadMessage(already.id);
+          if (prev) socket.send(JSON.stringify({ t: "message", message: prev, nonce: evt.nonce } satisfies ServerEvent));
+          return;
+        }
         const channel = await findChannel(evt.channelId);
         const isDm = channel?.kind === "dm";
         const allowed = !channel
@@ -1300,21 +1361,21 @@ export async function buildApp({
             ? await isDmMember(channel.id, user.id)
             : channel.kind === "text" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
         if (!channel || !allowed)
-          return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "canal não existe" } satisfies ServerEvent));
         if (isDm && (await dmBlocked(channel.id)))
-          return socket.send(JSON.stringify({ t: "error", error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
         // Anexos: só os que a própria pessoa enviou para este canal e ainda não usou.
         const picked = evt.attachments.length
           ? await db.select(attachmentCols).from(attachments).where(and(inArray(attachments.id, evt.attachments), eq(attachments.userId, user.id), eq(attachments.channelId, channel.id), isNull(attachments.messageId)))
           : [];
         if (picked.length !== new Set(evt.attachments).size)
-          return socket.send(JSON.stringify({ t: "error", error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
         // Resposta: só a uma mensagem que ainda existe no mesmo canal.
         const replyTo = evt.replyTo ? (await replyPreviews([evt.replyTo])).get(evt.replyTo) : undefined;
         if (evt.replyTo) {
           const target = replyTo && (await db.select({ c: messages.channelId }).from(messages).where(eq(messages.id, evt.replyTo)).limit(1))[0];
           if (!target || target.c !== channel.id)
-            return socket.send(JSON.stringify({ t: "error", error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
+            return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
         }
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
@@ -1324,10 +1385,13 @@ export async function buildApp({
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));
+        if (nonceKey) rememberNonce(nonceKey, message.id);
         await markRead(user.id, channel.id);
-        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
-        else toServer(channel.serverId!, { t: "message", message });
+        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message, nonce: evt.nonce });
+        else toServer(channel.serverId!, { t: "message", message, nonce: evt.nonce });
       };
+      // Pronto: entrega o que chegou durante a preparação, na ordem.
+      for (const raw of queue.splice(0)) deliver(raw);
     });
   });
 

@@ -106,6 +106,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_i
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'online';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS icon_key text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+-- Nome de usuário único sem diferenciar maiúsculas ("Thiago" e "thiago" não podem coexistir).
+-- Só cria o índice se o banco ainda não tem nomes repetidos nessa forma (senão o servidor não subiria).
+DO $$
+BEGIN
+  IF to_regclass('users_username_lower_idx') IS NULL
+     AND NOT EXISTS (SELECT 1 FROM users GROUP BY lower(username) HAVING count(*) > 1) THEN
+    CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
+  END IF;
+END $$;
 -- Responder a uma mensagem (sem chave estrangeira: a resposta continua quando a original é apagada).
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to text;
 CREATE INDEX IF NOT EXISTS messages_reply_to_idx ON messages (reply_to);

@@ -81,8 +81,10 @@ export const messages = pgTable(
     content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
+    /** Mensagem respondida (do mesmo canal). Sem chave estrangeira: se a original for apagada, a resposta mostra "mensagem apagada". */
+    replyTo: text("reply_to"),
   },
-  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt)],
+  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_reply_to_idx").on(t.replyTo)],
 );
 
 /** Arquivos do chat. Sem `messageId` = enviado mas ainda não usado numa mensagem (some depois de 1 h). */

@@ -2,6 +2,19 @@
 app.{$DOMAIN} {
 	encode zstd gzip
 
+	# Cabeçalhos de segurança (#93). A CSP começa em Report-Only: o navegador só avisa
+	# no console o que bloquearia. Depois de uns dias sem avisos, troque o nome para
+	# Content-Security-Policy para valer de verdade.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()"
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' wss://lk.{$DOMAIN} https://lk.{$DOMAIN}; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
 	# Instalador e auto-atualização do app desktop (arquivos em infra/desktop/ no VPS).
 	handle_path /desktop/* {
 		root * /srv/desktop

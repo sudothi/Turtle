@@ -889,3 +889,41 @@
 .desktop-hero > svg { flex: none; width: 40px; height: 40px; }
 a.auth-brand { text-decoration: none; }
 
+
+/* Responder mensagens: linha da mensagem citada em cima da resposta e barra acima do campo de texto. */
+.msg-reply { grid-column: 1 / -1; position: relative; display: flex; align-items: center; min-width: 0; height: 22px; padding-left: 56px; margin-bottom: 2px; font-size: var(--fs-sm); color: var(--text-muted); }
+.msg-reply::before {
+  content: ""; position: absolute; left: 19px; top: 50%; width: 30px; height: 12px;
+  border-left: 2px solid var(--ink-5); border-top: 2px solid var(--ink-5); border-top-left-radius: 6px;
+}
+.msg-reply-btn { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; color: inherit; cursor: pointer; text-align: left; }
+.msg-reply-btn b { flex: none; color: var(--paper-dim); font-weight: 700; }
+.msg-reply-btn .t-avatar, .msg-reply-btn .t-avatar-wrap { flex: none; margin: 0; }
+.msg-reply-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.msg-reply-text.faint, .msg-reply-gone { font-style: italic; color: var(--text-faint); }
+.msg-reply-btn:hover .msg-reply-text { color: var(--paper); }
+.msg.replying { background: rgba(255, 255, 255, 0.08); box-shadow: inset 3px 0 0 var(--paper-dim); }
+.msg.flash { animation: t-msg-flash 1.6s var(--ease); }
+@keyframes t-msg-flash { 0%, 40% { background: rgba(255, 255, 255, 0.16); } 100% { background: transparent; } }
+.reply-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 10px 16px; margin-bottom: -6px;
+  border-radius: 8px 8px 0 0; background: var(--ink-1); color: var(--text-muted); font-size: var(--fs-sm);
+}
+.reply-bar b { color: var(--paper-dim); }
+.reply-bar-close { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--text-muted); cursor: pointer; }
+.reply-bar-close:hover { color: var(--paper); background: var(--ink-4); }
+.composer-note { margin: 0 0 6px; color: var(--text-muted); font-size: var(--fs-sm); }
+.app.m .msg-reply { padding-left: 48px; }
+.app.m .msg-reply::before { left: 18px; width: 24px; }
+@media (prefers-reduced-motion: reduce) { .msg.flash { animation: none; background: rgba(255, 255, 255, 0.12); } }
+
+/* Mensagens ainda sem confirmação: só ficam apagadas se demorarem (envio normal leva milissegundos). */
+.msg.outgoing .msg-status { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
+.msg.outgoing.sending .msg-status, .msg.outgoing.sending .msg-text { animation: t-outgoing-wait 0s linear 0.7s both; }
+.msg.outgoing.sending .msg-status { visibility: hidden; animation-name: t-outgoing-show; }
+@keyframes t-outgoing-wait { to { opacity: 0.55; } }
+@keyframes t-outgoing-show { to { visibility: visible; } }
+.msg.outgoing.failed .msg-text { opacity: 0.55; text-decoration: line-through dashed var(--text-faint); }
+.msg.outgoing.failed .msg-status { color: var(--paper); font-style: normal; font-weight: 700; }
+.msg-failed { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.msg-failed .link { text-decoration: underline; color: var(--paper); cursor: pointer; }

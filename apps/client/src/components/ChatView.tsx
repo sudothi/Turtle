@@ -8,6 +8,19 @@ import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
 import { useMobile, useMobileBack } from "../mobile";
 
+/** Mensagem enviada que o servidor ainda não confirmou (ou que falhou). */
+export interface Outgoing {
+  nonce: string;
+  channelId: string;
+  content: string;
+  attachments: string[];
+  replyTo?: string;
+  status: "sending" | "failed";
+  error?: string;
+  /** Quando foi (re)enviada, em ms. */
+  at: number;
+}
+
 /** Botão "voltar" do celular (só aparece no layout de uma tela por vez). */
 export function BackButton() {
   const back = useMobileBack();
@@ -51,6 +64,25 @@ function MessageText({ content, names, onProfile, edited }: { content: string; n
 
 /** Volta `<@id>` para `@Nome`, para editar o texto como foi digitado. */
 const decodeMentions = (content: string, names: Map<string, string>) => content.replace(MENTION_RE, (_, id: string) => `@${names.get(id) ?? "alguém"}`);
+
+/** Linha acima da resposta com quem escreveu a original e o começo do texto; clicar leva até ela. */
+function ReplyLine({ message, names, onJump }: { message: Message; names: Map<string, string>; onJump: (id: string) => void }) {
+  if (!message.replyToId) return null;
+  const r = message.replyTo;
+  if (!r) return <div className="msg-reply"><span className="msg-reply-gone">Mensagem original apagada</span></div>;
+  const text = decodeMentions(r.content, names).replace(/\s+/g, " ").trim();
+  const shown = text || (r.attachments ? "Clique para ver o anexo" : "");
+  return (
+    <div className="msg-reply">
+      <button type="button" className="plain-btn msg-reply-btn" onClick={() => onJump(r.id)} aria-label={`Respondendo a ${shownName(r)}: ${shown}. Ir para a mensagem original`}>
+        <Avatar name={shownName(r)} src={fileUrl(r.avatar)} size={16} />
+        <b>{shownName(r)}</b>
+        <span className={`msg-reply-text${text ? "" : " faint"}`}>{shown}</span>
+        {r.attachments > 0 && <Icon name="paperclip" size={14} />}
+      </button>
+    </div>
+  );
+}
 
 export const formatSize = (n: number) =>
   n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0).replace(".", ",")} MB`;
@@ -146,7 +178,7 @@ function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (text
 }
 
 /** Menu de ações de uma mensagem no celular (abre com toque longo), vindo de baixo. */
-function MessageSheet({ message, text, canEdit, canDelete, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
+function MessageSheet({ message, text, canEdit, canDelete, onReply, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; onReply: () => void; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(onClose, 600); }).catch(() => {});
@@ -156,6 +188,7 @@ function MessageSheet({ message, text, canEdit, canDelete, onEdit, onDelete, onP
       <div className="m-sheet lino" role="menu" aria-label="Ações da mensagem" onClick={(e) => e.stopPropagation()}>
         <div className="m-sheet-grip" aria-hidden="true" />
         <p className="m-sheet-preview t-muted"><b>{shownName(message)}</b> {text || (message.attachments.length ? "(arquivo)" : "")}</p>
+        <button type="button" role="menuitem" className="m-sheet-item" onClick={onReply}><Icon name="reply" size={20} /> Responder</button>
         {text && <button type="button" role="menuitem" className="m-sheet-item" onClick={copy}><Icon name="file" size={20} /> {copied ? "Copiado!" : "Copiar texto"}</button>}
         {canEdit && <button type="button" role="menuitem" className="m-sheet-item" onClick={onEdit}><Icon name="pencil" size={20} /> Editar mensagem</button>}
         <button type="button" role="menuitem" className="m-sheet-item" onClick={onProfile}><Icon name="profile" size={20} /> Ver perfil</button>
@@ -175,6 +208,10 @@ export function ChatView({
   members,
   meId,
   onSend,
+  outbox = [],
+  onRetry,
+  onDiscard,
+  me,
   membersOpen,
   onToggleMembers,
   canInvite,
@@ -194,7 +231,14 @@ export function ChatView({
   messages: Message[];
   members: Member[];
   meId: string;
-  onSend: (content: string, attachments: string[]) => void;
+  /** `replyTo`: id da mensagem respondida. */
+  onSend: (content: string, attachments: string[], replyTo?: string) => void;
+  /** Envios desta conversa ainda sem confirmação; aparecem no fim da lista. */
+  outbox?: Outgoing[];
+  onRetry?: (nonce: string) => void;
+  onDiscard?: (nonce: string) => void;
+  /** Quem está usando o app (nome e foto nas mensagens pendentes). */
+  me?: { username: string; displayName?: string | null; avatar?: string | null };
   membersOpen: boolean;
   onToggleMembers: () => void;
   canInvite: boolean;
@@ -297,6 +341,10 @@ export function ChatView({
     ro.observe(el);
     return () => ro.disconnect();
   }, [channel?.id]);
+  // Mensagem nova na fila de envio: desce até ela.
+  useLayoutEffect(() => {
+    if (outbox.length && atBottom.current) toBottom();
+  }, [outbox.length, toBottom]);
   const onMediaLoad = () => {
     if (atBottom.current) toBottom();
   };
@@ -311,11 +359,47 @@ export function ChatView({
   const [dragging, setDragging] = useState(false);
   const [editing, setEditing] = useState<string>();
   const [viewing, setViewing] = useState<Attachment>();
+  /** Mensagem que está sendo respondida (barra em cima do campo de texto). */
+  const [replying, setReplying] = useState<Message>();
   const filePicker = useRef<HTMLInputElement>(null);
+  // A mensagem respondida foi apagada: cancela a resposta.
+  useEffect(() => {
+    if (replying && !messages.some((m) => m.id === replying.id)) setReplying(undefined);
+  }, [messages, replying]);
+  const startReply = (m: Message) => {
+    setReplying(m);
+    setEditing(undefined);
+    input.current?.focus();
+  };
+  // Ir até a mensagem respondida: se ainda não foi carregada, busca páginas antigas (até 5).
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+  const [jumpNote, setJumpNote] = useState<string>();
+  const jumpTo = async (id: string) => {
+    const find = () => list.current?.querySelector<HTMLElement>(`[data-mid="${CSS.escape(id)}"]`);
+    atBottom.current = false;
+    for (let i = 0; !find() && hasMoreRef.current && i < 5; i++) {
+      await onLoadOlder();
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
+    const el = find();
+    if (!el) {
+      setJumpNote("Essa mensagem é antiga demais para buscar daqui; role para cima para encontrá-la.");
+      setTimeout(() => setJumpNote(undefined), 4000);
+      return;
+    }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("flash");
+    void el.offsetWidth;
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1600);
+  };
   // Trocar de conversa limpa o que estava sendo escrito e cancela os envios.
   useEffect(() => {
     setText("");
     setEditing(undefined);
+    setReplying(undefined);
+    setJumpNote(undefined);
     setFileError(undefined);
     setPending((p) => {
       for (const x of p) {
@@ -401,7 +485,8 @@ export function ChatView({
     if (uploading) return;
     const ready = pending.filter((p) => p.done).map((p) => p.done!.id);
     if (!text.trim() && !ready.length) return;
-    onSend(encodeMentions(text.trim(), members), ready);
+    onSend(encodeMentions(text.trim(), members), ready, replying?.id);
+    setReplying(undefined);
     for (const p of pending) if (p.preview) URL.revokeObjectURL(p.preview);
     setPending([]);
     setFileError(undefined);
@@ -422,6 +507,10 @@ export function ChatView({
         return;
       }
       if (e.key === "Escape") return setQuery(undefined);
+    }
+    if (e.key === "Escape" && replying) {
+      e.preventDefault();
+      return setReplying(undefined);
     }
     // No celular, Enter quebra a linha (como no Discord); envia pelo botão.
     if (mobile && e.key === "Enter") return;
@@ -466,23 +555,28 @@ export function ChatView({
     if (ask && !window.confirm("Apagar esta mensagem? Não dá para desfazer.")) return;
     await api.deleteMessage(m.id).catch((err: Error) => window.alert(err.message));
   };
-  const mentionsMe = (m: Message) => mentionedIds(m.content).includes(meId);
+  const mentionsMe = (m: Message) => mentionedIds(m.content).includes(meId) || (m.replyTo?.userId === meId && m.userId !== meId);
 
   if (!channel) return <section className="chat" />;
 
   const actions = (m: Message) => {
     const mine = m.userId === meId;
-    if (!mine && !(canModerate && !dm)) return null;
+    const canDelete = mine || (canModerate && !dm);
     return (
       <div className="msg-actions lino" role="toolbar" aria-label="Ações da mensagem">
+        <button type="button" title="Responder" aria-label="Responder" onClick={() => startReply(m)}>
+          <Icon name="reply" size={18} />
+        </button>
         {mine && m.content !== "" && (
           <button type="button" title="Editar" aria-label="Editar mensagem" onClick={() => setEditing(m.id)}>
             <Icon name="pencil" size={18} />
           </button>
         )}
-        <button type="button" title="Apagar (Shift: sem perguntar)" aria-label="Apagar mensagem" onClick={(e) => void removeMessage(m, !e.shiftKey)}>
-          <Icon name="trash" size={18} />
-        </button>
+        {canDelete && (
+          <button type="button" title="Apagar (Shift: sem perguntar)" aria-label="Apagar mensagem" onClick={(e) => void removeMessage(m, !e.shiftKey)}>
+            <Icon name="trash" size={18} />
+          </button>
+        )}
       </div>
     );
   };
@@ -536,7 +630,8 @@ export function ChatView({
               <span>{r.label}</span>
             </div>
           ) : r.head ? (
-            <article key={r.key} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
+            <article key={r.key} data-mid={r.message.id} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
+              <ReplyLine message={r.message} names={names} onJump={(id) => void jumpTo(id)} />
               <button type="button" className="plain-btn" aria-label={`Perfil de ${shownName(r.message)}`} onClick={() => onProfile(r.message.userId)}>
                 <Avatar name={shownName(r.message)} src={fileUrl(r.message.avatar)} size={40} />
               </button>
@@ -553,7 +648,7 @@ export function ChatView({
               {editing !== r.message.id && !mobile && actions(r.message)}
             </article>
           ) : (
-            <article key={r.key} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
+            <article key={r.key} data-mid={r.message.id} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
               <time className="msg-gutter" dateTime={r.message.createdAt}>
                 {shortTime(r.message.createdAt)}
               </time>
@@ -562,6 +657,27 @@ export function ChatView({
             </article>
           ),
         )}
+        {outbox.map((o) => (
+          <article key={o.nonce} className={`msg head outgoing ${o.status}`} aria-busy={o.status === "sending"}>
+            <Avatar name={me ? shownName(me) : "?"} src={fileUrl(me?.avatar ?? null)} size={40} />
+            <div className="msg-body">
+              <div className="msg-meta">
+                <b className="msg-author">{me ? shownName(me) : "Você"}</b>
+                <span className="msg-status">{o.status === "sending" ? "Enviando…" : "Não enviada"}</span>
+              </div>
+              <MessageText content={o.content} names={names} onProfile={onProfile} />
+              {o.attachments.length > 0 && <p className="t-muted">{o.attachments.length === 1 ? "1 arquivo" : `${o.attachments.length} arquivos`}</p>}
+              {o.status === "failed" && (
+                <p className="msg-failed" role="alert">
+                  {o.error ? `${o.error[0]!.toUpperCase()}${o.error.slice(1)}. ` : ""}
+                  <button type="button" className="plain-btn link" onClick={() => onRetry?.(o.nonce)}>Reenviar</button>
+                  {" · "}
+                  <button type="button" className="plain-btn link" onClick={() => onDiscard?.(o.nonce)}>Descartar</button>
+                </p>
+              )}
+            </div>
+          </article>
+        ))}
         <div className="messages-end" />
       </div>
 
@@ -589,7 +705,18 @@ export function ChatView({
             ))}
           </div>
         )}
-        <div className="composer-box lino">
+        {jumpNote && <p className="composer-note" role="status">{jumpNote}</p>}
+        {replying && (
+          <div className="reply-bar">
+            <span>
+              Respondendo a <b>{shownName(replying)}</b>
+            </span>
+            <button type="button" className="plain-btn reply-bar-close" aria-label="Cancelar resposta" title="Cancelar (Esc)" onClick={() => { setReplying(undefined); input.current?.focus(); }}>
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+        )}
+        <div className={`composer-box lino${replying ? " with-reply" : ""}`}>
           {pending.length > 0 && (
             <ul className="pending-files" aria-label="Arquivos para enviar">
               {pending.map((p) => (
@@ -648,6 +775,7 @@ export function ChatView({
         canEdit={sheet.userId === meId && sheet.content !== ""}
         canDelete={sheet.userId === meId || (!!canModerate && !dm)}
         text={decodeMentions(sheet.content, names)}
+        onReply={() => { const m = sheet; setSheet(undefined); startReply(m); }}
         onEdit={() => { setEditing(sheet.id); setSheet(undefined); }}
         onDelete={() => { const m = sheet; setSheet(undefined); void removeMessage(m); }}
         onProfile={() => { const id = sheet.userId; setSheet(undefined); onProfile(id); }}

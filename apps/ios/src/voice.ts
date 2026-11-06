@@ -1,9 +1,10 @@
-import { AudioSession } from "@livekit/react-native";
-import { ConnectionQuality, DisconnectReason, RemoteAudioTrack, Room, RoomEvent, Track, type Participant } from "livekit-client";
+import { AudioSession, type VideoTrackProps } from "@livekit/react-native";
+import { ConnectionQuality, DisconnectReason, RemoteAudioTrack, Room, RoomEvent, Track, LocalVideoTrack, type Participant } from "livekit-client";
 import type { Api } from "./api";
 import type { VoiceReport } from "./gateway";
 
-export interface CallMember { id: string; name: string; muted: boolean; speaking: boolean; quality: string; local: boolean }
+export interface CallMember { id: string; name: string; muted: boolean; speaking: boolean; quality: string; local: boolean; volume: number; video?: VideoTrackProps["trackRef"] }
+export interface SharedScreen { id: string; name: string; participantId: string; watching: boolean; video?: VideoTrackProps["trackRef"]; volume: number }
 export interface VoiceSnapshot {
   status: "idle" | "connecting" | "connected" | "reconnecting" | "leaving";
   channelId: string | null;
@@ -13,12 +14,18 @@ export interface VoiceSnapshot {
   members: CallMember[];
   error?: string;
   busy: boolean;
+  camera: boolean;
+  facing: "user" | "environment";
+  screens: SharedScreen[];
 }
-const initial = (): VoiceSnapshot => ({ status: "idle", channelId: null, channelName: "", muted: true, deafened: false, members: [], busy: false });
+const initial = (): VoiceSnapshot => ({ status: "idle", channelId: null, channelName: "", muted: true, deafened: false, members: [], busy: false, camera: false, facing: "user", screens: [] });
 
 /** Owned by the session, never by the visible call screen. Native SDK manages AVAudioSession. */
 export class Voice {
   private room?: Room;
+  private videoVisible = false;
+  private watching = new Set<string>();
+  private volumes = new Map<string, { voice: number; screen: number }>();
   private generation = 0;
   private retry?: ReturnType<typeof setTimeout>;
   private recoveringSince = 0;
@@ -35,12 +42,14 @@ export class Voice {
   private set(patch: Partial<VoiceSnapshot>) {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach(fn => fn());
-    this.report({ t: "voice", channelId: this.state.status === "connected" || this.state.status === "reconnecting" ? this.state.channelId : null, muted: this.state.muted, deafened: this.state.deafened, camera: false, screen: false });
+    this.report({ t: "voice", channelId: this.state.status === "connected" || this.state.status === "reconnecting" ? this.state.channelId : null, muted: this.state.muted, deafened: this.state.deafened, camera: this.state.camera, screen: false });
   }
   private refresh = () => {
     if (!this.room) return;
     const room = this.room;
     const members = [room.localParticipant, ...room.remoteParticipants.values()].map((p: Participant): CallMember => ({
+      video: this.videoReference(p, Track.Source.Camera),
+      volume: this.volumes.get(p.identity)?.voice ?? 1,
       id: p.identity,
       name: p.name || p.identity,
       local: p === room.localParticipant,
@@ -48,7 +57,12 @@ export class Voice {
       speaking: p.isSpeaking,
       quality: p.connectionQuality === ConnectionQuality.Poor ? "Sinal fraco" : p.connectionQuality === ConnectionQuality.Lost ? "Sem sinal" : "",
     }));
-    this.set({ members, muted: !room.localParticipant.isMicrophoneEnabled });
+    const screens = [...room.remoteParticipants.values()].flatMap(p => {
+      const publication = p.getTrackPublication(Track.Source.ScreenShare);
+      if (!publication || publication.isMuted) return [];
+      return [{ id: publication.trackSid, name: p.name || p.identity, participantId: p.identity, watching: this.watching.has(publication.trackSid), video: this.videoReference(p, Track.Source.ScreenShare), volume: this.volumes.get(p.identity)?.screen ?? 1 }];
+    });
+    this.set({ members, screens, muted: !room.localParticipant.isMicrophoneEnabled, camera: room.localParticipant.isCameraEnabled });
   };
 
   join(channelId: string, channelName: string, microphone: boolean) {
@@ -69,15 +83,15 @@ export class Voice {
       await AudioSession.setDefaultRemoteAudioTrackVolume(this.state.deafened ? 0 : 1);
       await AudioSession.startAudioSession();
       if (generation !== this.generation) return;
-      room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, publishDefaults: { dtx: true } });
+      room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, videoCaptureDefaults: { facingMode: "user", resolution: { width: 1280, height: 720, frameRate: 30 } }, publishDefaults: { dtx: true, videoCodec: "h264" } });
       this.room = room;
-      for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.ConnectionQualityChanged]) room.on(event, this.refresh);
+      for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.TrackUnpublished, RoomEvent.TrackUnsubscribed, RoomEvent.ConnectionQualityChanged]) room.on(event, this.refresh);
       room.on(RoomEvent.TrackSubscribed, track => {
-        if (track.kind === Track.Kind.Audio && track instanceof RemoteAudioTrack) track.setVolume(this.state.deafened ? 0 : 1);
+        this.applyVolumes();
         this.refresh();
       });
       room.on(RoomEvent.TrackPublished, publication => {
-        if (publication.kind === Track.Kind.Audio && publication.source === Track.Source.Microphone) publication.setSubscribed(true);
+        this.syncSubscriptions();
       });
       room.on(RoomEvent.Reconnecting, () => this.set({ status: "reconnecting" }));
       room.on(RoomEvent.Reconnected, () => { this.set({ status: "connected" }); this.refresh(); });
@@ -92,9 +106,7 @@ export class Voice {
       });
       await room.connect(token.url, token.token, { autoSubscribe: false });
       if (generation !== this.generation) return;
-      for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
-        if (publication.kind === Track.Kind.Audio && publication.source === Track.Source.Microphone) publication.setSubscribed(true);
-      }
+      this.syncSubscriptions();
       this.recoveringSince = 0;
       this.set({ status: "connected", error: undefined });
       if (microphone && this.active()) {
@@ -116,7 +128,7 @@ export class Voice {
 
   private scheduleRecovery(generation: number, channelId: string) {
     if (generation !== this.generation || this.retry) return;
-    this.set({ status: "reconnecting", members: [], busy: false });
+    this.set({ status: "reconnecting", members: [], busy: false, camera: false, facing: "user", screens: [] });
     const remaining = 120_000 - (Date.now() - this.recoveringSince);
     if (remaining <= 0) { void this.leave("Não foi possível recuperar a chamada. Entre novamente para continuar."); return; }
     this.retry = setTimeout(() => {
@@ -137,6 +149,7 @@ export class Voice {
   leave(error?: string): Promise<void> {
     if (this.leaving) return this.leaving;
     ++this.generation;
+    this.watching.clear(); this.volumes.clear();
     clearTimeout(this.retry); this.retry = undefined;
     this.set({ status: "leaving", muted: true, error });
     const room = this.room;
@@ -151,6 +164,73 @@ export class Voice {
     this.leaving = task;
     void task.finally(() => { this.leaving = undefined; });
     return task;
+  }
+
+  private videoReference(participant: Participant, source: Track.Source): VideoTrackProps["trackRef"] {
+    const publication = participant.getTrackPublication(source);
+    return publication?.videoTrack ? { participant, publication, source } : undefined;
+  }
+
+  private syncSubscriptions() {
+    for (const participant of this.room?.remoteParticipants.values() ?? []) {
+      const screen = participant.getTrackPublication(Track.Source.ScreenShare);
+      for (const publication of participant.trackPublications.values()) {
+        const subscribed = publication.source === Track.Source.Microphone || this.videoVisible && this.active() && (
+          publication.source === Track.Source.Camera || (publication.source === Track.Source.ScreenShare || publication.source === Track.Source.ScreenShareAudio) && !!screen && this.watching.has(screen.trackSid)
+        );
+        publication.setSubscribed(subscribed);
+      }
+    }
+    this.applyVolumes();
+  }
+  foreground() { this.syncSubscriptions(); }
+  setVideoVisible(visible: boolean) { this.videoVisible = visible; this.syncSubscriptions(); }
+  watchScreen(id: string, watching: boolean) {
+    if (this.state.status !== "connected") return;
+    if (watching) this.watching.add(id); else this.watching.delete(id);
+    this.syncSubscriptions(); this.refresh();
+  }
+  private applyVolumes() {
+    for (const participant of this.room?.remoteParticipants.values() ?? []) for (const publication of participant.audioTrackPublications.values()) {
+      if (publication.track instanceof RemoteAudioTrack) {
+        const values = this.volumes.get(participant.identity);
+        publication.track.setVolume(this.state.deafened ? 0 : publication.source === Track.Source.ScreenShareAudio ? values?.screen ?? 1 : values?.voice ?? 1);
+      }
+    }
+  }
+  setVolume(id: string, kind: "voice" | "screen", value: number) {
+    const volumes = this.volumes.get(id) ?? { voice: 1, screen: 1 };
+    this.volumes.set(id, { ...volumes, [kind]: Math.max(0, Math.min(2, value)) });
+    this.applyVolumes(); this.refresh();
+  }
+  async toggleCamera() {
+    const room = this.room;
+    if (!room || this.state.busy || this.state.status !== "connected" || !this.active()) return;
+    this.set({ busy: true, error: undefined });
+    try {
+      await room.localParticipant.setCameraEnabled(!this.state.camera, { facingMode: this.state.facing });
+      if (!this.active()) await room.localParticipant.setCameraEnabled(false);
+    } catch { this.set({ error: "Não foi possível abrir a câmera. Confira a permissão do Turtle nos Ajustes." }); }
+    finally { if (this.room === room) { this.refresh(); this.set({ busy: false }); } }
+  }
+  async flipCamera() {
+    const room = this.room;
+    const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+    if (!room || !(track instanceof LocalVideoTrack) || this.state.busy || !this.active()) return;
+    const facing = this.state.facing === "user" ? "environment" : "user";
+    this.set({ busy: true, error: undefined });
+    try { await track.restartTrack({ facingMode: facing }); this.set({ facing }); }
+    catch { this.set({ error: "Não foi possível trocar a câmera." }); }
+    finally { if (this.room === room) { if (!this.active()) await room.localParticipant.setCameraEnabled(false).catch(() => {}); this.refresh(); this.set({ busy: false }); } }
+  }
+  async background() {
+    this.watching.clear();
+    this.syncSubscriptions();
+    const room = this.room;
+    if (room?.localParticipant.isCameraEnabled) {
+      await room.localParticipant.setCameraEnabled(false).catch(() => {});
+      if (this.room === room) this.refresh();
+    }
   }
 
   async toggleMute() {
@@ -171,10 +251,8 @@ export class Voice {
       // Deafening always mutes capture; returning to listening never reopens the mic.
       if (deafened) await room.localParticipant.setMicrophoneEnabled(false);
       await AudioSession.setDefaultRemoteAudioTrackVolume(deafened ? 0 : 1);
-      for (const participant of room.remoteParticipants.values()) for (const publication of participant.audioTrackPublications.values()) {
-        if (publication.track instanceof RemoteAudioTrack) publication.track.setVolume(deafened ? 0 : 1);
-      }
       this.set({ deafened });
+      this.applyVolumes();
     } catch { this.set({ error: "Não foi possível alterar o áudio. Tente novamente." }); }
     finally { if (this.room === room) { this.refresh(); this.set({ busy: false }); } }
   }

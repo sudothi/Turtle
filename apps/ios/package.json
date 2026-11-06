@@ -32,7 +32,11 @@
     "react-native": "0.88.1",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "react-native-svg": "15.16.0",
+    "expo-font": "~58.0.11",
+    "@expo-google-fonts/figtree": "0.4.1",
+    "@expo-google-fonts/bricolage-grotesque": "0.4.1"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

@@ -9,11 +9,14 @@ import AppNavigation from "./navigation/AppNavigation";
 import { WorkspaceProvider } from "./workspace-context";
 import { Button, Heading, Notice } from "./ui/components";
 import { colors, styles as s } from "./ui/theme";
+import { useBrandFonts } from "./ui/fonts";
 
 export default function App() {
+  const [fontsReady, fontError] = useBrandFonts();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [localError, setLocalError] = useState<string>();
   useEffect(() => { void session.restore(); }, []);
+  if (!fontsReady && !fontError) return <View style={s.center}><ActivityIndicator color={colors.paper} accessibilityLabel="Abrindo Turtle" /></View>;
   return <SafeAreaProvider>
     <View style={s.safe}>
       <StatusBar style="light" />

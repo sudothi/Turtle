@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceReport } from "./gateway";
 
 const fake = vi.hoisted(() => {
+  class AudioTrack { kind = "audio"; setVolume = vi.fn(); }
   class Room {
     static instances: Room[] = [];
-    localParticipant = { identity: "local", name: "Amigo", isSpeaking: false, isMicrophoneEnabled: false, connectionQuality: "excellent", setMicrophoneEnabled: vi.fn(async (enabled: boolean) => { this.localParticipant.isMicrophoneEnabled = enabled; }) };
+    localParticipant = { isCameraEnabled: false, getTrackPublication: vi.fn(), setCameraEnabled: vi.fn(async (enabled: boolean) => { this.localParticipant.isCameraEnabled = enabled; }), identity: "local", name: "Amigo", isSpeaking: false, isMicrophoneEnabled: false, connectionQuality: "excellent", setMicrophoneEnabled: vi.fn(async (enabled: boolean) => { this.localParticipant.isMicrophoneEnabled = enabled; }) };
     remoteParticipants = new Map();
     connect = vi.fn(async () => {});
     disconnect = vi.fn(async () => {});
@@ -14,10 +15,10 @@ const fake = vi.hoisted(() => {
     removeAllListeners = vi.fn(() => this.handlers.clear());
     constructor() { Room.instances.push(this); }
   }
-  return { Room, audio: { configureAudio: vi.fn(async () => {}), startAudioSession: vi.fn(async () => {}), stopAudioSession: vi.fn(async () => {}), setDefaultRemoteAudioTrackVolume: vi.fn(async () => {}) } };
+  return { Room, AudioTrack, audio: { configureAudio: vi.fn(async () => {}), startAudioSession: vi.fn(async () => {}), stopAudioSession: vi.fn(async () => {}), setDefaultRemoteAudioTrackVolume: vi.fn(async () => {}) } };
 });
 vi.mock("@livekit/react-native", () => ({ AudioSession: fake.audio }));
-vi.mock("livekit-client", async original => ({ ...await original<typeof import("livekit-client")>(), Room: fake.Room }));
+vi.mock("livekit-client", async original => ({ ...await original<typeof import("livekit-client")>(), Room: fake.Room, RemoteAudioTrack: fake.AudioTrack }));
 import { Voice } from "./voice";
 
 function setup(active = () => true) {
@@ -138,5 +139,59 @@ describe("call recovery", () => {
     await vi.advanceTimersByTimeAsync(30000);
     expect(api.voiceToken).toHaveBeenCalledTimes(2);
     expect(voice.getSnapshot().status).toBe("idle");
+  });
+});
+
+
+describe("camera and screen subscriptions", () => {
+  it("subscribes to cameras only on the call screen and to shared screen/audio only on request", async () => {
+    const { voice } = setup();
+    await voice.join("voice1", "Amigos", false);
+    const pub = (source: string) => ({ source, trackSid: source, isMuted: false, setSubscribed: vi.fn() });
+    const mic = pub("microphone"), camera = pub("camera"), screen = pub("screen_share"), audio = pub("screen_share_audio");
+    const publications = [mic, camera, screen, audio];
+    fake.Room.instances[0]!.remoteParticipants.set("friend", { identity: "friend", name: "Amigo", getTrackPublication: (source: string) => publications.find(p => p.source === source), trackPublications: new Map(publications.map(p => [p.trackSid, p])), audioTrackPublications: new Map(), isSpeaking: false, isMicrophoneEnabled: true });
+    voice.setVideoVisible(true);
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(camera.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(screen.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    voice.watchScreen("screen_share", true);
+    expect(screen.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(true);
+    voice.setVideoVisible(false);
+    expect(camera.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+    await voice.leave();
+  });
+  it("keeps independent voice and screen volumes and applies deafening to both", async () => {
+    const { voice } = setup();
+    await voice.join("voice1", "Amigos", false);
+    const micTrack = new fake.AudioTrack(), screenTrack = new fake.AudioTrack();
+    const microphone = { source: "microphone", track: micTrack }, screen = { source: "screen_share_audio", track: screenTrack };
+    fake.Room.instances[0]!.remoteParticipants.set("friend", { identity: "friend", getTrackPublication: () => undefined, trackPublications: new Map(), audioTrackPublications: new Map([["mic", microphone], ["screen", screen]]) });
+    voice.setVolume("friend", "voice", 0.5); voice.setVolume("friend", "screen", 0.25);
+    expect(micTrack.setVolume).toHaveBeenLastCalledWith(0.5);
+    expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
+    await voice.toggleDeafened();
+    expect(micTrack.setVolume).toHaveBeenLastCalledWith(0);
+    expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.toggleDeafened();
+    expect(micTrack.setVolume).toHaveBeenLastCalledWith(0.5);
+    expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
+    await voice.leave();
+  });
+  it("turns the camera off in background and requires an explicit action to reopen", async () => {
+    let active = true;
+    const { voice } = setup(() => active);
+    await voice.join("voice1", "Amigos", false);
+    await voice.toggleCamera();
+    expect(voice.getSnapshot().camera).toBe(true);
+    active = false; await voice.background();
+    expect(voice.getSnapshot().camera).toBe(false);
+    active = true; voice.foreground();
+    expect(voice.getSnapshot().camera).toBe(false);
+    await voice.leave();
   });
 });

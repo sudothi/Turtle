@@ -1,74 +1,72 @@
-# Produção (VPS): Postgres, LiveKit, o app (API + site) e o Caddy com HTTPS automático.
-# Uso: copie .env.prod.example para .env, preencha e rode `docker compose -f docker-compose.prod.yml up -d --build`
-# (a partir da raiz do repositório). O Caddy publica 80/443; o Postgres não é exposto.
-name: turtle
-
-# Logs do Docker com limite (o padrão cresce sem fim e um dia enche o disco): até 5 arquivos de 10 MB por serviço.
+# Produção (VPS): Caddy (HTTPS), LiveKit, Postgres e o servidor do Turtle (api: API + site).
+# Na VPS este arquivo fica em ~/turtle/docker-compose.yml (copiado de infra/docker-compose.prod.yml).
+# Logs do Docker com limite (o padrão cresce sem fim e enche o disco): até 5 arquivos de 10 MB por serviço.
 x-logging: &logging
   driver: json-file
   options: { max-size: "10m", max-file: "5" }
 
 services:
-  postgres:
-    image: postgres:17
-    logging: *logging
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: turtle
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
-      POSTGRES_DB: turtle
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U turtle"]
-      interval: 10s
-      retries: 5
-
-  app:
-    build: { context: .., dockerfile: Dockerfile }
-    logging: *logging
-    restart: unless-stopped
-    depends_on:
-      postgres: { condition: service_healthy }
-    environment:
-      DATABASE_URL: postgres://turtle:${POSTGRES_PASSWORD}@postgres:5432/turtle
-      LIVEKIT_URL: wss://lk.${DOMAIN:-ogturtle.xyz}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET}
-      # Código do primeiro cadastro (o primeiro usuário vira admin e dono do servidor "Turtle").
-      BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE:?defina BOOTSTRAP_INVITE}
-      # Fotos de perfil e banners (volume abaixo; entra no backup junto com o Postgres).
-      UPLOAD_DIR: /data/uploads
-      # Logs do app em JSON: info (padrão), warn, error, debug ou silent.
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    volumes: ["uploads:/data/uploads"]
-
-  livekit:
-    image: livekit/livekit-server:v1.13.11
-    logging: *logging
-    restart: unless-stopped
-    command: --config /etc/livekit.yaml
-    environment:
-      LIVEKIT_KEYS: ${LIVEKIT_KEYS:?defina LIVEKIT_KEYS}
-    ports:
-      - "7881:7881"
-      - "7882:7882/udp"
-      - "3478:3478/udp"
-    volumes: ["./livekit.prod.yaml:/etc/livekit.yaml:ro"]
-
   caddy:
     image: caddy:2
     logging: *logging
     restart: unless-stopped
     ports: ["80:80", "443:443"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
-      DOMAIN: ${DOMAIN:-ogturtle.xyz}
+      DOMAIN_APP: ${DOMAIN_APP:-app.ogturtle.xyz}
+      DOMAIN_LK: ${DOMAIN_LK:-lk.ogturtle.xyz}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./desktop:/srv/desktop:ro
       - caddy_data:/data
-    depends_on: [app, livekit]
+      - caddy_config:/config
 
-volumes:
-  pgdata:
-  uploads:
-  caddy_data:
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    logging: *logging
+    restart: unless-stopped
+    network_mode: host # recomendado para WebRTC
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET}"
+    volumes: ["./livekit.yaml:/etc/livekit.yaml:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7880 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:17
+    logging: *logging
+    restart: unless-stopped
+    # sem "ports:" de propósito: portas publicadas pelo Docker ignoram o UFW
+    environment:
+      POSTGRES_USER: kyo
+      POSTGRES_DB: turtle
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+    volumes: ["pg_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyo -d turtle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: turtle-app:latest
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      DATABASE_URL: postgres://kyo:${POSTGRES_PASSWORD}@postgres:5432/turtle
+      LIVEKIT_URL: wss://${DOMAIN_LK:-lk.ogturtle.xyz}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET}
+      BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE:?defina BOOTSTRAP_INVITE}
+      UPLOAD_DIR: /data/uploads
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes: ["uploads:/data/uploads"]
+
+volumes: { caddy_data: {}, caddy_config: {}, pg_data: {}, uploads: {} }

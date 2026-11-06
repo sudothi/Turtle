@@ -873,3 +873,130 @@ describe("limite de tentativas de login", () => {
     await db.close();
   });
 });
+
+describe("quem está de fato na chamada", () => {
+  const removed: string[] = [];
+  let present = new Set<string>();
+  const fakeRooms = {
+    removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
+    getParticipant: async (room: string, identity: string) => {
+      if (!present.has(`${room}:${identity}`)) throw new Error("not found");
+      return {} as any;
+    },
+  };
+  let h: DbHandle;
+  let srv: Awaited<ReturnType<typeof buildApp>>;
+  let url = "";
+  let dono = "";
+  let donoId = "";
+  let fora = "";
+  let foraId = "";
+  let sala = "";
+  const sign = async (body: string) => {
+    const { createHash } = await import("node:crypto");
+    const { AccessToken } = await import("livekit-server-sdk");
+    const at = new AccessToken(LK.apiKey, LK.apiSecret);
+    at.sha256 = createHash("sha256").update(body).digest("base64");
+    return at.toJwt();
+  };
+  const hook = async (event: string, identity: string, room = voiceRoomName(sala), auth?: string) => {
+    const body = JSON.stringify({ event, room: { name: room }, participant: { identity }, id: `${event}-${identity}-${Math.random()}`, createdAt: Math.floor(Date.now() / 1000) });
+    const res = await fetch(url + "/livekit/webhook", { method: "POST", headers: { "content-type": "application/webhook+json", authorization: auth ?? (await sign(body)) }, body });
+    return res.status;
+  };
+  const wsOpen = (token: string, opts: object = {}) =>
+    new Promise<{ ws: WebSocket; events: any[] }>((resolve, reject) => {
+      const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${token}`, opts);
+      const events: any[] = [];
+      ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+      ws.on("open", () => resolve({ ws, events }));
+      ws.on("error", reject);
+    });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const lastStates = (events: any[]) => events.filter((e) => e.t === "voiceStates").at(-1)?.states ?? [];
+
+  beforeAll(async () => {
+    h = await createDb();
+    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, roomService: fakeRooms });
+    url = await srv.listen({ port: 0, host: "127.0.0.1" });
+    const reg = async (inviteCode: string, username: string, token?: string) => {
+      const code = inviteCode || (await (await fetch(url + "/invites", { method: "POST", headers: { authorization: `Bearer ${token}` } })).json()).code;
+      return (await (await fetch(url + "/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inviteCode: code, username, password: "12345678" }) })).json()) as any;
+    };
+    const d = await reg("boot3", "voz-dono");
+    dono = d.token;
+    donoId = d.user.id;
+    const f = await reg("", "voz-fora", dono);
+    fora = f.token;
+    foraId = f.user.id;
+    const server = (await (await fetch(url + "/servers", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${dono}` }, body: JSON.stringify({ name: "Voz" }) })).json()) as any;
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    sala = chans.find((c) => c.kind === "voice").id;
+  });
+  afterAll(async () => {
+    await srv.close();
+    await h.close();
+  });
+
+  it("token de voz vale 10 minutos", async () => {
+    const r = (await (await fetch(url + `/voice/${sala}/token`, { method: "POST", headers: { authorization: `Bearer ${dono}` } })).json()) as any;
+    const claims = await new TokenVerifier(LK.apiKey, LK.apiSecret).verify(r.token);
+    expect(claims.exp! - claims.nbf!).toBeLessThanOrEqual(600);
+  });
+
+  it("conexão que não responde ao ping cai e sai da chamada", async () => {
+    const watcher = await wsOpen(dono);
+    const dead = await wsOpen(dono, { autoPong: false });
+    dead.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(80);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    const closed = new Promise((r) => dead.ws.on("close", r));
+    await wait(400);
+    await closed;
+    expect(lastStates(watcher.events)).toEqual([]);
+    // quem responde ao ping continua conectado
+    expect(watcher.ws.readyState).toBe(WebSocket.OPEN);
+    watcher.ws.close();
+  });
+
+  it("webhook: assinatura inválida é recusada", async () => {
+    expect(await hook("participant_joined", foraId, voiceRoomName(sala), "Bearer falso")).toBe(401);
+  });
+
+  it("webhook: quem entra sem permissão sai na hora; quem entra e não avisa o gateway sai depois", async () => {
+    removed.length = 0;
+    expect(await hook("participant_joined", foraId)).toBe(200);
+    expect(removed).toEqual([`${voiceRoomName(sala)}:${foraId}`]);
+    removed.length = 0;
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    expect(await hook("participant_joined", donoId)).toBe(200);
+    await wait(300);
+    expect(removed).toEqual([`${voiceRoomName(sala)}:${donoId}`]);
+    // avisando o gateway, fica
+    removed.length = 0;
+    const c = await wsOpen(dono);
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50);
+    expect(await hook("participant_joined", donoId)).toBe(200);
+    await wait(300);
+    expect(removed).toEqual([]);
+    c.ws.close();
+  });
+
+  it("webhook: participant_left tira da lista, a não ser que a pessoa ainda esteja na sala", async () => {
+    const watcher = await wsOpen(dono);
+    const c = await wsOpen(dono);
+    c.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    expect(await hook("participant_left", donoId)).toBe(200);
+    await wait(50);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    present = new Set();
+    expect(await hook("participant_left", donoId)).toBe(200);
+    await wait(50);
+    expect(lastStates(watcher.events)).toEqual([]);
+    c.ws.close();
+    watcher.ws.close();
+  });
+});

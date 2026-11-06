@@ -46,26 +46,37 @@ export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speake
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
 
 /** Busca nesta conversa: digite 2 letras ou mais; mostra as 25 mais recentes que combinam. */
-function SearchPanel({ channelId, names, onClose }: { channelId: string; names: Map<string, string>; onClose: () => void }) {
+function SearchPanel({ channelId, serverId, names, onClose }: { channelId: string; serverId?: string; names: Map<string, string>; onClose: () => void }) {
   const [q, setQ] = useState("");
+  const [wholeServer, setWholeServer] = useState(false);
+  const [channelNames, setChannelNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (wholeServer && serverId) api.channels(serverId).then((l) => setChannelNames(new Map(l.map((c) => [c.id, c.name])))).catch(() => {});
+  }, [wholeServer, serverId]);
   const [results, setResults] = useState<Message[] | null>(null);
   useEffect(() => {
     const term = q.trim();
     if (term.length < 2) return setResults(null);
-    const t = setTimeout(() => api.searchChannel(channelId, term).then(setResults).catch(() => setResults([])), 300);
+    const run = wholeServer && serverId ? api.searchServer(serverId, term) : api.searchChannel(channelId, term);
+    const t = setTimeout(() => run.then(setResults).catch(() => setResults([])), 300);
     return () => clearTimeout(t);
-  }, [q, channelId]);
+  }, [q, channelId, serverId, wholeServer]);
   return (
     <div className="search-panel lino" role="search">
       <div className="search-row">
-        <input autoFocus type="search" value={q} placeholder="Buscar nesta conversa" aria-label="Buscar nesta conversa" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
+        <input autoFocus type="search" value={q} placeholder={wholeServer ? "Buscar neste servidor" : "Buscar nesta conversa"} aria-label="Buscar mensagens" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
+        {serverId && (
+          <label className="search-scope">
+            <input type="checkbox" checked={wholeServer} onChange={(e) => setWholeServer(e.target.checked)} /> Servidor todo
+          </label>
+        )}
         <button type="button" className="plain-btn" onClick={onClose}>Fechar</button>
       </div>
       <ul className="search-results" aria-live="polite">
         {results?.length === 0 && <li className="t-muted">Nada encontrado.</li>}
         {results?.map((m) => (
           <li key={m.id}>
-            <b>{names.get(m.userId) ?? m.displayName ?? m.username}</b> <time className="t-muted" dateTime={m.createdAt}>{stamp(m.createdAt)}</time>
+            <b>{names.get(m.userId) ?? m.displayName ?? m.username}</b> {wholeServer && channelNames.get(m.channelId) && <span className="t-muted">em #{channelNames.get(m.channelId)}</span>} <time className="t-muted" dateTime={m.createdAt}>{stamp(m.createdAt)}</time>
             <div className="search-text">{decodeMentions(m.content, names)}</div>
           </li>
         ))}
@@ -721,7 +732,7 @@ export function ChatView({
           <Icon name="users" />
         </IconButton>}
       </ChannelHeader>
-      {searching && <SearchPanel channelId={channel.id} names={names} onClose={() => setSearching(false)} />}
+      {searching && <SearchPanel channelId={channel.id} serverId={dm ? undefined : channel.serverId} names={names} onClose={() => setSearching(false)} />}
 
       <div ref={list} className="messages" role="log" aria-label={dm ? `Conversa com ${channel.name}` : `Mensagens em #${channel.name}`} onScroll={onScroll}>
         {hasMore ? (

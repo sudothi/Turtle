@@ -60,3 +60,22 @@ it("invalidates visible profiles after a userUpdate", () => {
   socket.receive({ t: "userUpdate", user: { id: "friend", username: "friend", displayName: "Novo nome" } });
   expect(gateway.getSnapshot().revision).toBe(before + 1);
 });
+
+it("deduplicates incoming calls and expires them without declining automatically", async () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open();
+  const ring = { t: "ring", channelId: "dm", from: { id: "friend", username: "friend", displayName: null, avatar: null } };
+  socket.receive(ring); socket.receive(ring);
+  expect(gateway.getSnapshot().ring?.channelId).toBe("dm");
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(gateway.getSnapshot().ring).toBeUndefined();
+  expect(socket.send.mock.calls.some(([value]) => JSON.parse(value).t === "ringDecline")).toBe(false);
+});
+it("declines only the current call and clears call cards on reconnect", () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open();
+  const ring = { t: "ring", channelId: "dm", from: { id: "friend", username: "friend", displayName: null, avatar: null } };
+  socket.receive(ring); gateway.dismissRing(true);
+  expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ t: "ringDecline", channelId: "dm" }));
+  socket.receive(ring); socket.receive({ t: "ringEnd", channelId: "other" });
+  expect(gateway.getSnapshot().ring).toBeDefined();
+  gateway.resume(); expect(gateway.getSnapshot().ring).toBeUndefined();
+});

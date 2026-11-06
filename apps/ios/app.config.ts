@@ -22,6 +22,7 @@ const config: ExpoConfig = {
   plugins: [
     ["expo-build-properties", { ios: { deploymentTarget: "26.0" } }],
     "expo-secure-store",
+    ["expo-image-picker", { photosPermission: "Escolha uma foto para seu avatar ou banner no Turtle.", cameraPermission: false, microphonePermission: false }],
     "@livekit/react-native-expo-plugin",
     ["@config-plugins/react-native-webrtc", {
       microphonePermission: "Permita o microfone para falar nas chamadas do Turtle.",

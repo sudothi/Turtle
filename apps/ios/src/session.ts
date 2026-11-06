@@ -72,6 +72,10 @@ export class Session {
     if (generation === this.generation) this.set({ phase: "signedIn", user: result.user, api: new Api(normalized, result.token, this.transport) });
   }
 
+  updateUser(user: User, api: Api) {
+    if (this.state.phase === "signedIn" && this.state.user.id === user.id && this.state.api === api) this.set({ ...this.state, user });
+  }
+
   async logout() {
     ++this.generation;
     await this.mutateStore(() => this.store.remove());

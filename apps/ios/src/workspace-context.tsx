@@ -16,8 +16,11 @@ export function WorkspaceProvider({ api, user, children }: { api: Api; user: Use
   const value = useMemo(() => ({ workspace, user }), [workspace, user]);
   useEffect(() => {
     workspace.start();
+    const stopProfile = workspace.gateway.subscribeEvents(event => {
+      if (event.t === "userUpdate" && event.user.id === user.id) void api.me().then(fresh => session.updateUser(fresh, api)).catch(workspace.reject);
+    });
     const listener = AppState.addEventListener("change", state => { if (state === "active") workspace.resume(); else void workspace.chat.flush().catch(() => {}); });
-    return () => { listener.remove(); void workspace.dispose(); };
+    return () => { stopProfile(); listener.remove(); void workspace.dispose(); };
   }, [workspace]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

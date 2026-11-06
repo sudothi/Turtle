@@ -1,4 +1,4 @@
-import { accountSchema, createServerBody, createChannelBody, renameServerBody, invitePreviewSchema, createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
+import { updateProfileBody, accountSchema, createServerBody, createChannelBody, renameServerBody, invitePreviewSchema, createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -38,10 +38,10 @@ export class Api {
         method,
         headers: {
           accept: "application/json",
-          ...(body === undefined ? {} : { "content-type": "application/json" }),
+          ...(body === undefined || body instanceof FormData ? {} : { "content-type": "application/json" }),
           ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
         signal: abort.signal,
       });
       const data: unknown = await response.json().catch(() => null);
@@ -81,6 +81,14 @@ export class Api {
   members = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/members`, z.array(memberSchema));
   friends = () => this.request("/friends", z.array(friendSchema));
   dms = () => this.request("/dms", z.array(dmSchema));
+  updateProfile = (body: z.input<typeof updateProfileBody>) => this.request("/me", userSchema, updateProfileBody.parse(body), "PATCH");
+  uploadImage = (kind: "avatar" | "banner", uri: string) => {
+    const form = new FormData();
+    // React Native's native multipart transport reads a local URI, without loading base64 into JS.
+    form.append("file", { uri, name: `${kind}.jpg`, type: "image/jpeg" } as unknown as Blob);
+    return this.request(`/me/${kind}`, userSchema, form, "PUT");
+  };
+  removeImage = (kind: "avatar" | "banner") => this.request(`/me/${kind}`, userSchema, undefined, "DELETE");
   profile = (id: string) => this.request(`/users/${encodeURIComponent(id)}`, profileViewSchema);
   addFriend = (id: string) => this.request(`/friends/${encodeURIComponent(id)}`, z.object({ status: z.enum(["friend", "outgoing"]) }), {});
   addFriendByName = (username: string) => this.request("/friends", z.object({ status: z.enum(["friend", "outgoing"]) }), { username: username.trim() });

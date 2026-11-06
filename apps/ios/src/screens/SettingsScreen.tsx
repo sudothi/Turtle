@@ -5,6 +5,7 @@ import { Avatar, Content, layout, Page } from "../ui/layout";
 import { styles as text } from "../ui/theme";
 import { useCall, useWorkspace, useWorkspaceState } from "../workspace-context";
 import { useAppNavigation } from "../navigation/types";
+import { version } from "../../package.json";
 
 export default function SettingsScreen() {
   const { workspace, user } = useWorkspace();
@@ -19,5 +20,6 @@ export default function SettingsScreen() {
     <Button secondary disabled={state.signingOut} onPress={() => Alert.alert("Sair da conta?", call.status === "idle" ? "Você precisará entrar novamente neste iPhone." : "A chamada será encerrada neste iPhone.", [
       { text: "Cancelar", style: "cancel" }, { text: "Sair da conta", style: "destructive", onPress: () => { void workspace.logout(); } },
     ])}>{state.signingOut ? "Saindo…" : "Sair da conta"}</Button>
+    <Text style={text.footnote}>Turtle para iPhone · versão {version}</Text>
   </Content></Page>;
 }

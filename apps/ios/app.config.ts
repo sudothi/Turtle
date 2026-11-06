@@ -1,5 +1,5 @@
 import type { ExpoConfig } from "expo/config";
-import { version } from "./package.json";
+import { version, iosBuildNumber } from "./package.json";
 
 const config: ExpoConfig = {
   name: "Turtle",
@@ -10,7 +10,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "dark",
   ios: {
     bundleIdentifier: "xyz.ogturtle.mobile",
-    buildNumber: "3",
+    buildNumber: iosBuildNumber,
     supportsTablet: false,
     infoPlist: {
       UIBackgroundModes: ["audio"],

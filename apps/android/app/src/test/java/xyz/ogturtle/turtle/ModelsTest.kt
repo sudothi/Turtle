@@ -69,6 +69,13 @@ class ProfileAndPresenceTest {
     }
 
     @Test
+    fun parsesRing() {
+        val e = xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"ring","channelId":"c1","from":{"id":"u1","username":"kai","displayName":null,"avatar":null},"silent":false}""")
+        assertEquals(xyz.ogturtle.turtle.data.ServerEvent.Ring("c1", "u1", "kai", false), e)
+        assertEquals(xyz.ogturtle.turtle.data.ServerEvent.RingEnd("c1"), xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"ringEnd","channelId":"c1"}"""))
+    }
+
+    @Test
     fun parsesProfileView() {
         val json = """{"id":"u1","username":"kai","displayName":null,"bio":"oi","avatar":null,"banner":null,"staff":true,
             "createdAt":"2026-11-01T10:00:00.000Z","mutualServers":[{"id":"s1","name":"Turtle"}],"mutualFriends":[],

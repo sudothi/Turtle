@@ -29,6 +29,10 @@ sealed interface ServerEvent {
     data class Presence(val online: Set<String>, val busy: Set<String>) : ServerEvent
     data class VoiceStates(val states: List<VoiceState>) : ServerEvent
     data class Error(val text: String) : ServerEvent
+    /** Alguém está te ligando numa DM ou grupo. `silent` = você está em Não perturbe (só notificar). */
+    data class Ring(val channelId: String, val fromId: String, val fromName: String, val silent: Boolean) : ServerEvent
+    data class RingEnd(val channelId: String) : ServerEvent
+    data class RingDeclined(val channelId: String) : ServerEvent
 }
 
 private fun ids(e: kotlinx.serialization.json.JsonElement?): Set<String> =
@@ -49,6 +53,17 @@ fun parseServerEvent(text: String): ServerEvent? {
                 TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),
             )
             "error" -> ServerEvent.Error(str("error") ?: "erro")
+            "ring" -> {
+                val from = o["from"]!!.jsonObject
+                fun f(k: String) = from[k]?.jsonPrimitive?.contentOrNull
+                ServerEvent.Ring(
+                    str("channelId")!!, f("id")!!,
+                    f("displayName")?.takeIf { it.isNotBlank() } ?: f("username") ?: "Alguém",
+                    o["silent"]?.jsonPrimitive?.contentOrNull == "true",
+                )
+            }
+            "ringEnd" -> ServerEvent.RingEnd(str("channelId")!!)
+            "ringDeclined" -> ServerEvent.RingDeclined(str("channelId")!!)
             else -> null
         }
     }.getOrNull()
@@ -143,6 +158,12 @@ class Realtime(
                 "screen" to JsonPrimitive(false),
             ),
         )
+        return socket?.send(json.toString()) ?: false
+    }
+
+    /** Recusa a chamada que está tocando; quem ligou fica sabendo. */
+    fun sendRingDecline(channelId: String): Boolean {
+        val json = JsonObject(mapOf("t" to JsonPrimitive("ringDecline"), "channelId" to JsonPrimitive(channelId)))
         return socket?.send(json.toString()) ?: false
     }
 }

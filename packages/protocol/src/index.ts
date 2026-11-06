@@ -101,9 +101,12 @@ export const accountSchema = z.object({
   avatar: z.string().nullable().default(null),
   isAdmin: z.boolean(),
   canInvite: z.boolean(),
+  disabled: z.boolean().default(false),
 });
 export type Account = z.infer<typeof accountSchema>;
-export const setInviterBody = z.object({ canInvite: z.boolean() });
+export const setInviterBody = z
+  .object({ canInvite: z.boolean().optional(), disabled: z.boolean().optional() })
+  .refine((b) => b.canInvite !== undefined || b.disabled !== undefined, { message: "nada para alterar" });
 
 /** Menção no texto da mensagem: `<@id>`. O cliente mostra o nome de exibição atual da pessoa. */
 export const mentionToken = (userId: string) => `<@${userId}>`;
@@ -159,6 +162,49 @@ export const passwordSchema = z.string().min(8).max(200);
 
 export const registerBody = z.object({ inviteCode: z.string().min(1), username: usernameSchema, password: passwordSchema });
 export const loginBody = z.object({ username: z.string().max(64), password: z.string().max(200) });
+export const changePasswordBody = z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema });
+
+/** Validade deslizante da sessão: 30 dias sem uso expira; `lastUsedAt` é gravado no máximo uma vez por hora. */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const SESSION_TOUCH_MS = 60 * 60 * 1000;
+export const sessionInfoSchema = z.object({
+  id: z.string(),
+  userAgent: z.string().nullable().default(null),
+  createdAt: z.string(),
+  lastUsedAt: z.string(),
+  current: z.boolean(),
+});
+export type SessionInfo = z.infer<typeof sessionInfoSchema>;
+/** Nome legível do aparelho/navegador a partir do User-Agent salvo na sessão. */
+export function describeDevice(ua: string | null | undefined): string {
+  if (!ua) return "Aparelho desconhecido";
+  if (/okhttp/i.test(ua)) return "App Android";
+  const os = /Windows/i.test(ua)
+    ? "Windows"
+    : /Android/i.test(ua)
+      ? "Android"
+      : /iPhone|iPad|iOS/i.test(ua)
+        ? "iPhone"
+        : /Mac OS X|Macintosh/i.test(ua)
+          ? "macOS"
+          : /Linux/i.test(ua)
+            ? "Linux"
+            : null;
+  if (/Electron/i.test(ua)) return os ? `App desktop (${os})` : "App desktop";
+  const browser = /Edg\//i.test(ua)
+    ? "Edge"
+    : /OPR\//i.test(ua)
+      ? "Opera"
+      : /Chrome\//i.test(ua)
+        ? "Chrome"
+        : /Firefox\//i.test(ua)
+          ? "Firefox"
+          : /Safari\//i.test(ua)
+            ? "Safari"
+            : null;
+  if (browser && os) return `${browser} no ${os}`;
+  return browser ?? os ?? (ua.slice(0, 48).trim() || "Aparelho desconhecido");
+}
 /** Quantos servidores uma conta pode ter como dona. */
 export const MAX_OWNED_SERVERS = 2;
 

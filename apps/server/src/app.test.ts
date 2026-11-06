@@ -1246,3 +1246,197 @@ describe("nomes de usuário", () => {
     await h.close();
   });
 });
+
+describe("sessões, senha e contas desativadas (#89)", () => {
+  it("migração mantém sessões antigas funcionando com UUID aleatório e validade de 30 dias", async () => {
+    const { sessions, eq, sql } = await import("@turtle/db");
+    const { hashToken } = await import("./auth.js");
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-old" });
+    const reg = (await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-old", username: "antigo", password: "12345678" } })).json();
+    const oldToken = "token-de-antes-da-migracao";
+    const oldHash = hashToken(oldToken);
+    // Insere só (token_hash, user_id), como o servidor antigo fazia antes do #89.
+    await h.db.execute(sql`INSERT INTO sessions (token_hash, user_id) VALUES (${oldHash}, ${reg.user.id})`);
+    const row = (await h.db.select().from(sessions).where(eq(sessions.tokenHash, oldHash)))[0]!;
+    expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(oldHash.startsWith(row.id.slice(0, 8))).toBe(false);
+    expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+    const me = await a.inject({ url: "/me", headers: { authorization: `Bearer ${oldToken}` } });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().username).toBe("antigo");
+    await a.close();
+    await h.close();
+  });
+
+  it("validade deslizante renova após 1 h e sessão vencida responde 401 e fecha o WebSocket com 4401", async () => {
+    const { sessions, eq } = await import("@turtle/db");
+    const { hashToken } = await import("./auth.js");
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const reg = (await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-exp", username: "expira", password: "12345678" } })).json();
+    const th = hashToken(reg.token);
+
+    // Há 2 horas sem gravar: o próximo pedido atualiza last_used_at e empurra expires_at para +30 dias.
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+    const soon = new Date(Date.now() + 3_600_000);
+    await h.db.update(sessions).set({ lastUsedAt: twoHoursAgo, expiresAt: soon }).where(eq(sessions.tokenHash, th));
+    expect((await a.inject({ url: "/me", headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(200);
+    const touched = (await h.db.select().from(sessions).where(eq(sessions.tokenHash, th)))[0]!;
+    expect(touched.lastUsedAt.getTime()).toBeGreaterThan(twoHoursAgo.getTime());
+    expect(touched.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+
+    // Sessão vencida: 401 na API, 4401 no WebSocket e linha apagada do banco.
+    await h.db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.tokenHash, th));
+    const wsCode = await new Promise<number>((resolve) => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      ws.on("open", () => ws.send(JSON.stringify({ t: "auth", token: reg.token })));
+      ws.on("close", (code) => resolve(code));
+    });
+    expect(wsCode).toBe(4401);
+    expect((await a.inject({ url: "/me", headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(401);
+    expect(await h.db.select().from(sessions).where(eq(sessions.tokenHash, th))).toEqual([]);
+    await a.close();
+    await h.close();
+  });
+
+  it("lista sessões, encerra outra sessão, faz logout real e troca a senha derrubando as outras (com limitador)", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-sess", heartbeatMs: 120, authLimit: { perIp: 1000, perName: 4 } });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const req = async (method: string, path: string, body?: unknown, token?: string, ua = "Mozilla/5.0 (Windows NT 10.0) Chrome/130.0") => {
+      const res = await fetch(url + path, {
+        method,
+        headers: {
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          "user-agent": ua,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const openWs = async (token: string) => {
+      const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+      const closed = new Promise<number>((r) => ws.on("close", (c) => r(c)));
+      const ready = new Promise<void>((r) => ws.on("message", (raw) => {
+        if (JSON.parse(raw.toString()).t === "presence") r();
+      }));
+      ws.on("open", () => ws.send(JSON.stringify({ t: "auth", token })));
+      await ready;
+      return { ws, closed };
+    };
+
+    const s1 = (await req("POST", "/auth/register", { inviteCode: "boot-sess", username: "bia", password: "12345678" }, undefined, "Electron/37 (Windows)")).body.token as string;
+    const s2 = (await req("POST", "/auth/login", { username: "bia", password: "12345678" }, undefined, "okhttp/4.12.0")).body.token as string;
+    const s3 = (await req("POST", "/auth/login", { username: "bia", password: "12345678" }, undefined, "Mozilla/5.0 Firefox/132.0")).body.token as string;
+
+    const list = (await req("GET", "/me/sessions", undefined, s1)).body as any[];
+    expect(list).toHaveLength(3);
+    expect(list.filter((x) => x.current)).toHaveLength(1);
+    const s2Info = list.find((x) => x.userAgent === "okhttp/4.12.0")!;
+    expect(s2Info.id).toMatch(/^[0-9a-f-]{36}$/i);
+
+    // Encerrar s2 fecha o WebSocket de s2 com 4401, enquanto s1 segue viva (respondendo ao heartbeat e enviando mensagens).
+    const ws1 = await openWs(s1);
+    const ws2 = await openWs(s2);
+    expect((await req("DELETE", `/me/sessions/${s2Info.id}`, undefined, s1)).status).toBe(200);
+    expect(await ws2.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s2)).status).toBe(401);
+    expect(ws1.ws.readyState).toBe(WebSocket.OPEN);
+
+    // Troca de senha: 4 erros travam pelo limitador; antes disso, acertar troca a senha, mantém s1 e derruba s3.
+    expect((await req("POST", "/me/password", { currentPassword: "errada", newPassword: "nova-senha-forte" }, s1)).status).toBe(401);
+    const ws3 = await openWs(s3);
+    expect((await req("POST", "/me/password", { currentPassword: "12345678", newPassword: "nova-senha-forte" }, s1)).status).toBe(200);
+    expect(await ws3.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s3)).status).toBe(401);
+    expect((await req("GET", "/me", undefined, s1)).status).toBe(200);
+    expect(ws1.ws.readyState).toBe(WebSocket.OPEN);
+    expect((await req("POST", "/auth/login", { username: "bia", password: "12345678" })).status).toBe(401);
+    expect((await req("POST", "/auth/login", { username: "bia", password: "nova-senha-forte" })).status).toBe(200);
+
+    // Limitador de tentativas vale também em POST /me/password (4 erros seguidos -> 429).
+    for (let i = 0; i < 4; i++) {
+      expect((await req("POST", "/me/password", { currentPassword: "errada", newPassword: "outra-senha-123" }, s1)).status).toBe(401);
+    }
+    expect((await req("POST", "/me/password", { currentPassword: "nova-senha-forte", newPassword: "outra-senha-123" }, s1)).status).toBe(429);
+
+    // POST /auth/logout apaga a sessão atual e fecha o WebSocket com 4401.
+    expect((await req("POST", "/auth/logout", {}, s1)).status).toBe(200);
+    expect(await ws1.closed).toBe(4401);
+    expect((await req("GET", "/me", undefined, s1)).status).toBe(401);
+
+    await a.close();
+    await h.close();
+  });
+
+  it("admin desativa e reativa conta (derrubando sessões e chamadas), mas não pode desativar a si mesmo nem o dono do app", async () => {
+    const { users, eq } = await import("@turtle/db");
+    const removed: string[] = [];
+    const fakeRooms = {
+      removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
+      getParticipant: async () => ({}) as any,
+    };
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-dis", livekit: LK, roomService: fakeRooms });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const req = async (method: string, path: string, body?: unknown, token?: string) => {
+      const res = await fetch(url + path, {
+        method,
+        headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+
+    const owner = (await req("POST", "/auth/register", { inviteCode: "boot-dis", username: "dono", password: "12345678" })).body;
+    const inv1 = (await req("POST", "/invites", {}, owner.token)).body.code;
+    const admin2 = (await req("POST", "/auth/register", { inviteCode: inv1, username: "admin2", password: "12345678" })).body;
+    await h.db.update(users).set({ isAdmin: true }).where(eq(users.id, admin2.user.id));
+    const inv2 = (await req("POST", "/invites", {}, owner.token)).body.code;
+    const membro = (await req("POST", "/auth/register", { inviteCode: inv2, username: "membro", password: "12345678" })).body;
+
+    // Caso 1: admin não pode desativar a si mesmo.
+    expect((await req("PATCH", `/admin/users/${owner.user.id}`, { disabled: true }, owner.token)).status).toBe(403);
+    // Caso 2: outro admin também não pode desativar o dono do app (isAdmin = true).
+    expect((await req("PATCH", `/admin/users/${owner.user.id}`, { disabled: true }, admin2.token)).status).toBe(403);
+
+    // Coloca o membro num servidor e numa chamada de voz, com WebSocket aberto.
+    const srv = (await req("POST", "/servers", { name: "Casa" }, owner.token)).body;
+    const sInv = (await req("POST", `/servers/${srv.id}/invites`, {}, owner.token)).body.code;
+    await req("POST", `/invites/${sInv}/join`, {}, membro.token);
+    const chans = (await req("GET", `/servers/${srv.id}/channels`, undefined, owner.token)).body as any[];
+    const sala = chans.find((c) => c.kind === "voice").id;
+
+    const ws = new WebSocket(url.replace("http", "ws") + "/ws");
+    const closed = new Promise<number>((r) => ws.on("close", (c) => r(c)));
+    const inCall = new Promise<void>((r) => ws.on("message", (raw) => {
+      const e = JSON.parse(raw.toString());
+      if (e.t === "voiceStates" && e.states.some((s: any) => s.userId === membro.user.id)) r();
+    }));
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ t: "auth", token: membro.token }));
+      ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    });
+    await inCall;
+
+    // Desativar conta apaga sessões, fecha WS com 4401, tira da chamada no LiveKit e bloqueia login.
+    expect((await req("PATCH", `/admin/users/${membro.user.id}`, { disabled: true }, owner.token)).status).toBe(200);
+    expect(await closed).toBe(4401);
+    expect(removed).toContain(`${voiceRoomName(sala)}:${membro.user.id}`);
+    expect((await req("GET", "/me", undefined, membro.token)).status).toBe(401);
+    const blockedLogin = await req("POST", "/auth/login", { username: "membro", password: "12345678" });
+    expect(blockedLogin.status).toBe(403);
+    expect(blockedLogin.body.error).toMatch(/desativada/);
+    expect((await req("GET", "/admin/users", undefined, owner.token)).body.find((u: any) => u.id === membro.user.id).disabled).toBe(true);
+
+    // Reativar permite entrar de novo.
+    expect((await req("PATCH", `/admin/users/${membro.user.id}`, { disabled: false }, owner.token)).status).toBe(200);
+    expect((await req("POST", "/auth/login", { username: "membro", password: "12345678" })).status).toBe(200);
+
+    await a.close();
+    await h.close();
+  });
+});

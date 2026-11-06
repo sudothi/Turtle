@@ -27,7 +27,7 @@ beforeAll(async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")) });
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 } });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -840,5 +840,36 @@ describe("chat do dia a dia", () => {
     expect((await get("/servers", dono)).body.find((s: any) => s.id === serverId).icon).toBeNull();
     expect((await fetch(base + `/files/${r.body.icon}`)).status).toBe(404);
     expect(donoId).toBeTruthy();
+  });
+});
+
+describe("limite de tentativas de login", () => {
+  it("bloqueia o nome depois de 8 senhas erradas, o IP depois de 20 tentativas, e login certo zera o nome", async () => {
+    const db = await createDb();
+    const lim = await buildApp({ db: db.db, bootstrapInvite: "boot2" });
+    const url = await lim.listen({ port: 0, host: "127.0.0.1" });
+    const send = async (path: string, body: unknown, ip = "203.0.113.7") => {
+      // vem de 127.0.0.1 (proxy confiável), então o X-Forwarded-For vale como IP de quem tenta
+      const res = await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify(body) });
+      return { status: res.status, retry: res.headers.get("retry-after"), body: (await res.json()) as any };
+    };
+    expect((await send("/auth/register", { inviteCode: "boot2", username: "dona", password: "12345678" })).status).toBe(200);
+    // 7 erros e um acerto: o acerto zera o contador do nome
+    for (let i = 0; i < 7; i++) expect((await send("/auth/login", { username: "dona", password: "errada!!" })).status).toBe(401);
+    expect((await send("/auth/login", { username: "dona", password: "12345678" })).status).toBe(200);
+    // 8 erros seguidos (de IPs diferentes) travam o nome, inclusive com a senha certa e outra grafia
+    for (let i = 0; i < 8; i++) expect((await send("/auth/login", { username: "dona", password: "errada!!" }, `198.51.100.${i}`)).status).toBe(401);
+    const locked = await send("/auth/login", { username: "DONA", password: "12345678" }, "198.51.100.99");
+    expect(locked.status).toBe(429);
+    expect(Number(locked.retry)).toBeGreaterThan(0);
+    expect(locked.body.error).toMatch(/muitas tentativas/);
+    // o IP 203.0.113.7 já fez 9 tentativas; mais 11 em nomes que não existem e ele trava
+    for (let i = 0; i < 11; i++) expect((await send("/auth/login", { username: `ninguem${i}`, password: "x" })).status).toBe(401);
+    expect((await send("/auth/login", { username: "outro", password: "x" })).status).toBe(429);
+    expect((await send("/auth/register", { inviteCode: "x", username: "novo", password: "12345678" })).status).toBe(429);
+    // outro IP segue livre
+    expect((await send("/auth/login", { username: "outro", password: "x" }, "192.0.2.1")).status).toBe(401);
+    await lim.close();
+    await db.close();
   });
 });

@@ -140,7 +140,7 @@ export const usernameSchema = z.string().trim().min(2).max(32).regex(/^[\p{L}\p{
 export const passwordSchema = z.string().min(8).max(200);
 
 export const registerBody = z.object({ inviteCode: z.string().min(1), username: usernameSchema, password: passwordSchema });
-export const loginBody = z.object({ username: z.string(), password: z.string() });
+export const loginBody = z.object({ username: z.string().max(64), password: z.string().max(200) });
 /** Quantos servidores uma conta pode ter como dona. */
 export const MAX_OWNED_SERVERS = 2;
 

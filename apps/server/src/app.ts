@@ -53,6 +53,7 @@ import {
 } from "@turtle/protocol";
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
+import { attemptLimiter } from "./limiter.js";
 
 export interface AppOptions {
   db: Db;
@@ -64,7 +65,20 @@ export interface AppOptions {
   clientDir?: string;
   /** Pasta das fotos e banners enviados (precisa de volume em produção). Padrão: ./data/uploads. */
   uploadDir?: string;
+  /**
+   * De quem aceitar o X-Forwarded-For (o IP real de quem acessa, usado no limite de tentativas de login).
+   * Padrão: redes privadas e localhost, onde fica o Caddy em produção.
+   */
+  trustProxy?: string[] | boolean;
+  /** Tentativas de login/cadastro por IP a cada 10 min e erros de senha por nome a cada 15 min. Padrão: 20 e 8. */
+  authLimit?: { perIp: number; perName: number };
 }
+
+/** Hash de uma senha aleatória, para o login de um nome que não existe levar o mesmo tempo. */
+const DUMMY_HASH = await hashPassword(newToken());
+
+/** Endereços do proxy (Caddy na rede do Docker). */
+const PRIVATE_NETS = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
 
 export interface LiveKitConfig {
   /** URL que o cliente usa para conectar (ws://localhost:7880 local, wss://lk.ogturtle.xyz em produção). */
@@ -85,8 +99,8 @@ interface Socket {
 /** Cargos que podem gerir canais e expulsar membros. */
 const canManage = (role: ServerRole | undefined) => role === "owner" || role === "admin";
 
-export async function buildApp({ db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads" }: AppOptions) {
-  const app = Fastify({ logger: false });
+export async function buildApp({ db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 } }: AppOptions) {
+  const app = Fastify({ logger: false, trustProxy });
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);
@@ -312,7 +326,21 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
 
   app.get("/health", async () => ({ ok: true }));
 
+  // Limite de tentativas: por IP (login e cadastro juntos) e por nome de usuário (só erros de senha).
+  // Login certo zera o contador do nome. Sem isso, qualquer um na internet testaria senhas sem parar.
+  const byIp = attemptLimiter({ max: authLimit.perIp, windowMs: 10 * 60_000 });
+  const byName = attemptLimiter({ max: authLimit.perName, windowMs: 15 * 60_000 });
+  const tooMany = (reply: any, seconds: number) =>
+    reply
+      .code(429)
+      .header("retry-after", String(seconds))
+      .send({ error: `muitas tentativas; tente de novo em ${seconds < 90 ? `${seconds} segundos` : `${Math.ceil(seconds / 60)} minutos`}` });
+  const nameKey = (name: string) => name.trim().toLocaleLowerCase("pt-BR");
+
   app.post("/auth/register", async (req, reply) => {
+    const wait = byIp.blockedFor(req.ip);
+    if (wait) return tooMany(reply, wait);
+    byIp.hit(req.ip);
     const body = registerBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
     const { inviteCode, username, password } = body.data;
@@ -335,9 +363,18 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   app.post("/auth/login", async (req, reply) => {
     const body = loginBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+    const name = nameKey(body.data.username);
+    const wait = Math.max(byIp.blockedFor(req.ip), byName.blockedFor(name));
+    if (wait) return tooMany(reply, wait);
+    byIp.hit(req.ip);
     const row = (await db.select().from(users).where(eq(users.username, body.data.username)).limit(1))[0];
-    if (!row || !(await verifyPassword(body.data.password, row.passwordHash)))
+    // Sem a conta, compara com um hash qualquer: o tempo de resposta não revela quais nomes existem.
+    const ok = await verifyPassword(body.data.password, row?.passwordHash ?? DUMMY_HASH);
+    if (!row || !ok) {
+      byName.hit(name);
       return reply.code(401).send({ error: "usuário ou senha incorretos" });
+    }
+    byName.reset(name);
     return { token: await startSession(row.id), user: toUser(row) };
   });
 

@@ -14,3 +14,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Kotlin, coroutines e androidx andam juntos: subir um sem os outros quebra o build
+      # (jvmTarget removido, metadados novos, compileSdk). Sobem todos de uma vez, à mão, na #130.
+      - dependency-name: "org.jetbrains.kotlin*"
+      - dependency-name: "org.jetbrains.kotlinx*"
+      - dependency-name: "androidx.*"
+      - dependency-name: "com.google.devtools.ksp*"

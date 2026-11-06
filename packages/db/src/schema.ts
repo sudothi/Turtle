@@ -115,7 +115,7 @@ export const attachments = pgTable(
     height: integer("height"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("attachments_message_idx").on(t.messageId), uniqueIndex("attachments_key_idx").on(t.fileKey)],
+  (t) => [index("attachments_message_idx").on(t.messageId), uniqueIndex("attachments_key_idx").on(t.fileKey), index("attachments_created_idx").on(t.createdAt)],
 );
 
 /** Até quando cada pessoa leu cada conversa (para as marcas de não lida). */

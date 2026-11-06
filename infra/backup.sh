@@ -21,8 +21,10 @@ db="$DEST/turtle-$stamp.sql.gz"
 mv "$db.tmp" "$db"
 
 # O volume `uploads` é montado em /data/uploads no serviço api.
-up="$DEST/uploads-$stamp.tar.gz"
+# Mantém apenas a cópia mais recente (`uploads-latest.tar.gz`) para não multiplicar o uso de disco na VPS de 100 GB.
+up="$DEST/uploads-latest.tar.gz"
 "${compose[@]}" exec -T "$SERVICE" tar -C /data/uploads -czf - . > "$up.tmp"
 mv "$up.tmp" "$up"
+find "$DEST" -maxdepth 1 -name 'uploads-20*.tar.gz' -delete
 
-find "$DEST" -maxdepth 1 \( -name 'turtle-*.sql.gz' -o -name 'uploads-*.tar.gz' \) -mtime +"$KEEP_DAYS" -delete
+find "$DEST" -maxdepth 1 -name 'turtle-*.sql.gz' -mtime +"$KEEP_DAYS" -delete

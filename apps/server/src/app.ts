@@ -3,11 +3,11 @@ import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "li
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -80,8 +80,14 @@ export interface AppOptions {
   authLimit?: { perIp: number; perName: number };
   /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
   heartbeatMs?: number;
-  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 2 GB. */
+  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 500 MB. */
   attachmentQuotaBytes?: number;
+  /** Por quanto tempo os anexos das mensagens ficam no servidor antes de expirar. Padrão: 7 dias. */
+  attachmentRetentionMs?: number;
+  /** Intervalo da limpeza automática de anexos órfãos e vencidos. Padrão: 15 min. */
+  sweepIntervalMs?: number;
+  /** Uso máximo do disco (0 a 1) antes de recusar novos uploads para proteger o banco. Padrão: 0.85 (85%). */
+  maxDiskUsageRatio?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
@@ -140,7 +146,9 @@ const canManage = (role: ServerRole | undefined) => role === "owner" || role ===
 export async function buildApp({
   db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
-  heartbeatMs = 30_000, attachmentQuotaBytes = 2 * 1024 ** 3, voiceGraceMs = 30_000, roomService,
+  heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
+  attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
+  voiceGraceMs = 30_000, roomService,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
@@ -431,14 +439,38 @@ export async function buildApp({
   const markRead = (userId: string, channelId: string) =>
     db.insert(readStates).values({ userId, channelId, lastReadAt: new Date() }).onConflictDoUpdate({ target: [readStates.userId, readStates.channelId], set: { lastReadAt: new Date() } });
 
-  // Anexo enviado e nunca usado numa mensagem some depois de uma hora.
-  const sweepOrphans = async () => {
-    const old = await db.select({ id: attachments.id, key: attachments.fileKey }).from(attachments).where(and(isNull(attachments.messageId), lt(attachments.createdAt, new Date(Date.now() - 3_600_000))));
-    if (!old.length) return;
-    await db.delete(attachments).where(inArray(attachments.id, old.map((o) => o.id)));
-    await removeFiles(old.map((o) => o.key));
+  // Anexos órfãos (enviados e nunca usados numa mensagem) somem depois de 1 h;
+  // anexos de mensagens antigas somem depois de `attachmentRetentionMs` (7 dias por padrão), mantendo o texto da conversa.
+  const sweepAttachments = async () => {
+    const now = Date.now();
+    const orphans = await db.select({ id: attachments.id, key: attachments.fileKey }).from(attachments).where(and(isNull(attachments.messageId), lt(attachments.createdAt, new Date(now - 3_600_000))));
+    if (orphans.length) {
+      await db.delete(attachments).where(inArray(attachments.id, orphans.map((o) => o.id)));
+      await removeFiles(orphans.map((o) => o.key));
+    }
+    const expired = await db
+      .select({ id: attachments.id, messageId: attachments.messageId, key: attachments.fileKey, name: attachments.name })
+      .from(attachments)
+      .where(and(isNotNull(attachments.messageId), lt(attachments.createdAt, new Date(now - attachmentRetentionMs))));
+    if (!expired.length) return;
+    await db.delete(attachments).where(inArray(attachments.id, expired.map((e) => e.id)));
+    await removeFiles(expired.map((e) => e.key));
+    const byMsg = new Map<string, string[]>();
+    for (const e of expired) if (e.messageId) byMsg.set(e.messageId, [...(byMsg.get(e.messageId) ?? []), e.name]);
+    for (const [msgId, names] of byMsg) {
+      const row = (await db.select({ id: messages.id, channelId: messages.channelId, content: messages.content }).from(messages).where(eq(messages.id, msgId)).limit(1))[0];
+      if (!row) continue;
+      const rem = (await db.select({ n: count() }).from(attachments).where(eq(attachments.messageId, msgId)))[0]?.n ?? 0;
+      if (rem === 0 && row.content.trim() === "") {
+        await db.update(messages).set({ content: `[anexo expirado: ${names.join(", ")}]` }).where(eq(messages.id, msgId));
+      }
+      const channel = await findChannel(row.channelId);
+      const message = await loadMessage(msgId);
+      if (channel && message) await toChannel(channel, { t: "messageUpdate", message });
+    }
   };
-  const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
+  void sweepAttachments().catch(() => {});
+  const sweeper = setInterval(() => void sweepAttachments().catch(() => {}), sweepIntervalMs);
   sweeper.unref();
   app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
 
@@ -1476,6 +1508,9 @@ export async function buildApp({
       if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
       if (channel.kind === "dm" && (await dmBlocked(channel.id))) return reply.code(403).send({ error: "não é possível enviar para essa pessoa" });
       if (!attachmentAllowed(me(req).id)) return reply.code(429).send({ error: "muitos arquivos seguidos; espere alguns minutos" });
+      const disk = await statfs(files.dir).catch(() => undefined);
+      if (disk && disk.blocks > 0 && (disk.blocks - disk.bavail) / disk.blocks >= maxDiskUsageRatio)
+        return reply.code(507).send({ error: "disco do servidor quase cheio; tente mais tarde" });
       const part = await req.file({ limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 } }).catch(() => undefined);
       if (!part) return reply.code(400).send({ error: "envie um arquivo" });
       const raw = await part.toBuffer().catch(() => undefined);

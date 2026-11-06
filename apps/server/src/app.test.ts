@@ -1285,6 +1285,58 @@ describe("cota de anexos", () => {
     await a.close();
     await h.close();
   });
+
+  it("expira anexos antigos mantendo as mensagens e liberando a cota; bloqueia upload se o disco encher", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30 });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const token = (await json("/auth/register", { inviteCode: "boot-exp", username: "expira", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Expira" }, token);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    const text = chans.find((c) => c.kind === "text").id;
+    const upload = async (name: string) => {
+      const form = new FormData();
+      form.append("file", new Blob(["conteudo"], { type: "text/plain" }), name);
+      return (await (await fetch(url + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form })).json()) as any;
+    };
+    const att1 = await upload("com-texto.txt");
+    const att2 = await upload("so-arquivo.txt");
+
+    const ws = new WebSocket(`${url.replace("http", "ws")}/ws?token=${token}`);
+    await new Promise<void>((r) => ws.on("open", () => r()));
+    ws.send(JSON.stringify({ t: "send", channelId: text, content: "mensagem fica", attachments: [att1.id] }));
+    ws.send(JSON.stringify({ t: "send", channelId: text, content: "", attachments: [att2.id] }));
+    for (let i = 0; i < 30; i++) {
+      const cur = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+      if (cur.used === 0) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    ws.close();
+
+    // Arquivos físicos apagados e cota zerada, mas as duas mensagens continuam no canal.
+    expect((await fetch(url + `/files/${att1.key}`)).status).toBe(404);
+    expect((await fetch(url + `/files/${att2.key}`)).status).toBe(404);
+    const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+    expect(st.used).toBe(0);
+    const msgs = (await (await fetch(url + `/channels/${text}/messages`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    expect(msgs.map((m) => ({ content: m.content, atts: m.attachments.length })).sort((x, y) => x.content.localeCompare(y.content))).toEqual([
+      { content: "[anexo expirado: so-arquivo.txt]", atts: 0 },
+      { content: "mensagem fica", atts: 0 },
+    ]);
+    await a.close();
+
+    // Se o disco passar do limite (ex.: maxDiskUsageRatio: 0), recusa com 507.
+    const aFull = await buildApp({ db: h.db, maxDiskUsageRatio: 0 });
+    const urlFull = await aFull.listen({ port: 0, host: "127.0.0.1" });
+    const form = new FormData();
+    form.append("file", new Blob(["x"], { type: "text/plain" }), "cheio.txt");
+    const resFull = await fetch(urlFull + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+    expect(resFull.status).toBe(507);
+    await aFull.close();
+    await h.close();
+  });
 });
 
 describe("busca no servidor", () => {

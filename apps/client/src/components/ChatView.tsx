@@ -896,7 +896,7 @@ export function ChatView({
           <div className="drop-card lino">
             <Icon name="paperclip" size={40} />
             <b>Solte para enviar em {dm ? channel.name : `#${channel.name}`}</b>
-            <span className="t-muted">Até {MAX_ATTACHMENTS} arquivos de {ATTACHMENT_MAX_BYTES / 1024 / 1024} MB</span>
+            <span className="t-muted">Até {MAX_ATTACHMENTS} arquivos de {ATTACHMENT_MAX_BYTES / 1024 / 1024} MB · disponíveis por 7 dias</span>
           </div>
         </div>
       )}

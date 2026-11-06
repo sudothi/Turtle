@@ -23,6 +23,8 @@ export class Gateway {
   private send(value: ClientEvent) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(value)); }
   update = (report: VoiceReport) => { this.report = report; this.send(report); };
 
+  invalidate = () => { this.set({ revision: this.state.revision + 1 }); this.sync(); };
+
   start() { if (this.stopped) { this.stopped = false; this.connect(); } }
   resume() {
     if (this.stopped) return;

@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from "react-native";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { useRoute, useIsFocused, type RouteProp } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { shownName, splitMentions, type Message, type Person } from "@turtle/protocol";
 import { useConversation, usePresence, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation, type RootRoutes } from "../navigation/types";
-import { CallDock } from "../navigation/call-access";
+import { CallDock, useJoinCall } from "../navigation/call-access";
 import { Avatar, Empty, layout, Page, ToolbarButton } from "../ui/layout";
 import { Notice } from "../ui/components";
 import { styles as text, colors, fonts } from "../ui/theme";
@@ -23,11 +23,16 @@ function MessageBody({ content, names }: { content: string; names: Map<string, s
 export default function ConversationScreen() {
   const { params } = useRoute<RouteProp<RootRoutes, "Conversation">>();
   const navigation = useAppNavigation();
+  const joinCall = useJoinCall();
   const headerHeight = useHeaderHeight();
   const { workspace, user } = useWorkspace();
   const presence = usePresence();
   const state = useConversation(params.channelId);
   const { conversation } = state;
+  const focused = useIsFocused();
+  const [atLatest, setAtLatest] = useState(true);
+  const latestId = state.messages.at(-1)?.id;
+  useEffect(() => { if (focused && atLatest && latestId) void workspace.api.markRead(params.channelId).then(() => workspace.gateway.invalidate()).catch(() => {}); }, [workspace, params.channelId, latestId, atLatest, focused]);
   const list = useRef<FlatList<Row>>(null);
   const people = useRead<Person[]>([], useCallback(async () => {
     const own: Person = { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar };
@@ -44,15 +49,16 @@ export default function ConversationScreen() {
     ...state.messages.map(value => ({ kind: "message" as const, id: value.id, value })),
     ...state.outbox.map(value => ({ kind: "pending" as const, id: value.id, value })),
   ].reverse(), [state.messages, state.outbox]);
-  const jumpLatest = () => { conversation.setAtLatest(true); list.current?.scrollToOffset({ offset: 0, animated: true }); };
+  const jumpLatest = () => { setAtLatest(true); conversation.setAtLatest(true); list.current?.scrollToOffset({ offset: 0, animated: true }); };
   return <Page><KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+    {!params.serverId && <ToolbarButton label="Entrar na chamada" onPress={() => joinCall(params.channelId, params.title)} />}
     {!presence.connected && <Text accessibilityLiveRegion="polite" style={s.connection}>Sem conexão. Você pode continuar escrevendo.</Text>}
     <Notice>{state.storageError || state.error}</Notice>
     {state.error && <ToolbarButton label="Atualizar conversa" onPress={() => { void conversation.refresh(); }} />}
     <FlatList key={params.channelId} ref={list} data={rows} inverted style={{ flex: 1 }} keyExtractor={item => item.id}
       contentContainerStyle={s.messages} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
       maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
-      onScroll={({ nativeEvent }) => conversation.setAtLatest(nativeEvent.contentOffset.y < 80)} scrollEventThrottle={100}
+      onScroll={({ nativeEvent }) => { const latest = nativeEvent.contentOffset.y < 80; setAtLatest(latest); conversation.setAtLatest(latest); }} scrollEventThrottle={100}
       onEndReached={() => { if (state.messages.length) void conversation.loadOlder(); }} onEndReachedThreshold={0.2}
       ListFooterComponent={rows.length ? <View style={s.history}>
         {state.loadingOlder || state.loading ? <ActivityIndicator color={colors.paper} accessibilityLabel="Carregando histórico" /> : state.hasMore ? <ToolbarButton label="Carregar mensagens anteriores" onPress={() => { void conversation.loadOlder(); }} /> : <View style={s.welcome}>
@@ -78,7 +84,7 @@ export default function ConversationScreen() {
         const gap = Date.parse(message.createdAt) - Date.parse(previous?.createdAt || "");
         const grouped = previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
         return <View style={[s.message, !grouped && { marginTop: 16 }]}>
-          <View style={{ width: 40 }}>{!grouped && <Avatar name={shownName(message)} uri={workspace.api.fileUrl(message.avatar)} />}</View>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Ver perfil de ${shownName(message)}`} onPress={() => navigation.navigate("Profile", { userId: message.userId })} style={{ width: 40, minHeight: 44 }}>{!grouped && <Avatar name={shownName(message)} uri={workspace.api.fileUrl(message.avatar)} />}</Pressable>
           <View style={[layout.rowText, { gap: 2 }]}>
             {!grouped && <Text style={[text.label, { fontFamily: fonts.bold }]}>{shownName(message)} <Text style={[text.caption, { color: colors.faint }]}>{stamp(message.createdAt)}</Text></Text>}
             {!!message.content && <MessageBody content={message.content} names={names} />}

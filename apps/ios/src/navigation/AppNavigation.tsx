@@ -1,13 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Text, View } from "react-native";
+import { Alert, Text, View } from "react-native";
 import { DarkTheme, NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootRoutes } from "./types";
 import { colors, fonts, styles as text } from "../ui/theme";
-import { Notice } from "../ui/components";
+import { shownName } from "@turtle/protocol";
+import { Button, Notice } from "../ui/components";
 import { IconButton } from "../ui/layout";
 import { Icon } from "../ui/Icon";
-import { useCall, useWorkspace, useWorkspaceState } from "../workspace-context";
+import { useCall, usePresence, useWorkspace, useWorkspaceState } from "../workspace-context";
 import NavigationScreen from "../screens/NavigationScreen";
 import FriendsScreen from "../screens/HomeScreen";
 import SettingsScreen from "../screens/SettingsScreen";
@@ -29,6 +30,7 @@ export default function AppNavigation() {
   const navigationRef = useNavigationContainerRef<RootRoutes>();
   const state = useWorkspaceState();
   const call = useCall();
+  const presence = usePresence();
   const { workspace } = useWorkspace();
   return <NavigationContainer ref={navigationRef} theme={theme} onReady={() => {
     void AsyncStorage.getItem("turtle.pendingServerInvite").then(async raw => {
@@ -39,6 +41,18 @@ export default function AppNavigation() {
     }).catch(() => {});
   }}>
     <View style={{ flex: 1 }}>
+      {presence.ring && presence.ring.channelId !== call.channelId && <View accessibilityLiveRegion="polite" style={{ padding: 12, gap: 8, backgroundColor: colors.userPanel }}>
+        <Text style={text.label}>{shownName(presence.ring.from)} está chamando</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+          <Button onPress={() => {
+            const ring = presence.ring;
+            if (!ring) return;
+            const accept = async () => { workspace.gateway.dismissRing(); if (workspace.voice.getSnapshot().status !== "idle") await workspace.voice.leave(); const entering = workspace.enter(ring.channelId, `Chamada com ${shownName(ring.from)}`, true); navigationRef.navigate("Call"); await entering; };
+            if (call.status !== "idle") Alert.alert("Trocar de chamada?", "Você sairá da chamada atual para atender.", [{ text: "Cancelar", style: "cancel" }, { text: "Atender", onPress: () => { void accept(); } }]); else void accept();
+          }}>Atender</Button>
+          <Button secondary onPress={() => workspace.gateway.dismissRing(true)}>Recusar</Button>
+        </View>
+      </View>}
       <Root.Navigator screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: colors.panel }, headerTintColor: colors.paper,
         headerTitleStyle: { fontFamily: fonts.semibold, fontSize: 16 },

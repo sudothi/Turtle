@@ -18,6 +18,9 @@ export default function SettingsScreen() {
     <Button secondary onPress={() => navigation.navigate("EditProfile")}>Editar perfil e imagens</Button>
     {canInviteAccounts(user) && <Button secondary onPress={() => navigation.navigate("Admin")}>Administração e convites de conta</Button>}
     <Button secondary onPress={() => navigation.navigate("Blocks")}>Pessoas bloqueadas</Button>
+    <Text accessibilityRole="header" style={text.serverTitle}>Notificações e tela</Text>
+    <Text style={text.body}>Chamadas recebidas aparecem enquanto o app está aberto. Com o app fechado, novas mensagens e chamadas aparecem ao voltar ao Turtle.</Text>
+    <Text style={text.caption}>Você pode assistir às telas dos amigos. Compartilhar a tela deste iPhone ainda não está disponível nesta versão.</Text>
     <Text accessibilityRole="header" style={text.serverTitle}>Conexão</Text>
     <Text selectable style={text.body}>{workspace.api.origin}</Text>
     {call.status !== "idle" && <Button secondary onPress={() => navigation.navigate("Call")}>Abrir chamada e áudio</Button>}

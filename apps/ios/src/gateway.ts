@@ -2,7 +2,8 @@ import { serverEvent, type ClientEvent, type ServerEvent, type VoiceState, type 
 import type { Api } from "./api";
 
 export type VoiceReport = Extract<ClientEvent, { t: "voice" }>;
-export interface GatewayState { connected: boolean; states: VoiceState[]; online: string[]; busy: string[]; activities: Record<string, Activity>; revision: number }
+export type IncomingCall = Extract<ServerEvent, { t: "ring" }>;
+export interface GatewayState { connected: boolean; ring?: IncomingCall; states: VoiceState[]; online: string[]; busy: string[]; activities: Record<string, Activity>; revision: number }
 
 /** Best-effort gateway presence. Native media owns the call independently. */
 export class Gateway {
@@ -11,6 +12,7 @@ export class Gateway {
   private heartbeat?: ReturnType<typeof setInterval>;
   private stopped = true;
   private attempts = 0;
+  private ringExpiry?: ReturnType<typeof setTimeout>;
   private state: GatewayState = { connected: false, states: [], online: [], busy: [], activities: {}, revision: 0 };
   private listeners = new Set<() => void>();
   private events = new Set<(event: ServerEvent) => void>();
@@ -21,6 +23,12 @@ export class Gateway {
   subscribeEvents = (fn: (event: ServerEvent) => void) => { this.events.add(fn); return () => { this.events.delete(fn); }; };
   private set(patch: Partial<GatewayState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); }
   private send(value: ClientEvent) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(value)); }
+  dismissRing(decline = false) {
+    const ring = this.state.ring;
+    clearTimeout(this.ringExpiry);
+    this.set({ ring: undefined });
+    if (decline && ring) this.send({ t: "ringDecline", channelId: ring.channelId });
+  }
   update = (report: VoiceReport) => { this.report = report; this.send(report); };
 
   invalidate = () => { this.set({ revision: this.state.revision + 1 }); this.sync(); };
@@ -31,6 +39,7 @@ export class Gateway {
     // Replace a socket that can look OPEN after iOS suspended its transport.
     clearTimeout(this.retry);
     this.release();
+    this.dismissRing();
     this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
     this.connect();
   }
@@ -53,6 +62,12 @@ export class Gateway {
       try {
         const parsed = serverEvent.safeParse(JSON.parse(String(event.data)));
         if (!parsed.success) return;
+        if (parsed.data.t === "ring") {
+          this.dismissRing();
+          this.set({ ring: parsed.data });
+          this.ringExpiry = setTimeout(() => this.dismissRing(), 30_000);
+        }
+        if (parsed.data.t === "ringEnd" && parsed.data.channelId === this.state.ring?.channelId) this.dismissRing();
         if (parsed.data.t === "voiceStates") this.set({ ...this.state, states: parsed.data.states });
         if (parsed.data.t === "presence") this.set({ online: parsed.data.online, busy: parsed.data.busy, activities: parsed.data.activities });
         if (parsed.data.t === "sync") this.sync();
@@ -65,6 +80,7 @@ export class Gateway {
       if (this.socket !== socket) return;
       clearInterval(this.heartbeat);
       this.socket = undefined;
+      this.dismissRing();
       this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
       if (event.code === 4401) { this.stop(); this.expired(); return; }
       if (!this.stopped) {
@@ -90,6 +106,7 @@ export class Gateway {
     this.stopped = true;
     clearTimeout(this.retry);
     this.release();
+    this.dismissRing();
     this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
   }
 }

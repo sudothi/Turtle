@@ -40,9 +40,10 @@ export default function NavigationScreen() {
   const entry = directory.data.find(value => value.server.id === place);
   const serverActions = () => {
     if (!entry) return;
-    ActionSheetIOS.showActionSheetWithOptions({ title: entry.server.name, options: ["Ver membros", "Atualizar canais", "Cancelar"], cancelButtonIndex: 2 }, choice => {
+    ActionSheetIOS.showActionSheetWithOptions({ title: entry.server.name, options: ["Ver membros", "Opções do servidor", "Atualizar canais", "Cancelar"], cancelButtonIndex: 3 }, choice => {
       if (choice === 0) navigation.navigate("Members", { serverId: entry.server.id, title: entry.server.name });
-      if (choice === 1) void workspace.directory.refresh();
+      if (choice === 1) navigation.navigate("Server", { serverId: entry.server.id });
+      if (choice === 2) void workspace.directory.refresh();
     });
   };
   const openConversation = (channelId: string, title: string, serverId?: string) => {
@@ -58,6 +59,7 @@ export default function NavigationScreen() {
         {directory.data.map(({ server }) => <RailItem key={server.id} title={server.name} selected={server.id === entry?.server.id} onPress={() => setPlace(server.id)}>
           {server.icon ? <Image source={{ uri: workspace.api.fileUrl(server.icon) }} style={s.serverImage} /> : <Text allowFontScaling={false} style={[s.initials, server.id === entry?.server.id && { color: colors.rail }]}>{server.name.split(/\s+/).map(word => Array.from(word)[0]).slice(0, 3).join("").toUpperCase()}</Text>}
         </RailItem>)}
+        <RailItem title="Criar ou entrar em servidor" selected={false} onPress={() => navigation.navigate("Server")}><Icon name="plus" size={24} color={colors.paper} /></RailItem>
       </ScrollView>
     </SafeAreaView>
     <View style={s.sidebar}>

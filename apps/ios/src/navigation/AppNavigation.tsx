@@ -1,5 +1,6 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Text, View } from "react-native";
-import { DarkTheme, NavigationContainer } from "@react-navigation/native";
+import { DarkTheme, NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootRoutes } from "./types";
 import { colors, fonts, styles as text } from "../ui/theme";
@@ -14,6 +15,8 @@ import CallScreen from "../screens/CallScreen";
 import ConversationScreen from "../screens/ConversationScreen";
 import MembersScreen from "../screens/MembersScreen";
 
+import ServerScreen from "../screens/ServerScreen";
+import AdminScreen from "../screens/AdminScreen";
 import BlocksScreen from "../screens/BlocksScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import GroupScreen from "../screens/GroupScreen";
@@ -22,10 +25,18 @@ const Root = createNativeStackNavigator<RootRoutes>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: colors.background, card: colors.panel, primary: colors.paper, text: colors.paper, border: colors.rail } };
 
 export default function AppNavigation() {
+  const navigationRef = useNavigationContainerRef<RootRoutes>();
   const state = useWorkspaceState();
   const call = useCall();
   const { workspace } = useWorkspace();
-  return <NavigationContainer theme={theme}>
+  return <NavigationContainer ref={navigationRef} theme={theme} onReady={() => {
+    void AsyncStorage.getItem("turtle.pendingServerInvite").then(async raw => {
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { origin?: string; code?: string };
+      if (saved.origin === workspace.api.origin && typeof saved.code === "string") navigationRef.navigate("Server", { invite: saved.code });
+      await AsyncStorage.removeItem("turtle.pendingServerInvite");
+    }).catch(() => {});
+  }}>
     <View style={{ flex: 1 }}>
       <Root.Navigator screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: colors.panel }, headerTintColor: colors.paper,
@@ -40,6 +51,8 @@ export default function AppNavigation() {
           headerTitle: () => <View style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 }}><Icon name={route.params.serverId ? "hash" : "chat"} /><Text numberOfLines={1} style={[text.label, { flexShrink: 1 }]}>{route.params.title}</Text></View>,
           headerRight: () => route.params.serverId ? <IconButton name="users" label="Membros do servidor" onPress={() => navigation.navigate("Members", { serverId: route.params.serverId!, title: route.params.title })} /> : <IconButton name="users" label="Participantes e opções" onPress={() => navigation.navigate("Group", { channelId: route.params.channelId })} />,
         })} />
+        <Root.Screen name="Server" component={ServerScreen} options={{ title: "Servidor", presentation: "modal" }} />
+        <Root.Screen name="Admin" component={AdminScreen} options={{ title: "Administração", presentation: "modal" }} />
         <Root.Screen name="Blocks" component={BlocksScreen} options={{ title: "Pessoas bloqueadas", presentation: "modal" }} />
         <Root.Screen name="Profile" component={ProfileScreen} options={{ title: "Perfil", presentation: "modal" }} />
         <Root.Screen name="Group" component={GroupScreen} options={{ title: "Grupo e participantes", presentation: "modal" }} />

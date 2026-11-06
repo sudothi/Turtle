@@ -5,6 +5,8 @@ export type ConversationParams = { channelId: string; title: string; serverId?: 
 export type RootRoutes = {
   Main: undefined;
   Friends: undefined;
+  Server: { serverId?: string; invite?: string } | undefined;
+  Admin: undefined;
   Blocks: undefined;
   Profile: { userId: string };
   Group: { channelId?: string } | undefined;

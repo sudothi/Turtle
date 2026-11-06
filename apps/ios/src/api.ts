@@ -1,4 +1,4 @@
-import { createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
+import { accountSchema, createServerBody, createChannelBody, renameServerBody, invitePreviewSchema, createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -64,6 +64,19 @@ export class Api {
   register = (credentials: Credentials) => this.request("/auth/register", authResponse, registerBody.parse(credentials));
   me = () => this.request("/me", userSchema);
   servers = () => this.request("/servers", z.array(serverSchema));
+  createServer = (name: string) => this.request("/servers", serverSchema, createServerBody.parse({ name }));
+  renameServer = (id: string, name: string) => this.request(`/servers/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), renameServerBody.parse({ name }), "PATCH");
+  deleteServer = (id: string, name: string) => this.request(`/servers/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), { name }, "DELETE");
+  transferServer = (id: string, userId: string) => this.request(`/servers/${encodeURIComponent(id)}/transfer`, z.object({ ok: z.literal(true) }), { userId });
+  createChannel = (id: string, name: string, kind: "text" | "voice") => this.request(`/servers/${encodeURIComponent(id)}/channels`, channelSchema, createChannelBody.parse({ name, kind }));
+  setRole = (id: string, userId: string, role: "admin" | "member") => this.request(`/servers/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, z.object({ ok: z.literal(true) }), { role }, "PATCH");
+  removeMember = (id: string, userId: string) => this.request(`/servers/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
+  createInvite = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/invites`, z.object({ code: z.string(), expiresAt: z.string().nullable() }), { days: 7 });
+  invitePreview = (code: string) => this.request(`/invites/${encodeURIComponent(code)}`, invitePreviewSchema);
+  joinInvite = (code: string) => this.request(`/invites/${encodeURIComponent(code)}/join`, serverSchema, {});
+  accounts = () => this.request("/admin/users", z.array(accountSchema));
+  setAccount = (id: string, body: { canInvite?: boolean; disabled?: boolean }) => this.request(`/admin/users/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), body, "PATCH");
+  createAccountInvite = () => this.request("/invites", z.object({ code: z.string() }), {});
   channels = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/channels`, z.array(channelSchema));
   members = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/members`, z.array(memberSchema));
   friends = () => this.request("/friends", z.array(friendSchema));

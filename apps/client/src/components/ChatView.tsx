@@ -85,6 +85,40 @@ function SearchPanel({ channelId, serverId, names, onClose }: { channelId: strin
   );
 }
 
+type Preview = Awaited<ReturnType<typeof api.linkPreview>> | null;
+const previewCache = new Map<string, Promise<Preview>>();
+/** Primeiro link http(s) da mensagem (fora de bloco de código). */
+function firstLink(content: string): string | undefined {
+  const find = (nodes: RichNode[]): string | undefined => {
+    for (const n of nodes) {
+      if (n.type === "link") return n.href;
+      if (n.type === "bold" || n.type === "italic") { const r = find(n.children); if (r) return r; }
+    }
+  };
+  return find(parseRichText(content));
+}
+/** Cartão com título e descrição do link; o servidor busca a página, então o site de fora não vê quem leu. */
+function LinkCard({ content }: { content: string }) {
+  const url = firstLink(content);
+  const [p, setP] = useState<Preview>(null);
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    let job = previewCache.get(url);
+    if (!job) { job = api.linkPreview(url).catch(() => null); previewCache.set(url, job); }
+    void job.then((r) => alive && setP(r));
+    return () => { alive = false; };
+  }, [url]);
+  if (!p) return null;
+  return (
+    <a className="link-card lino" href={p.url} target="_blank" rel="noopener noreferrer">
+      <span className="link-card-host t-muted">{p.host}</span>
+      {p.title && <b className="link-card-title">{p.title}</b>}
+      {p.description && <span className="link-card-desc">{p.description}</span>}
+    </a>
+  );
+}
+
 /** Mensagens fixadas do canal (a lista é recarregada a cada fixar/desafixar). */
 function PinsPanel({ channelId, names, tick, onClose }: { channelId: string; names: Map<string, string>; tick: number; onClose: () => void }) {
   const [list, setList] = useState<Message[] | null>(null);
@@ -730,6 +764,7 @@ export function ChatView({
     ) : (
       <>
         <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} pinned={m.pinned} />
+        {m.content && <LinkCard content={m.content} />}
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
         {m.reactions.length > 0 && (
           <div className="reactions">

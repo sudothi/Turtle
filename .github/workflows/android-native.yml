@@ -13,7 +13,7 @@ jobs:
         working-directory: apps/android
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: 21 }
       - name: Chave de assinatura (opcional)
         env:

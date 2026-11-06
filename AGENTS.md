@@ -30,7 +30,7 @@ Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeir
 ## Produção
 - VPS Hostinger KVM 2 (Ubuntu 24.04), app em https://app.ogturtle.xyz, LiveKit em lk.ogturtle.xyz. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
 - Deploy: workflow "Deploy (VPS)" no GitHub Actions, **só manual** (`workflow_dispatch`; sha vazio = main, sha antigo = rollback), usa `infra/deploy.sh` com backup e rollback automático. Só rode com ok do thiago.
-- Atenção: o compose da VPS ainda difere do `infra/` do repo (serviço `api` na VPS, `app` no repo; issue #101).
+- Compose e arquivos da VPS (`~/turtle/`) espelham `infra/` do repositório (serviço `api`, veja `docs/planos/infra-vps.md`).
 - Backup do Postgres + uploads na VPS todo dia 07:00 UTC; cópia fora da VPS (R2) ainda pendente (#14). Uploads ficam no volume Docker `uploads`.
 
 ## Decisões e pegadinhas que não aparecem no código

@@ -71,10 +71,10 @@ flock -w 600 9 || die "outro deploy está rodando há mais de 10 minutos"
 cd "$BASE"
 compose=(docker compose -f "$COMPOSE_FILE")
 
-# A tag atual do api, para o rollback.
-mapfile -t tags < <(grep -nE "^[[:space:]]*image:[[:space:]]*${IMAGE}:[0-9a-f]+[[:space:]]*$" "$COMPOSE_FILE")
-[[ ${#tags[@]} -eq 1 ]] || die "esperava uma única linha 'image: ${IMAGE}:<sha>' em $COMPOSE_FILE, achei ${#tags[@]}"
-prev="$(sed -E "s/.*${IMAGE}:([0-9a-f]+).*/\1/" <<<"${tags[0]}")"
+# A tag atual do api, para o rollback (aceita hex ou 'latest' no primeiro deploy de uma VPS nova).
+mapfile -t tags < <(grep -nE "^[[:space:]]*image:[[:space:]]*${IMAGE}:([0-9a-f]+|latest)[[:space:]]*$" "$COMPOSE_FILE")
+[[ ${#tags[@]} -eq 1 ]] || die "esperava uma única linha 'image: ${IMAGE}:<tag>' em $COMPOSE_FILE, achei ${#tags[@]}"
+prev="$(sed -E "s/.*${IMAGE}:([0-9a-f]+|latest).*/\1/" <<<"${tags[0]}")"
 log "versão atual: $prev, nova: $short"
 
 # Recebe o código mesmo se a imagem já existir, para não deixar o ssh do outro lado travado.
@@ -100,7 +100,7 @@ else
   mv "$tmp" "$BASE/src" && tmp="$(mktemp -d)"
 fi
 
-set_tag() { sed -i -E "s/^([[:space:]]*image:[[:space:]]*${IMAGE}:)[0-9a-f]+([[:space:]]*)$/\1$1\2/" "$COMPOSE_FILE"; }
+set_tag() { sed -i -E "s/^([[:space:]]*image:[[:space:]]*${IMAGE}:)([0-9a-f]+|latest)([[:space:]]*)$/\1$1\3/" "$COMPOSE_FILE"; }
 
 wait_healthy() {
   local id status waited=0

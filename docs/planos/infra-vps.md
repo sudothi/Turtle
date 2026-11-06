@@ -1,56 +1,106 @@
-# Infra do VPS: backup de uploads (#29) e troca das chaves do LiveKit (#14)
+# Infra da VPS: compose único (#101), backup (#29), chaves do LiveKit (#14) e guia do zero
 
-Plano, nada disso foi executado. Mudanças em produção só depois do "ok" escrito do dono.
+Mudanças em produção só depois do "ok" escrito do dono.
 
-## O que o repositório já tem
+## Arquivos da pasta `~/turtle` na VPS (espelhados em `infra/`)
 
-- `infra/docker-compose.prod.yml` já define `UPLOAD_DIR=/data/uploads` e o volume `uploads` no serviço `app`.
-- O script de backup diário (04:00 BRT, 14 dias, só dump do Postgres) existe apenas no VPS. Este PR adiciona `infra/backup.sh` com dump + uploads; falta comparar com o do VPS.
+| Arquivo no repositório | Caminho na VPS | Função |
+|---|---|---|
+| `infra/docker-compose.prod.yml` | `~/turtle/docker-compose.yml` | Serviços `caddy`, `livekit`, `postgres` e `api` (com rotação de logs e healthchecks) |
+| `infra/Caddyfile` | `~/turtle/Caddyfile` | Proxy HTTPS (`{$DOMAIN_APP}` → `api:3000`, `{$DOMAIN_LK}` → `host.docker.internal:7880`), `/desktop/*` e cabeçalhos de segurança |
+| `infra/livekit.prod.yaml` | `~/turtle/livekit.yaml` | Configuração do LiveKit (`network_mode: host`, portas 7880/7881/7882 e TURN UDP 3478) |
+| `infra/.env.prod.example` | `~/turtle/.env` (`chmod 600`) | Domínios e segredos de produção (nunca versionado) |
+| `infra/backup.sh` | `~/turtle/backup.sh` (`chmod +x`) | Dump diário do Postgres (`kyo`/`turtle`) + tarball do volume `uploads`, retenção de 14 dias |
+| `infra/deploy.sh` | `~/turtle/deploy.sh` (`chmod +x`) | Recebe tarball via SSH, roda backup, faz build de `turtle-app:<sha>`, atualiza `api` e faz rollback automático se `/health` falhar |
 
-## #29 — backup dos uploads e alinhar o compose
+---
 
-Passo 0, somente leitura no VPS (precisa de aprovação para acessar):
+## Refazer a VPS do zero (#101)
 
-1. `docker ps`, `docker compose config` e `crontab -l` do usuário `kyo`, para ver o compose e o script de backup reais.
-2. `diff` entre o compose do VPS e `infra/docker-compose.prod.yml`.
+Guia curto para subir tudo do zero numa máquina Ubuntu 24.04 limpa com usuário `kyo` (sudo + SSH por chave).
 
-Mudanças propostas (cada uma com cópia do arquivo antes):
+### 1. Pacotes e Docker
+```bash
+sudo apt update && sudo apt install -y ca-certificates curl ufw
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker kyo
+# reconecte no SSH para ativar o grupo docker
+```
 
-1. Se o compose do VPS não tiver `UPLOAD_DIR` e o volume `uploads`, copiar o do repositório e fazer `docker compose up -d --build app` (reinício curto do app; o Postgres e o LiveKit não reiniciam).
-2. Trocar o script de backup do cron por `infra/backup.sh` (ou acrescentar a linha do `tar` ao atual). Rodar uma vez à mão e conferir o tamanho dos dois arquivos.
-3. Teste de restauração: extrair o `uploads-*.tar.gz` numa pasta temporária e listar.
+### 2. Firewall (UFW)
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'SSH'
+sudo ufw allow 80/tcp comment 'HTTP (Caddy ACME)'
+sudo ufw allow 443/tcp comment 'HTTPS (Caddy)'
+sudo ufw allow 7881/tcp comment 'LiveKit RTC TCP'
+sudo ufw allow 7882/udp comment 'LiveKit RTC UDP'
+sudo ufw allow 3478/udp comment 'LiveKit TURN UDP'
+sudo ufw allow 5349/tcp comment 'LiveKit TURN TLS'
+# Porta 7880 do LiveKit (network_mode: host) liberada apenas para a rede bridge do Docker (Caddy -> host.docker.internal:7880)
+sudo ufw allow from 172.16.0.0/12 to any port 7880 proto tcp comment 'LiveKit HTTP so p/ Caddy (Docker)'
+sudo ufw enable
+```
 
-Reversão: restaurar a cópia do compose e do script de backup e subir de novo.
+### 3. Estrutura `~/turtle` e `.env`
+Copie os arquivos de `infra/` do repositório para `~/turtle`:
+```bash
+mkdir -p ~/turtle/backups ~/turtle/desktop ~/turtle/src
+cp infra/docker-compose.prod.yml ~/turtle/docker-compose.yml
+cp infra/Caddyfile               ~/turtle/Caddyfile
+cp infra/livekit.prod.yaml       ~/turtle/livekit.yaml
+cp infra/backup.sh               ~/turtle/backup.sh
+cp infra/deploy.sh               ~/turtle/deploy.sh
+cp infra/.env.prod.example       ~/turtle/.env
+chmod 600 ~/turtle/.env
+chmod +x ~/turtle/backup.sh ~/turtle/deploy.sh
+```
+Preencha `~/turtle/.env` com valores reais (`DOMAIN_APP`, `DOMAIN_LK`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `POSTGRES_PASSWORD`, `BOOTSTRAP_INVITE`).
 
-## #14 — trocar as chaves do LiveKit (plano)
+### 4. Primeiro build e subida dos containers
+No primeiro boot (ou via workflow `Deploy (VPS)` depois de configurar a chave SSH do passo 6):
+```bash
+# Se estiver subindo manualmente pela primeira vez a partir do código em ~/turtle/src:
+docker build -t turtle-app:latest ~/turtle/src
+cd ~/turtle && docker compose up -d
+docker compose ps
+curl -fsSI https://app.ogturtle.xyz/health
+```
 
-O segredo vazou, então a chave nova precisa ter outro nome e outro segredo (32+ caracteres).
+### 5. Cron de backup diário (07:00 UTC / 04:00 BRT)
+No `crontab -e` do usuário `kyo`:
+```cron
+0 7 * * * /home/kyo/turtle/backup.sh >> /home/kyo/turtle/backups/backup.log 2>&1
+```
+Para restaurar um backup num banco/volume limpos:
+```bash
+gunzip -c ~/turtle/backups/pg-AAAA-MM-DD_HHMMSS.sql.gz | docker compose -f ~/turtle/docker-compose.yml exec -T postgres psql -U kyo -d turtle
+docker compose -f ~/turtle/docker-compose.yml exec -T api tar -xzf - -C /data/uploads < ~/turtle/backups/uploads-AAAA-MM-DD_HHMMSS.tar.gz
+```
+
+### 6. Deploy pelo GitHub Actions (só manual)
+Fluxo: **Actions > Deploy (VPS) > Run workflow**. O job confere que o CI do commit está verde e envia o código por SSH para `~/turtle/deploy.sh`. Na VPS o script faz backup, build de `turtle-app:<sha>`, troca a tag do serviço `api`, sobe só o `api`, espera o healthcheck e volta para a tag anterior se ele falhar. Rollback: o mesmo botão, informando o sha antigo.
+
+1. Gerar uma chave dedicada (`ssh-keygen -t ed25519 -N '' -f turtle-deploy`) e acrescentar a pública ao `~/.ssh/authorized_keys` do `kyo` com comando forçado:
+   ```text
+   command="/home/kyo/turtle/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... turtle-deploy
+   ```
+2. No GitHub (`Settings > Environments > production`), configurar os secrets `DEPLOY_SSH_KEY` (chave privada), `DEPLOY_HOST` (IP da VPS) e `DEPLOY_KNOWN_HOSTS` (saída de `ssh-keyscan -t ed25519 <ip>`).
+
+---
+
+## #14 — trocar as chaves do LiveKit (pendente)
+
+O segredo antigo vazou no histórico inicial, então a chave nova precisa ter outro nome e outro segredo (32+ caracteres).
 
 1. Gerar localmente `LIVEKIT_API_KEY` novo e `LIVEKIT_API_SECRET` novo (`openssl rand -hex 24` para o segredo). Não colar em chat nem em issue.
-2. No VPS, copiar `infra/.env` para `.env.bak`; editar `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` e `LIVEKIT_KEYS` (formato `chave: segredo`) com os mesmos valores.
-3. `docker compose -f docker-compose.prod.yml up -d app livekit`. As chamadas em andamento caem e o app reconecta; fazer num horário calmo.
-4. Atualizar o `.env` local do PC (desenvolvimento) com chaves de desenvolvimento próprias, diferentes das de produção.
-5. Conferir: `GET https://app.ogturtle.xyz/health`, entrar numa chamada de voz e numa transmissão de tela; olhar `docker compose logs livekit` sem erros de autenticação.
-6. Reversão: restaurar `.env.bak` e subir de novo (as chaves antigas continuam comprometidas, então só usar para diagnosticar).
-7. Depois: apagar `.env.bak` e fechar o ssh-agent temporário do PC (item da #14).
+2. Na VPS, copiar `~/turtle/.env` para `~/turtle/.env.bak`; editar `LIVEKIT_API_KEY` e `LIVEKIT_API_SECRET` (`LIVEKIT_KEYS` no container `livekit` é montado automaticamente pelo `docker-compose.yml` a partir dessas duas variáveis).
+3. `cd ~/turtle && docker compose up -d api livekit`. As chamadas em andamento caem e o app reconecta; fazer num horário calmo.
+4. Conferir: `GET https://app.ogturtle.xyz/health`, entrar numa chamada de voz e numa transmissão de tela; olhar `docker compose logs livekit` sem erros de autenticação.
+5. Reversão: restaurar `.env.bak` e subir de novo (só para diagnosticar). Depois, apagar `.env.bak`.
 
-## #14 — TURN TLS e R2 (depois)
+## #14 — TURN TLS e R2 (pendente)
 
-- TURN TLS na 5349 precisa de certificado para `lk.ogturtle.xyz` (o Caddy já emite; falta o LiveKit usá-lo ou um domínio `turn.` próprio) e de abrir a porta no firewall.
-- Envio ao R2 precisa de credenciais criadas pelo dono (token só com permissão no bucket de backup).
-
-## Deploy da VPS pelo GitHub (só manual)
-
-Código: `.github/workflows/deploy.yml` (GitHub Actions) e `infra/deploy.sh` (roda na VPS). Plano completo: [Deploy automático do Turtle na VPS](https://claude.ai/artifact/KRJL3FJxYcJiC6k5qNVHpy).
-
-Fluxo: Actions > Deploy (VPS) > Run workflow. O job confere que o CI do commit está verde e envia o código por SSH. Não há gatilho automático a cada merge, porque o GitHub Free não deixa exigir aprovação (Required reviewers) em Environments de repositório privado; sem essa trava, qualquer merge iria direto para produção. Na VPS o script faz backup, build de `turtle-app:<sha>`, troca a tag do serviço `api`, sobe só o `api`, espera o healthcheck e volta para a tag anterior se ele falhar. Rollback: o mesmo botão, com o sha antigo.
-
-Passos de ativação:
-
-1. Na VPS, copiar `infra/deploy.sh` para `~/turtle/deploy.sh` (`chmod +x`).
-2. Gerar uma chave só para isso (`ssh-keygen -t ed25519 -N '' -f turtle-deploy`) e acrescentar a pública ao `~/.ssh/authorized_keys` do `kyo` com o comando forçado:
-   `command="/home/kyo/turtle/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... turtle-deploy`
-3. No GitHub, Settings > Environments > New environment `production` (com um plano que tenha Required reviewers, marcar o dono e voltar o gatilho `workflow_run`) e criar os secrets `DEPLOY_SSH_KEY` (chave privada), `DEPLOY_HOST` (IP) e `DEPLOY_KNOWN_HOSTS` (saída de `ssh-keyscan -t ed25519 <ip>`).
-4. Testar com Run workflow na main atual, aprovando quando o GitHub pedir, e olhar o resultado e o `/health`.
-
-Revogar: apagar a linha da chave no `authorized_keys`.
+- TURN TLS na 5349 precisa de certificado para `lk.ogturtle.xyz` e configuração `tls_port: 5349` no `livekit.yaml` (a porta `5349/tcp` já está aberta no UFW).
+- Envio de cópia dos backups ao R2 precisa de credenciais criadas pelo dono (token restrito ao bucket de backup).

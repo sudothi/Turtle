@@ -1,5 +1,5 @@
 # HTTPS automático (Let's Encrypt). O WebSocket do chat (/ws) passa pelo mesmo proxy.
-app.{$DOMAIN} {
+{$DOMAIN_APP} {
 	encode zstd gzip
 
 	# Cabeçalhos de segurança (#93). A CSP começa em Report-Only: o navegador só avisa
@@ -11,11 +11,11 @@ app.{$DOMAIN} {
 		Referrer-Policy "strict-origin-when-cross-origin"
 		X-Frame-Options "DENY"
 		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()"
-		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' wss://lk.{$DOMAIN} https://lk.{$DOMAIN}; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' wss://{$DOMAIN_LK} https://{$DOMAIN_LK}; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 
-	# Instalador e auto-atualização do app desktop (arquivos em infra/desktop/ no VPS).
+	# Instalador e auto-atualização do app desktop (arquivos em ~/turtle/desktop/ na VPS).
 	handle_path /desktop/* {
 		root * /srv/desktop
 		@manifesto path *.yml
@@ -24,11 +24,11 @@ app.{$DOMAIN} {
 	}
 
 	handle {
-		reverse_proxy app:3000
+		reverse_proxy api:3000
 	}
 }
 
-# Sinalização do LiveKit (as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).
-lk.{$DOMAIN} {
-	reverse_proxy livekit:7880
+# Sinalização do LiveKit (roda em network_mode: host na VPS; as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).
+{$DOMAIN_LK} {
+	reverse_proxy host.docker.internal:7880
 }

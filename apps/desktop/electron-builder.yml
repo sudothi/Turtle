@@ -20,8 +20,9 @@ win:
       arch: [x64]
   icon: build/icon.ico
   executableName: Turtle
-  # Sem certificado de assinatura por enquanto: o Windows mostra o aviso do SmartScreen
-  # ("Mais informações > Executar assim mesmo") na primeira instalação.
+  # Sem assinatura o Windows mostra o aviso do SmartScreen ("Mais informações > Executar assim mesmo").
+  # A assinatura (Azure Trusted Signing) entra por flags no workflow "Desktop (Windows)" quando os
+  # segredos existem; com ela o auto-update passa a conferir o editor (publisherName).
   signAndEditExecutable: true
 
 nsis:

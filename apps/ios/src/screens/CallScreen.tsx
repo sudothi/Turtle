@@ -26,6 +26,7 @@ export default function CallScreen() {
       <Notice>{error || call.error}</Notice>
       <View style={s.tiles}>{call.members.map(member => <View key={member.id} accessibilityLabel={`${member.name}${member.local ? ", você" : ""}. ${member.speaking ? "Falando" : member.muted ? "Microfone fechado" : "Na conversa"}`} style={[s.tile, { width: single ? "100%" : "48%" }, member.speaking && { borderColor: colors.paper }]}>
         <Avatar name={member.name} size={single ? 80 : 64} />
+        {!!member.quality && <Text style={[text.caption, { position: "absolute", top: 8, left: 8 }]}>{member.quality}</Text>}
         <View style={s.memberName}>{member.muted && <Icon name="mic-off" size={16} color={colors.paper} />}<Text numberOfLines={1} style={[text.label, { fontSize: 14, flexShrink: 1 }]}>{member.name}{member.local ? " (você)" : ""}</Text></View>
       </View>)}</View>
     </ScrollView>

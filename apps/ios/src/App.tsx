@@ -16,7 +16,7 @@ export default function App() {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [localError, setLocalError] = useState<string>();
   useEffect(() => { void session.restore(); }, []);
-  if (!fontsReady && !fontError) return <View style={s.center}><ActivityIndicator color={colors.paper} accessibilityLabel="Abrindo Turtle" /></View>;
+  if (!fontsReady && !fontError) return <View style={[s.center, { backgroundColor: colors.background }]}><StatusBar style="light" /><ActivityIndicator color={colors.paper} accessibilityLabel="Abrindo Turtle" /></View>;
   return <SafeAreaProvider>
     <View style={s.safe}>
       <StatusBar style="light" />

@@ -1000,3 +1000,34 @@ describe("quem está de fato na chamada", () => {
     watcher.ws.close();
   });
 });
+
+describe("logs e saúde", () => {
+  it("/health responde 503 quando o banco não responde", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db });
+    expect((await a.inject({ url: "/health" })).statusCode).toBe(200);
+    await h.close();
+    const r = await a.inject({ url: "/health" });
+    expect(r.statusCode).toBe(503);
+    expect(r.json()).toMatchObject({ ok: false });
+    await a.close();
+  });
+
+  it("os logs não guardam o token (nem no cabeçalho nem na URL do WebSocket)", async () => {
+    const { serverLogger, hideToken } = await import("./app.js");
+    expect(hideToken("/ws?token=abc.def&x=1")).toBe("/ws?token=***&x=1");
+    const lines: string[] = [];
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-log", logger: serverLogger("info", { write: (l) => void lines.push(l) }) });
+    const reg = await a.inject({ method: "POST", url: "/auth/register", payload: { inviteCode: "boot-log", username: "logado", password: "12345678" } });
+    const token = reg.json().token as string;
+    await a.inject({ url: "/me", headers: { authorization: `Bearer ${token}` } });
+    await a.inject({ url: `/ws?token=${token}` });
+    await a.close();
+    await h.close();
+    const all = lines.join("");
+    expect(all).toContain('"url":"/me"');
+    expect(all).toContain("token=***");
+    expect(all).not.toContain(token);
+  });
+});

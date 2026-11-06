@@ -2,9 +2,16 @@
 # Uso: copie .env.prod.example para .env, preencha e rode `docker compose -f docker-compose.prod.yml up -d --build`
 # (a partir da raiz do repositório). O Caddy publica 80/443; o Postgres não é exposto.
 name: turtle
+
+# Logs do Docker com limite (o padrão cresce sem fim e um dia enche o disco): até 5 arquivos de 10 MB por serviço.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
 services:
   postgres:
     image: postgres:17
+    logging: *logging
     restart: unless-stopped
     environment:
       POSTGRES_USER: turtle
@@ -18,6 +25,7 @@ services:
 
   app:
     build: { context: .., dockerfile: Dockerfile }
+    logging: *logging
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -30,10 +38,13 @@ services:
       BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE:?defina BOOTSTRAP_INVITE}
       # Fotos de perfil e banners (volume abaixo; entra no backup junto com o Postgres).
       UPLOAD_DIR: /data/uploads
+      # Logs do app em JSON: info (padrão), warn, error, debug ou silent.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes: ["uploads:/data/uploads"]
 
   livekit:
     image: livekit/livekit-server:v1.13.11
+    logging: *logging
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     environment:
@@ -46,6 +57,7 @@ services:
 
   caddy:
     image: caddy:2
+    logging: *logging
     restart: unless-stopped
     ports: ["80:80", "443:443"]
     environment:

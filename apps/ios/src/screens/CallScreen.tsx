@@ -26,14 +26,14 @@ export default function CallScreen() {
   useEffect(() => { if (call.status === "idle" && navigation.canGoBack()) navigation.goBack(); }, [call.status, navigation]);
   return <Page modal>
     <ScrollView contentContainerStyle={s.content}>
-      <View style={s.heading}><Text accessibilityRole="header" style={text.title}>{call.channelName}</Text><Text style={text.caption}>{callStatus(call.status)}</Text></View>
+      <View style={s.heading}><Text accessibilityRole="header" accessibilityLabel={call.channelName} maxFontSizeMultiplier={2} numberOfLines={2} style={text.title}>{call.channelName}</Text><Text style={text.caption}>{callStatus(call.status)}</Text></View>
       <Notice>{error || call.error}</Notice>
       {!!focus && <Button secondary onPress={() => setFocus(undefined)}>Voltar à grade</Button>}
       <View style={s.tiles}>{call.members.filter(member => !focus || member.id === focus).map(member => <View key={member.id} accessibilityLabel={`${member.name}${member.local ? ", você" : ""}. ${member.speaking ? "Falando" : member.muted ? "Microfone fechado" : "Na conversa"}`} style={[s.tile, { width: single ? "100%" : "48%" }, member.speaking && { borderColor: colors.paper }]}>
         {member.video ? <VideoTrack trackRef={member.video} mirror={member.local && call.facing === "user"} objectFit="contain" style={{ width: "100%", height: "100%", borderRadius: 8 }} /> : <Avatar name={member.name} size={single ? 80 : 64} />}
         <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar ${member.name}`} onPress={() => setFocus(member.id)} style={{ position: "absolute", right: 4, top: 4, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.panel, borderRadius: 4 }}><Icon name="maximize" color={colors.paper} /></Pressable>
         {!!member.quality && <Text style={[text.caption, { position: "absolute", top: 8, left: 8 }]}>{member.quality}</Text>}
-        <View style={s.memberName}>{member.muted && <Icon name="mic-off" size={16} color={colors.paper} />}<Text numberOfLines={1} style={[text.label, { fontSize: 14, flexShrink: 1 }]}>{member.name}{member.local ? " (você)" : ""}{member.speaking ? " · Falando" : ""}</Text></View>
+        <View style={s.memberName}>{member.muted && <Icon name="mic-off" size={16} color={colors.paper} />}<Text maxFontSizeMultiplier={2} numberOfLines={2} style={[text.label, { fontSize: 14, flexShrink: 1 }]}>{member.name}{member.local ? " (você)" : ""}{member.speaking ? " · Falando" : ""}</Text></View>
       </View>)}</View>
       {call.screens.filter(screen => !focus || screen.id === focus).map(screen => <View key={screen.id} style={{ gap: 8 }}>
         <Text style={text.label}>Tela de {screen.name}</Text>

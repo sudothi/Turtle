@@ -432,7 +432,12 @@ export async function buildApp({
       return reply.code(409).send({ error: "nome já em uso" });
     }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
-    await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
+    // Marca o convite numa única operação: se dois cadastros usarem o mesmo código ao mesmo tempo, só um vence.
+    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code });
+    if (!claimed.length) {
+      await db.delete(users).where(eq(users.id, id));
+      return reply.code(403).send({ error: "convite inválido" });
+    }
     return { token: await startSession(id), user };
   });
 

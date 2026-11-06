@@ -1,15 +1,16 @@
 import type { ExpoConfig } from "expo/config";
+import { version } from "./package.json";
 
 const config: ExpoConfig = {
   name: "Turtle",
   slug: "turtle-ios",
-  version: "0.1.0",
+  version,
   platforms: ["ios"],
-  orientation: "portrait",
+  orientation: "default",
   userInterfaceStyle: "dark",
   ios: {
     bundleIdentifier: "xyz.ogturtle.mobile",
-    buildNumber: "1",
+    buildNumber: "2",
     supportsTablet: false,
     infoPlist: {
       UIBackgroundModes: ["audio"],

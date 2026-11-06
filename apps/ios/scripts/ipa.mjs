@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, cpSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, cpSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = join(root, "release");
+const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const run = (command, args, cwd = root) => {
   const result = spawnSync(command, args, { cwd, stdio: "inherit", env: { ...process.env, CI: "1" } });
   if (result.error) throw result.error;
@@ -28,7 +29,7 @@ const staging = mkdtempSync(join(output, "package-"));
 const payload = join(staging, "Payload");
 mkdirSync(payload);
 cpSync(app, join(payload, "Turtle.app"), { recursive: true });
-const ipa = join(output, "Turtle-0.1.0.ipa");
+const ipa = join(output, `Turtle-${version}.ipa`);
 run("ditto", ["-c", "-k", "--keepParent", "Payload", ipa], staging);
 console.log(`\nIPA para importação/reassinatura na AltStore Classic: ${ipa}`);
 console.log("Validar instalação, renovação e entitlements no iPhone. O archive não possui assinatura de distribuição.");

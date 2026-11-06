@@ -1,6 +1,17 @@
-# Turtle para iPhone — prova inicial
+# Turtle para iPhone
 
-React Native/Expo com build nativo próprio, LiveKit e Keychain. Alvo: iOS 26.0 ou posterior. Implementa login/cadastro por convite de conta, restauração de sessão, canais de voz dos servidores existentes, chamada com microfone ou só escuta, participantes, mudo, ensurdecer, saída de áudio do sistema e logout. O convite de cadastro não adiciona a conta a um servidor: entre no servidor pelo web/desktop nesta versão.
+React Native/Expo com build nativo próprio, LiveKit e Keychain. Alvo: iOS 26.0 ou posterior. A versão 0.2 traz navegação por telas, além de login/cadastro por convite de conta, sessão protegida e chamadas de voz. O convite de cadastro não adiciona a conta a um servidor: entre no servidor pelo web/desktop nesta versão.
+
+## Navegação e escopo
+
+- **Barra de servidores:** tartaruga para mensagens diretas e ícones dos servidores, como na web/desktop e no Android. Selecionar um servidor atualiza a lista lateral de canais de texto/voz. O cabeçalho do servidor abre membros e atualização dos canais.
+- **Mensagens diretas:** entrada para Amigos e lista de conversas existentes. Amigos tem filtros Online/Todos/Pendentes e busca por nome/usuário. Abrir um canal ou conversa mostra o histórico; voltar pelo botão ou gesto retorna à mesma seleção lateral.
+- **Barra de perfil:** flutua na base sobre as duas colunas, com avatar, nome e presença/estado de voz. Tocar no perfil abre um painel inferior com configurações e controles da chamada ativa. O atalho à direita abre configurações ou a chamada. Configurações inclui conta, origem do servidor, áudio e saída da conta com confirmação.
+- **Chamada:** modal com grade de participantes e controles de microfone, escuta, saída de áudio e desconexão. Fechar o modal mantém a chamada; a barra de voz no rodapé permite voltar a ela nas outras telas, inclusive membros e configurações.
+
+A interface usa as mesmas cores tinta/papel, famílias Figtree/Bricolage Grotesque e desenhos vetoriais da web. Listas e categorias seguem a organização existente, com alvos de toque de pelo menos 44 pt no iPhone.
+
+O histórico é uma consulta das mensagens recentes, com atualização ao retornar à tela, gesto de atualizar e eventos relevantes do gateway. Envio de mensagens, paginação, edição/exclusão, gerenciamento de amigos/grupos/servidores e edição de perfil pertencem às próximas entregas. A chamada é mantida pelo workspace autenticado, acima das rotas; trocar telas não recria Voice/Gateway.
 
 ## Testar pelo Xcode
 
@@ -16,6 +27,8 @@ Conecte e desbloqueie o iPhone, aceite confiar no Mac e selecione o dispositivo 
 
 O build de desenvolvimento usa Metro no Mac. Para reiniciar Metro, rode `pnpm ios`; computador e telefone precisam se alcançar pela rede. Expo Go não suporta o módulo nativo LiveKit. Para testar sem Metro e com o app instalado pela AltStore, use o IPA Release abaixo.
 
+Ao atualizar da prova 0.1 ou do primeiro layout 0.2, execute `pnpm ios:device` novamente: a navegação e os ícones SVG acrescentam código nativo. Só reiniciar o Metro não instala esses módulos no app antigo. Ao usar `pnpm ios`, o simulador selecionado deve já conter o build de desenvolvimento.
+
 O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configurar servidor** permite outra origem HTTPS. Para definir outro padrão no build, copie `.env.example` para `.env.local` nesta pasta e altere `EXPO_PUBLIC_API_ORIGIN`. As variáveis `EXPO_PUBLIC_*` entram no app; use apenas endereços públicos. O LiveKit vem da resposta autenticada do backend. Não há credenciais Apple nem chaves secretas LiveKit no app.
 
 ## Testar pela AltStore Classic
@@ -24,7 +37,7 @@ O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configura
 pnpm ios:ipa
 ```
 
-O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.1.0.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. Build number e bundle ID ficam em `app.config.ts`; use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
+O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.2.0.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; build number e bundle ID ficam em `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
 
 Instale AltServer no Mac/Windows e AltStore Classic no iPhone seguindo os guias oficiais abaixo. Cada participante usa sua própria conta Apple gratuita. Transfira o IPA ao iPhone, abra AltStore > My Apps > `+` e selecione-o. Autorize confiança/Modo Desenvolvedor quando solicitado. O fluxo de importação, reassinatura e renovação ainda exige validação no aparelho do grupo.
 
@@ -39,8 +52,17 @@ Contas gratuitas exigem renovação em 7 dias e têm limites de apps/App IDs; co
 5. Faça Wi-Fi → celular, modo avião → reconexão e interrupção por ligação/Siri. Confira áudio e presença dos dois lados ao retornar. Saia da chamada e da conta e verifique que o microfone parou.
 6. Renove e atualize pela mesma identidade de assinatura. Registre modelo, iOS, versão/build, método de instalação, tempo de chamada, comportamento, bateria e temperatura, sem incluir tokens, senhas ou URLs autenticadas do gateway.
 
+Para a navegação da #48, validar também:
+
+1. Compare com web/desktop: barra vertical de servidores, mensagens diretas, categorias de canais, seleção, tipografia e painel do usuário. Alterne servidores, abra canais/conversas e volte por botão/gesto, mantendo a seleção lateral.
+2. Durante uma chamada, abrir outra conversa e outro servidor, membros e configurações; retornar pela barra. Confirmar que áudio e mudo permanecem iguais e que o microfone não reabre ao voltar de ensurdecer.
+3. Tocar no cabeçalho do servidor, cancelar a ação e abrir/fechar membros. Abrir o painel pelo perfil, fechar pelo botão/fundo, acessar configurações e cancelar logout. Durante a chamada, testar os controles no painel e abrir a tela de áudio. Fechar o painel mantém a chamada.
+4. Girar retrato/paisagem, buscar com teclado aberto e aumentar o tamanho de texto no iOS. Conferir controles e conteúdo sem rolagem horizontal; a barra flutuante deve respeitar a área inferior e o último item das duas listas deve continuar alcançável por rolagem. O painel de perfil deve permitir rolar suas ações.
+5. Com VoiceOver, conferir nomes e seleção dos servidores/canais, categorias recolhíveis, filtros de amigos, campos de busca, ícones de ação, participantes e retorno dos modais. Não marcar VoiceOver como validado apenas por presença de rótulos no código.
+6. Usar sem rede e tentar novamente. Ao perder acesso a conversa/servidor, o conteúdo inacessível deve ser removido e deve aparecer um erro compreensível.
+
 ## Limites desta prova
 
-Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. A presença ainda usa o gateway existente: é reenviada após reconexão/retorno, mas o backend a remove quando o WebSocket cai. Continuidade de presença/voz em todos os casos de suspensão exige a #54 e validação real. Não há CallKit/PushKit, push, chamadas recebidas, chat, DMs na interface, câmera ou transmissão de tela nesta prova. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
+Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. A presença ainda usa o gateway existente: é reenviada após reconexão/retorno, mas o backend a remove quando o WebSocket cai. Continuidade de presença/voz em todos os casos de suspensão exige a #54 e validação real. Não há CallKit/PushKit, push, chamadas recebidas, envio de mensagens, câmera ou transmissão de tela nesta versão. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
 
 Testes de unidade e build não comprovam áudio, permissões, entitlements ou duração em tela bloqueada. O aceite da #46 depende da instalação final em iPhone real; mantenha resultados não executados como pendentes.

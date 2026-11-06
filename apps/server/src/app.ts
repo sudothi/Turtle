@@ -214,7 +214,29 @@ export async function buildApp({
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Toque de chamada em DM/grupo: um por canal; para quando alguém atende, quem ligou sai, recusam todos ou passam 30 s.
+  const RING_MS = 30_000;
+  const rings = new Map<string, { callerId: string; targets: Set<string>; timer: ReturnType<typeof setTimeout> }>();
+  const endRing = (channelId: string, only?: string) => {
+    const r = rings.get(channelId);
+    if (!r) return;
+    if (only) {
+      r.targets.delete(only);
+      toUsers([only], { t: "ringEnd", channelId });
+      if (r.targets.size) return;
+    } else toUsers(r.targets, { t: "ringEnd", channelId });
+    clearTimeout(r.timer);
+    rings.delete(channelId);
+  };
+  /** Chamado a cada mudança de voz: encerra o toque de quem já foi atendido ou cancelado. */
+  const syncRings = () => {
+    for (const [channelId, r] of rings) {
+      const inCall = [...voice.values()].filter((v) => v.channelId === channelId);
+      if (!inCall.some((v) => v.userId === r.callerId) || inCall.some((v) => v.userId !== r.callerId)) endRing(channelId);
+    }
+  };
   const broadcastVoice = () => {
+    syncRings();
     for (const s of online.keys()) s.send(JSON.stringify(voiceStatesFor(s)));
   };
   /** Tira da chamada quem deixou de ser membro (some das listas e perde a conexão de áudio). */
@@ -346,7 +368,7 @@ export async function buildApp({
   };
   const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
   sweeper.unref();
-  app.addHook("onClose", async () => clearInterval(sweeper));
+  app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
 
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
@@ -1383,6 +1405,14 @@ export async function buildApp({
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "ringDecline") {
+          const r = rings.get(evt.channelId);
+          if (r?.targets.has(user.id)) {
+            toUsers([r.callerId], { t: "ringDeclined", channelId: evt.channelId, by: user.id });
+            endRing(evt.channelId, user.id);
+          }
+          return;
+        }
         if (evt.t === "voice") {
           if (evt.channelId === null) {
             if (voice.delete(socket)) broadcastVoice();
@@ -1398,10 +1428,26 @@ export async function buildApp({
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
+          // Primeira pessoa a entrar na chamada de uma DM/grupo: toca para as outras (só a quem está conectado).
+          const alreadyThere = [...voice.values()].some((v) => v.channelId === channel.id);
+          const ringTargets = channel.kind === "dm" && !alreadyThere && !rings.has(channel.id)
+            ? (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channel.id))).map((r) => r.id).filter((id) => id !== user.id)
+            : [];
           voice.set(socket, {
             userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId ?? "",
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
+          if (ringTargets.length) {
+            const from = { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar };
+            const targets = new Set(ringTargets);
+            const timer = setTimeout(() => endRing(channel.id), RING_MS);
+            timer.unref?.();
+            rings.set(channel.id, { callerId: user.id, targets, timer });
+            for (const s of online.keys()) {
+              const u = online.get(s)!;
+              if (targets.has(u.id)) s.send(JSON.stringify({ t: "ring", channelId: channel.id, from, silent: u.status === "busy" } satisfies ServerEvent));
+            }
+          }
           broadcastVoice();
           return;
         }

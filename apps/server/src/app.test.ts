@@ -649,6 +649,34 @@ describe("amigos e mensagens diretas", () => {
     await post(`/friends/${aId}`, {}, c);
   });
 
+  it("chamada em DM toca para a outra pessoa; recusar avisa quem ligou; atender para o toque", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C, B] = await Promise.all([wsOpen(a), wsOpen(c), wsOpen(b)]);
+    const wait = () => new Promise((r) => setTimeout(r, 250));
+    const voiceEvt = (channelId: string | null) => JSON.stringify({ t: "voice", channelId, muted: false, deafened: false });
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.find((e) => e.t === "ring")).toMatchObject({ channelId: dm, from: { id: aId }, silent: false });
+    expect(B.events.some((e) => e.t === "ring")).toBe(false);
+    expect(A.events.some((e) => e.t === "ring")).toBe(false);
+    // recusar: quem ligou fica sabendo e o toque para
+    C.ws.send(JSON.stringify({ t: "ringDecline", channelId: dm }));
+    await wait();
+    expect(A.events.find((e) => e.t === "ringDeclined")).toMatchObject({ channelId: dm, by: cId });
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    // quem ligou sai e liga de novo: toca outra vez; atender para o toque
+    A.ws.send(voiceEvt(null));
+    await wait();
+    C.events.length = 0;
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ring")).toBe(true);
+    C.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);

@@ -28,6 +28,9 @@ run("xcodebuild", [
 ]);
 const app = join(archive, "Products/Applications/Turtle.app");
 if (!existsSync(app)) throw new Error("O archive não gerou Turtle.app.");
+const plist = key => execFileSync("plutil", ["-extract", key, "raw", "-o", "-", join(app, "Info.plist")], { encoding: "utf8" }).trim();
+if (plist("CFBundleShortVersionString") !== version || plist("CFBundleVersion") !== iosBuildNumber) throw new Error("Versão do archive não corresponde ao pacote.");
+if (!plist("NSMicrophoneUsageDescription") || !plist("NSCameraUsageDescription")) throw new Error("Archive sem descrições de permissão.");
 const staging = mkdtempSync(join(output, "package-"));
 const payload = join(staging, "Payload");
 mkdirSync(payload);
@@ -35,9 +38,6 @@ cpSync(app, join(payload, "Turtle.app"), { recursive: true });
 const ipa = join(output, `Turtle-${version}-build${iosBuildNumber}.ipa`);
 try { run("ditto", ["-c", "-k", "--keepParent", "Payload", ipa], staging); }
 finally { rmSync(staging, { recursive: true, force: true }); }
-const plist = key => execFileSync("plutil", ["-extract", key, "raw", "-o", "-", join(app, "Info.plist")], { encoding: "utf8" }).trim();
-if (plist("CFBundleShortVersionString") !== version || plist("CFBundleVersion") !== iosBuildNumber) throw new Error("Versão do archive não corresponde ao pacote.");
-if (!plist("NSMicrophoneUsageDescription") || !plist("NSCameraUsageDescription")) throw new Error("Archive sem descrições de permissão.");
 const hash = createHash("sha256");
 for await (const chunk of createReadStream(ipa)) hash.update(chunk);
 const sha256 = hash.digest("hex");

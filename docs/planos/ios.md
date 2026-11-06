@@ -109,3 +109,13 @@ O servidor continua usando o gateway como fonte da verdade de voz e remove a pre
 - [LiveKit: captura do próprio app e broadcast no SDK Swift](https://docs.livekit.io/transport/media/screenshare/).
 - [LiveKit React Native: integração iOS de screen sharing](https://github.com/livekit/client-sdk-react-native#ios-2) (confirmada também no README da versão 3.1.0 instalada).
 - [Expo ImagePicker](https://docs.expo.dev/versions/latest/sdk/imagepicker/) e [ImageManipulator](https://docs.expo.dev/versions/latest/sdk/imagemanipulator/).
+
+
+### Registro local de revisão visual (06/11)
+
+Build Release no simulador iPhone 16e, iOS 26.1, com uma cópia do app sob bundle ID de QA e dados artificiais locais. A cópia não usa contas nem serviços de produção. Amigos, perfil público, edição de perfil, servidor, conversa e chamada foram renderizados. Foram conferidos os papéis de cor, fontes, hierarquia e acesso aos controles da chamada no enquadramento capturado. O cartão de chamada recebida foi ajustado para respeitar também a safe area superior.
+
+As capturas e o harness ficam em `.local/ios/qa/`, ignorados pelo Git. Algumas capturas da sequência automática pegaram transições de rota; o enquadramento de chamada foi repetido com a rota fixa. Isso não foi considerado teste de toques, permissões, teclado, texto ampliado, VoiceOver, mídia ou navegação real. Esses cenários permanecem na #59.
+
+
+A conferência do primeiro archive 0.4 detectou ausência das descrições de câmera/microfone: `cameraPermission: false`/`microphonePermission: false` do plugin ImagePicker removiam chaves também utilizadas pelo WebRTC. A configuração foi corrigida para preservar descrições explícitas em todos os plugins. O empacotamento agora valida essas chaves antes de criar o IPA; o archive inicial não foi considerado uma entrega válida.

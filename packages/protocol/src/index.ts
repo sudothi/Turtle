@@ -272,6 +272,8 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** Primeira mensagem da conexão: o token da sessão (em vez de ir na URL do WebSocket). */
+  z.object({ t: z.literal("auth"), token: z.string().max(200) }),
   /** Texto e/ou anexos já enviados por POST /channels/:id/attachments. */
   z.object({
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),

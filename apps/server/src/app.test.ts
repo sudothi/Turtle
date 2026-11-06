@@ -801,6 +801,36 @@ describe("chat do dia a dia", () => {
     m.close();
   });
 
+  it("presença e perfil só chegam a quem divide servidor, DM ou amizade", async () => {
+    const foraId = (await get("/me", fora)).body.id;
+    const watcher = await listen(dono);
+    const stranger = await listen(fora);
+    await settle();
+    const lastOf = (c: any) => c.events.filter((e: any) => e.t === "presence").at(-1);
+    // quem não divide nada com você não aparece na presença (nem você na dele)
+    expect(lastOf(watcher).online).toContain(donoId);
+    expect(lastOf(watcher).online).not.toContain(foraId);
+    expect(lastOf(stranger).online).not.toContain(donoId);
+    // perfil novo: userUpdate para o dono do servidor, nada para o estranho
+    const upd = await patch("/me", { displayName: "Membro Novo" }, membro);
+    expect(upd.status).toBe(200);
+    await settle();
+    const got = watcher.events.find((e: any) => e.t === "userUpdate");
+    expect(got?.user).toMatchObject({ id: membroId, displayName: "Membro Novo" });
+    expect(watcher.events.some((e: any) => e.t === "sync")).toBe(false);
+    expect(stranger.events.some((e: any) => e.t === "userUpdate" || e.t === "sync")).toBe(false);
+    // virando amigos, a presença passa a aparecer
+    await post(`/friends/${donoId}`, {}, fora);
+    await settle();
+    expect(lastOf(stranger).online).toContain(donoId);
+    expect(lastOf(watcher).online).toContain(foraId);
+    await del(`/friends/${donoId}`, fora);
+    await settle();
+    expect(lastOf(stranger).online).not.toContain(donoId);
+    watcher.close();
+    stranger.close();
+  });
+
   it("não lidas: contam mensagens dos outros, menções, e somem ao ler (avisando os outros aparelhos)", async () => {
     const d = await listen(dono);
     const m2 = await listen(membro);

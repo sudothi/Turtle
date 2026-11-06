@@ -190,12 +190,29 @@ export async function buildApp({
       const set = await loadDmSet(id);
       for (const [s, u] of online) if (u.id === id) dmSets.set(s, set);
     }
+    presence();
+  };
+  /** Amizades (pendentes ou aceitas) de cada conexão: quem tem amizade com você vê sua presença e seu perfil. */
+  const friendSets = new Map<Socket, Set<string>>();
+  const loadFriendSet = async (userId: string) =>
+    new Set(
+      (await db.select().from(friendships).where(or(eq(friendships.userA, userId), eq(friendships.userB, userId)))).map((r) =>
+        r.userA === userId ? r.userB : r.userA,
+      ),
+    );
+  const refreshFriends = async (userIds: Iterable<string>) => {
+    for (const id of new Set(userIds)) {
+      const set = await loadFriendSet(id);
+      for (const [s, u] of online) if (u.id === id) friendSets.set(s, set);
+    }
+    presence();
   };
   const loadMemberships = async (userId: string) =>
     new Set((await db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, userId))).map((r) => r.id));
   const refreshMemberships = async (userId: string) => {
     const set = await loadMemberships(userId);
     for (const [s, u] of online) if (u.id === userId) memberships.set(s, set);
+    presence();
   };
   const sendWhere = (evt: ServerEvent, allow: (s: Socket) => boolean) => {
     const data = JSON.stringify(evt);
@@ -207,9 +224,35 @@ export async function buildApp({
     const set = new Set(ids);
     sendWhere(evt, (s) => set.has(online.get(s)!.id));
   };
+  const intersects = (a?: Set<string>, b?: Set<string>) => {
+    if (!a || !b) return false;
+    for (const x of a) if (b.has(x)) return true;
+    return false;
+  };
+  /** `viewer` enxerga `other` (presença, perfil) se for a mesma conta ou se dividirem servidor, DM ou amizade. */
+  const sees = (viewer: Socket, other: Socket) =>
+    online.get(viewer)!.id === online.get(other)!.id ||
+    intersects(memberships.get(viewer), memberships.get(other)) ||
+    intersects(dmSets.get(viewer), dmSets.get(other)) ||
+    (friendSets.get(viewer)?.has(online.get(other)!.id) ?? false);
+  /** Cada conexão recebe só a presença de quem ela enxerga (não a lista de todas as contas conectadas). */
   const presence = () => {
-    const people = [...online.values()];
-    broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
+    const sockets = [...online.keys()];
+    for (const viewer of sockets) {
+      const seen = sockets.filter((o) => sees(viewer, o));
+      const people = seen.map((o) => online.get(o)!);
+      viewer.send(JSON.stringify({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] } satisfies ServerEvent));
+    }
+  };
+  /** Quem deve receber a mudança de perfil de `userId`: ele mesmo e quem divide servidor, DM ou amizade com ele. */
+  const profileAudience = async (userId: string) => {
+    const ids = new Set<string>([userId]);
+    const servers = [...(await loadMemberships(userId))];
+    if (servers.length) for (const r of await db.select({ id: serverMembers.userId }).from(serverMembers).where(inArray(serverMembers.serverId, servers))) ids.add(r.id);
+    const dms = [...(await loadDmSet(userId))];
+    if (dms.length) for (const r of await db.select({ id: dmMembers.userId }).from(dmMembers).where(inArray(dmMembers.channelId, dms))) ids.add(r.id);
+    for (const id of await loadFriendSet(userId)) ids.add(id);
+    return ids;
   };
 
   /** Nonces de envio recentes (10 min) por conta: o reenvio depois de uma queda não duplica a mensagem. */
@@ -655,14 +698,17 @@ export async function buildApp({
     });
 
     // ---- Perfil ----
-    /** Propaga o perfil novo: conexões abertas, estado de voz e todo mundo rebusca membros/mensagens. */
+    /** Propaga o perfil novo: conexões abertas, estado de voz e evento userUpdate só para quem divide servidor, DM ou amizade. */
     async function profileChanged(userId: string) {
       const fresh = await loadUser(userId);
       if (!fresh) return;
       for (const [s, u] of online) if (u.id === userId) online.set(s, fresh);
       for (const [s, v] of voice) if (v.userId === userId) voice.set(s, { ...v, displayName: fresh.displayName, avatar: fresh.avatar, staff: canInviteAccounts(fresh) });
       broadcastVoice();
-      broadcast({ t: "sync" });
+      toUsers(await profileAudience(userId), {
+        t: "userUpdate",
+        user: { id: fresh.id, username: fresh.username, displayName: fresh.displayName, bio: fresh.bio, avatar: fresh.avatar, banner: fresh.banner, staff: canInviteAccounts(fresh) },
+      });
       return fresh;
     }
 
@@ -1043,6 +1089,7 @@ export async function buildApp({
       } else if (current.status === "pending" && current.requestedBy !== id) {
         await db.update(friendships).set({ status: "accepted" }).where(and(eq(friendships.userA, current.userA), eq(friendships.userB, current.userB)));
       }
+      await refreshFriends([id, other]);
       toUsers([id, other], { t: "friends" });
       const now = await friendshipOf(id, other);
       return { status: now?.status === "accepted" ? "friend" : "outgoing" };
@@ -1059,6 +1106,7 @@ export async function buildApp({
     authed.delete<{ Params: { userId: string } }>("/friends/:userId", async (req) => {
       const p = pairOf(me(req).id, req.params.userId);
       await db.delete(friendships).where(and(eq(friendships.userA, p.userA), eq(friendships.userB, p.userB)));
+      await refreshFriends([me(req).id, req.params.userId]);
       toUsers([me(req).id, req.params.userId], { t: "friends" });
       return { ok: true };
     });
@@ -1089,11 +1137,13 @@ export async function buildApp({
         }
       }
       broadcastVoice();
+      await refreshFriends([id, other]);
       toUsers([id, other], { t: "friends" });
       return { ok: true };
     });
     authed.delete<{ Params: { userId: string } }>("/blocks/:userId", async (req) => {
       await db.delete(blocks).where(and(eq(blocks.blocker, me(req).id), eq(blocks.blocked, req.params.userId)));
+      await refreshFriends([me(req).id, req.params.userId]);
       toUsers([me(req).id, req.params.userId], { t: "friends" });
       return { ok: true };
     });
@@ -1557,12 +1607,14 @@ export async function buildApp({
       beat.unref?.();
       memberships.set(socket, await loadMemberships(connected.id));
       dmSets.set(socket, await loadDmSet(connected.id));
+      friendSets.set(socket, await loadFriendSet(connected.id));
       cleanup = () => {
         clearInterval(beat);
         socketSessions.delete(socket);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
+        friendSets.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
       };

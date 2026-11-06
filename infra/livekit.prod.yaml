@@ -8,7 +8,10 @@ rtc:
 turn:
   enabled: true
   udp_port: 3478
+  tls_port: 5349
   domain: lk.ogturtle.xyz
+  cert_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.ogturtle.xyz/lk.ogturtle.xyz.crt
+  key_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.ogturtle.xyz/lk.ogturtle.xyz.key
 # Webhooks: o app confere quem está de fato nas salas (tira quem entrou sem permissão ou sem avisar o gateway,
 # e tira da lista quem caiu do LiveKit). Para ligar, troque CHAVE pela chave (`LIVEKIT_API_KEY` do `.env`).
 # webhook:

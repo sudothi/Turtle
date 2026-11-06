@@ -31,7 +31,7 @@ Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeir
 - VPS Hostinger KVM 2 (Ubuntu 24.04), app em https://app.ogturtle.xyz, LiveKit em lk.ogturtle.xyz. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
 - Deploy: workflow "Deploy (VPS)" no GitHub Actions, **só manual** (`workflow_dispatch`; sha vazio = main, sha antigo = rollback), usa `infra/deploy.sh` com backup e rollback automático. Só rode com ok do thiago.
 - Compose e arquivos da VPS (`~/turtle/`) espelham `infra/` do repositório (serviço `api`, veja `docs/planos/infra-vps.md`).
-- Backup do Postgres + uploads na VPS todo dia 07:00 UTC; cópia fora da VPS (R2) ainda pendente (#14). Uploads ficam no volume Docker `uploads`.
+- Backup do Postgres + uploads na VPS todo dia 07:00 UTC (`~/turtle/backups/`, 14 dias). Uploads ficam no volume Docker `uploads`.
 
 ## Decisões e pegadinhas que não aparecem no código
 - Convite de **conta** só pelo admin do app (Configurações > Administração, link `/convite/<código>`); convite de **servidor** só entra num servidor; conta nova começa sem servidor. Limite de 2 servidores próprios por pessoa.
@@ -44,7 +44,7 @@ Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeir
 
 ## Estado (resumo; confirme nas issues/PRs)
 Prontos e no main: auth por convite, servidores, chat, DMs e amigos, voz, tela/câmera, desktop com instalador e auto-update, perfil (avatar/banner), redesign linocut, mobile responsivo, Android nativo em andamento, endurecimento da auditoria de 06/11 (login limitado, heartbeat WS, logs/health, envio sem perda, rejoin de chamada, headers de segurança).
-Pendente principal: rotação das chaves do LiveKit e TURN TLS (#14), backup externo, push notifications, bans, cota de upload, assinatura do instalador Windows, paridade de chat (respostas/reações/busca) e acessibilidade. A lista completa e priorizada vem da auditoria (issues #88–#104, mais #112): veja a aba Issues.
+Pendente principal: push notifications, cota de upload na UI, assinatura com certificado do instalador Windows, paridade de chat (reações/busca) e acessibilidade. A lista completa e priorizada vem da auditoria (issues #88–#104, mais #112): veja a aba Issues.
 
 ## Como trabalhar aqui
 Branch por tarefa → PR para `main` com descrição clara → thiago revisa e mescla. Rode `pnpm typecheck` e `pnpm test` antes de abrir PR. Mantenha o estilo existente e comente só o que não é óbvio.

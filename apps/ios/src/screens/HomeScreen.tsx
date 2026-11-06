@@ -1,41 +1,39 @@
 import { useCallback, useState } from "react";
-import { Pressable, RefreshControl, Text, View } from "react-native";
-import { dmTitle, shownName, type Dm, type Friend } from "@turtle/protocol";
+import { Pressable, RefreshControl, Text, TextInput, View } from "react-native";
+import { shownName, type Friend } from "@turtle/protocol";
 import { usePresence, useRead, useWorkspace } from "../workspace-context";
-import { Field } from "../ui/components";
-import { Avatar, Content, Empty, layout, ListRow, Page, ReadStatus } from "../ui/layout";
+import { Avatar, Content, Empty, ListRow, Page, ReadStatus } from "../ui/layout";
 import { styles as text, colors } from "../ui/theme";
 import { useAppNavigation } from "../navigation/types";
+import { CallDock } from "../navigation/call-access";
 
-export default function HomeScreen() {
-  const { user, workspace } = useWorkspace();
+export default function FriendsScreen() {
+  const { workspace } = useWorkspace();
   const navigation = useAppNavigation();
   const presence = usePresence();
-  const [tab, setTab] = useState<"conversations" | "friends">("conversations");
+  const [tab, setTab] = useState<"online" | "all" | "pending">("online");
   const [query, setQuery] = useState("");
-  const conversations = useRead<Dm[]>([], useCallback(() => workspace.api.dms(), [workspace]));
   const friends = useRead<Friend[]>([], useCallback(() => workspace.api.friends(), [workspace]));
-  const active = tab === "conversations" ? conversations : friends;
   const search = query.trim().toLocaleLowerCase("pt-BR");
-  const matchingConversations = conversations.data.filter(dm => `${dmTitle(dm)} ${dm.users.map(person => person.username).join(" ")}`.toLocaleLowerCase("pt-BR").includes(search));
-  const matchingFriends = friends.data.filter(friend => `${shownName(friend.user)} ${friend.user.username}`.toLocaleLowerCase("pt-BR").includes(search));
-  return <Page><Content refreshControl={<RefreshControl refreshing={active.loading} onRefresh={active.refresh} tintColor={colors.paper} />}>
-    <Text accessibilityRole="header" style={text.title}>Olá, {shownName(user)}.</Text>
-    <Text style={text.body}>As conversas continuam por aqui.</Text>
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      {(["conversations", "friends"] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { setTab(value); setQuery(""); }} style={[layout.toolbar, { borderBottomWidth: 2, borderColor: tab === value ? colors.paper : colors.line }]}><Text style={text.label}>{value === "conversations" ? "Conversas" : "Amigos"}</Text></Pressable>)}
+  const matching = friends.data.filter(friend => {
+    const accepted = friend.status === "friend";
+    const visible = tab === "pending" ? !accepted : accepted && (tab === "all" || presence.online.includes(friend.user.id));
+    return visible && `${shownName(friend.user)} ${friend.user.username}`.toLocaleLowerCase("pt-BR").includes(search);
+  });
+  return <Page>
+    <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: colors.panel, borderBottomWidth: 2, borderColor: colors.rail, flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+      {([['online', 'Online'], ['all', 'Todos'], ['pending', 'Pendentes']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => setTab(value)} style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 4, backgroundColor: tab === value || pressed ? colors.hover : "transparent" })}><Text style={[text.label, { color: tab === value ? colors.paper : colors.muted, fontSize: 14 }]}>{label}</Text></Pressable>)}
     </View>
-    <Field label={tab === "conversations" ? "Buscar conversas" : "Buscar amigos"} value={query} onChangeText={setQuery} placeholder="Nome ou usuário" returnKeyType="search" />
-    <ReadStatus loading={active.loading && !active.data.length} error={active.error} retry={active.refresh} />
-    {tab === "conversations" && matchingConversations.map(dm => <ListRow
-      key={dm.channelId} title={dmTitle(dm)} detail={dm.group ? `${dm.users.length + 1} participantes` : "Conversa direta"}
-      leading={<Avatar name={dmTitle(dm)} uri={dm.group ? undefined : workspace.api.fileUrl(dm.users[0]?.avatar)} />}
-      onPress={() => navigation.navigate("Conversation", { channelId: dm.channelId, title: dmTitle(dm) })}
-    />)}
-    {tab === "friends" && matchingFriends.map(({ user: friend, status }) => <ListRow key={friend.id}
-      title={shownName(friend)} detail={`@${friend.username} · ${status === "incoming" ? "Pedido recebido" : status === "outgoing" ? "Pedido enviado" : presence.busy.includes(friend.id) ? "Não perturbe" : presence.online.includes(friend.id) ? "Online" : "Offline"}`}
-      leading={<Avatar name={shownName(friend)} uri={workspace.api.fileUrl(friend.avatar)} />}
-    />)}
-    {!active.loading && !active.error && (tab === "conversations" ? !matchingConversations.length : !matchingFriends.length) && <Empty title={search ? "Nenhum resultado" : tab === "conversations" ? "Nenhuma conversa ainda" : "Sua lista está vazia"}>{search ? "Tente outro nome ou usuário." : "Suas conversas e amizades do Turtle aparecem aqui quando disponíveis."}</Empty>}
-  </Content></Page>;
+    <Content refreshControl={<RefreshControl refreshing={friends.loading} onRefresh={friends.refresh} tintColor={colors.paper} />}>
+      <TextInput accessibilityLabel="Buscar amigos" value={query} onChangeText={setQuery} placeholder="Buscar amigos" placeholderTextColor={colors.faint} autoCorrect={false} autoCapitalize="none" returnKeyType="search" style={text.input} />
+      <ReadStatus loading={friends.loading && !friends.data.length} error={friends.error} retry={friends.refresh} />
+      <Text accessibilityRole="header" style={text.serverTitle}>{tab === "online" ? "Online" : tab === "all" ? "Todos os amigos" : "Pendentes"} — {matching.length}</Text>
+      {matching.map(({ user: friend, status }) => <ListRow key={friend.id} title={shownName(friend)}
+        detail={status === "incoming" ? "Pedido recebido" : status === "outgoing" ? "Pedido enviado" : presence.busy.includes(friend.id) ? "Não perturbe" : presence.online.includes(friend.id) ? "Online" : "Offline"}
+        leading={<Avatar name={shownName(friend)} uri={workspace.api.fileUrl(friend.avatar)} online={presence.online.includes(friend.id)} />}
+      />)}
+      {!friends.loading && !friends.error && !matching.length && <Empty title={search ? "Nenhum resultado" : tab === "online" ? "Nenhum amigo online" : tab === "pending" ? "Nenhum pedido pendente" : "Nenhum amigo ainda"}>{search ? "Tente outro nome ou usuário." : "Seus amigos aparecem aqui quando disponíveis."}</Empty>}
+    </Content>
+    <CallDock onOpen={() => navigation.navigate("Call")} />
+  </Page>;
 }

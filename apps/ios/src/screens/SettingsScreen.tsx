@@ -15,6 +15,7 @@ export default function SettingsScreen() {
   const navigation = useAppNavigation();
   return <Page><Content>
     <View style={layout.row}><Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} /><View style={layout.rowText}><Text accessibilityRole="header" style={text.subtitle}>{shownName(user)}</Text><Text style={text.caption}>@{user.username}</Text></View></View>
+    <Button secondary onPress={() => navigation.navigate("EditProfile")}>Editar perfil e imagens</Button>
     {canInviteAccounts(user) && <Button secondary onPress={() => navigation.navigate("Admin")}>Administração e convites de conta</Button>}
     <Button secondary onPress={() => navigation.navigate("Blocks")}>Pessoas bloqueadas</Button>
     <Text accessibilityRole="header" style={text.serverTitle}>Conexão</Text>

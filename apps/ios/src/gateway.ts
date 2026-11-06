@@ -55,7 +55,7 @@ export class Gateway {
         if (parsed.data.t === "voiceStates") this.set({ ...this.state, states: parsed.data.states });
         if (parsed.data.t === "presence") this.set({ online: parsed.data.online, busy: parsed.data.busy });
         if (parsed.data.t === "sync") this.sync();
-        if (["sync", "friends", "message", "messageUpdate", "messageDelete", "channel"].includes(parsed.data.t)) this.set({ revision: this.state.revision + 1 });
+        if (["sync", "friends", "message", "messageUpdate", "messageDelete", "channel", "userUpdate", "read"].includes(parsed.data.t)) this.set({ revision: this.state.revision + 1 });
         this.events.forEach(fn => fn(parsed.data));
       } catch { /* Malformed messages do not tear down native audio. */ }
     };

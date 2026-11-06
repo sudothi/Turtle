@@ -15,6 +15,7 @@ import CallScreen from "../screens/CallScreen";
 import ConversationScreen from "../screens/ConversationScreen";
 import MembersScreen from "../screens/MembersScreen";
 
+import EditProfileScreen from "../screens/EditProfileScreen";
 import ServerScreen from "../screens/ServerScreen";
 import AdminScreen from "../screens/AdminScreen";
 import BlocksScreen from "../screens/BlocksScreen";
@@ -51,6 +52,7 @@ export default function AppNavigation() {
           headerTitle: () => <View style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 }}><Icon name={route.params.serverId ? "hash" : "chat"} /><Text numberOfLines={1} style={[text.label, { flexShrink: 1 }]}>{route.params.title}</Text></View>,
           headerRight: () => route.params.serverId ? <IconButton name="users" label="Membros do servidor" onPress={() => navigation.navigate("Members", { serverId: route.params.serverId!, title: route.params.title })} /> : <IconButton name="users" label="Participantes e opções" onPress={() => navigation.navigate("Group", { channelId: route.params.channelId })} />,
         })} />
+        <Root.Screen name="EditProfile" component={EditProfileScreen} options={{ title: "Meu perfil", presentation: "modal" }} />
         <Root.Screen name="Server" component={ServerScreen} options={{ title: "Servidor", presentation: "modal" }} />
         <Root.Screen name="Admin" component={AdminScreen} options={{ title: "Administração", presentation: "modal" }} />
         <Root.Screen name="Blocks" component={BlocksScreen} options={{ title: "Pessoas bloqueadas", presentation: "modal" }} />

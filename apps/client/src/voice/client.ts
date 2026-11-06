@@ -11,7 +11,9 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPreset,
   VideoPresets,
+  VideoQuality,
 } from "livekit-client";
 import { api } from "../api";
 import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfiles, usesWasmNoise, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
@@ -353,7 +355,7 @@ export class VoiceClient {
   async startScreen() {
     const room = this.room;
     if (!room || this.snap.status === "idle" || room.localParticipant.isScreenShareEnabled) return;
-    const { screenProfile, screenAudio } = this.snap.prefs;
+    const { screenProfile, screenAudio, screenSimulcast } = this.snap.prefs;
     const prof = screenProfiles[screenProfile];
     try {
       await room.localParticipant.setScreenShareEnabled(
@@ -371,7 +373,9 @@ export class VoiceClient {
         {
           // H.264: no Windows o Chromium usa o encoder da placa de vídeo (NVENC, QuickSync, AMF).
           videoCodec: supportsH264() ? "h264" : "vp8",
-          simulcast: false,
+          // Opcional (Configurações da transmissão): camada extra pequena para quem assiste com rede fraca.
+          simulcast: screenSimulcast,
+          screenShareSimulcastLayers: screenSimulcast ? [new VideoPreset(960, 540, 800_000, 15)] : [],
           screenShareEncoding: { maxBitrate: prof.bitrate, maxFramerate: prof.fps, priority: "high" },
           degradationPreference: prof.degradation,
           // Valem só para o áudio da tela: estéreo, sem DTX nem RED, 128 kb/s (música e jogo).
@@ -411,6 +415,17 @@ export class VoiceClient {
 
   setScreenAudio(screenAudio: boolean) {
     this.savePrefs({ screenAudio });
+  }
+
+  setScreenSimulcast(screenSimulcast: boolean) {
+    this.savePrefs({ screenSimulcast });
+  }
+
+  /** Quem assiste escolhe a qualidade da transmissão de outra pessoa (só muda algo se ela publicou a camada pequena). */
+  setWatchQuality(userId: string, quality: "auto" | "high" | "low") {
+    const p = this.room?.remoteParticipants.get(userId);
+    const pub = p?.getTrackPublication(Track.Source.ScreenShare) as RemoteTrackPublication | undefined;
+    pub?.setVideoQuality(quality === "low" ? VideoQuality.LOW : VideoQuality.HIGH);
   }
 
   async setCamera(cameraId: string) {

@@ -946,3 +946,4 @@ a.auth-brand { text-decoration: none; }
 .ring-stack { position: fixed; top: 16px; right: 16px; z-index: 60; display: grid; gap: 8px; max-width: calc(100vw - 32px); }
 .ring-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--ink-2); }
 .ring-card > span { flex: 1; min-width: 0; }
+.watch-quality { font-size: 12px; background: var(--ink-2); color: var(--paper); border: 1px solid var(--text-muted); border-radius: 4px; }

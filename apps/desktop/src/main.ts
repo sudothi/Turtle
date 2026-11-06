@@ -93,6 +93,8 @@ function createWindow(splash?: Splash) {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Minimizada ou em segundo plano a janela continua capturando/enviando (testar o 0 fps depois de alt-tab, #97).
+      backgroundThrottling: false,
     },
   });
   win.setMenuBarVisibility(false);

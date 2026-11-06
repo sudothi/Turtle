@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { randomUUID } from "expo-crypto";
 import { useFocusEffect } from "@react-navigation/native";
 import type { User } from "@turtle/protocol";
 import type { Api } from "./api";
@@ -10,11 +12,11 @@ import { WorkspaceSession } from "./workspace-session";
 const Context = createContext<{ workspace: WorkspaceSession; user: User } | null>(null);
 
 export function WorkspaceProvider({ api, user, children }: { api: Api; user: User; children: ReactNode }) {
-  const workspace = useMemo(() => new WorkspaceSession(api, session), [api]);
+  const workspace = useMemo(() => new WorkspaceSession(api, session, { userId: user.id, storage: AsyncStorage, id: randomUUID }), [api, user.id]);
   const value = useMemo(() => ({ workspace, user }), [workspace, user]);
   useEffect(() => {
     workspace.start();
-    const listener = AppState.addEventListener("change", state => { if (state === "active") workspace.resume(); });
+    const listener = AppState.addEventListener("change", state => { if (state === "active") workspace.resume(); else void workspace.chat.flush().catch(() => {}); });
     return () => { listener.remove(); void workspace.dispose(); };
   }, [workspace]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
@@ -40,6 +42,13 @@ export function useDirectory() {
 export function useWorkspaceState() {
   const { workspace } = useWorkspace();
   return useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+}
+export function useConversation(channelId: string) {
+  const { workspace } = useWorkspace();
+  const conversation = useMemo(() => workspace.chat.get(channelId), [workspace, channelId]);
+  useFocusEffect(useCallback(() => workspace.chat.activate(channelId), [workspace, channelId]));
+  const state = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot);
+  return { conversation, ...state };
 }
 export function useRead<T>(initial: T, load: () => Promise<T>) {
   const { workspace } = useWorkspace();

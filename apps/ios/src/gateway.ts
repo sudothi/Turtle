@@ -1,4 +1,4 @@
-import { serverEvent, type ClientEvent, type VoiceState } from "@turtle/protocol";
+import { serverEvent, type ClientEvent, type ServerEvent, type VoiceState } from "@turtle/protocol";
 import type { Api } from "./api";
 
 export type VoiceReport = Extract<ClientEvent, { t: "voice" }>;
@@ -13,10 +13,12 @@ export class Gateway {
   private attempts = 0;
   private state: GatewayState = { connected: false, states: [], online: [], busy: [], revision: 0 };
   private listeners = new Set<() => void>();
+  private events = new Set<(event: ServerEvent) => void>();
   private report: VoiceReport = { t: "voice", channelId: null, muted: true, deafened: false, camera: false, screen: false };
   constructor(private readonly api: Api, private readonly expired: () => void, private readonly sync: () => void) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
+  subscribeEvents = (fn: (event: ServerEvent) => void) => { this.events.add(fn); return () => { this.events.delete(fn); }; };
   private set(patch: Partial<GatewayState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); }
   private send(value: ClientEvent) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(value)); }
   update = (report: VoiceReport) => { this.report = report; this.send(report); };
@@ -51,6 +53,7 @@ export class Gateway {
         if (parsed.data.t === "presence") this.set({ online: parsed.data.online, busy: parsed.data.busy });
         if (parsed.data.t === "sync") this.sync();
         if (["sync", "friends", "message", "messageUpdate", "messageDelete", "channel"].includes(parsed.data.t)) this.set({ revision: this.state.revision + 1 });
+        this.events.forEach(fn => fn(parsed.data));
       } catch { /* Malformed messages do not tear down native audio. */ }
     };
     socket.onerror = () => { if (this.socket === socket) socket.close(); };

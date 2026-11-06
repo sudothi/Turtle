@@ -14,7 +14,7 @@ O Turtle para iPhone usa React Native/Expo com LiveKit/WebRTC **nativos**, sem W
 
 O deployment target configurado é **iOS 26.0**. O mínimo é o do projeto gerado e do IPA, não uma promessa de suporte a versões anteriores. A compilação em simulador iOS 27 foi exercitada; a matriz física precisa incluir iOS 26 e outro aparelho/versão do grupo, quando disponíveis. O menor iPhone real aceito ainda precisa ser identificado na #59.
 
-## Escopo da versão 0.4.0, build 4
+## Escopo da versão 0.4.0, build 5
 
 - Autenticação por convite, restauração de sessão, navegação nativa e chat confirmado da #113.
 - Amigos, pedidos, DMs/grupos, bloqueios e perfis públicos; leitura e não lidas no backend.
@@ -63,16 +63,16 @@ pnpm ios:ipa
 
 O script gera o projeto nativo a partir da configuração versionada, instala Pods, faz archive Release sem assinatura, inclui JavaScript e empacota o IPA. A versão e o build vêm de `apps/ios/package.json`; `app.config.ts` usa os mesmos valores. Saídas:
 
-- `apps/ios/release/Turtle-0.4.0-build4.ipa`
-- `apps/ios/release/Turtle-0.4.0-build4.ipa.sha256`
-- `apps/ios/release/Turtle-0.4.0-build4.ipa.json`
+- `apps/ios/release/Turtle-0.4.0-build5.ipa`
+- `apps/ios/release/Turtle-0.4.0-build5.ipa.sha256`
+- `apps/ios/release/Turtle-0.4.0-build5.ipa.json`
 
 O manifesto registra versão, build, bundle ID, iOS mínimo, commit e SHA-256. O script confere a versão do archive e a presença das descrições de câmera/microfone. Artefatos e o projeto gerado são ignorados pelo Git. O IPA é **para importar e reassinar**, não uma distribuição já assinada. Compartilhar o IPA e o checksum juntos pelo canal privado do grupo; não criar release pública nem source AltStore antes do aceite de instalação manual. Não há workflow automático de publicação.
 
 Para conferir a transferência, rode na pasta do IPA:
 
 ```sh
-shasum -a 256 -c Turtle-0.4.0-build4.ipa.sha256
+shasum -a 256 -c Turtle-0.4.0-build5.ipa.sha256
 ```
 
 Instalação: AltServer no computador, AltStore Classic no iPhone, importar o IPA em My Apps > + e seguir os pedidos de confiança/Modo Desenvolvedor. Cada participante usa a própria conta. No modelo gratuito, a documentação Classic informa renovação em sete dias, três apps ativos (AltStore ocupa uma vaga) e até dez App IDs registrados simultaneamente. Extensões usam App IDs adicionais. Conferir os limites que a instalação final mostrar.
@@ -119,3 +119,6 @@ As capturas e o harness ficam em `.local/ios/qa/`, ignorados pelo Git. Algumas c
 
 
 A conferência do primeiro archive 0.4 detectou ausência das descrições de câmera/microfone: `cameraPermission: false`/`microphonePermission: false` do plugin ImagePicker removiam chaves também utilizadas pelo WebRTC. A configuração foi corrigida para preservar descrições explícitas em todos os plugins. O empacotamento agora valida essas chaves antes de criar o IPA; o archive inicial não foi considerado uma entrega válida.
+
+
+A conferência adicional da chamada com o maior tamanho de texto de acessibilidade do simulador mostrou o título ocupando quase toda a área de conteúdo. O build 5 limita somente o título e os nomes dos tiles a 200% de escala e duas linhas, preservando o nome completo no rótulo acessível do título. Os controles fixos de voz continuam disponíveis; a revisão de VoiceOver e de interação física permanece pendente. O build 4 é o artefato anterior à correção e foi mantido separado pelo número do build.

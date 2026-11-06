@@ -3,7 +3,8 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { shownName, splitMentions, type Message } from "@turtle/protocol";
 import { useRead, useWorkspace } from "../workspace-context";
-import type { HomeRoutes } from "../navigation/types";
+import { useAppNavigation, type RootRoutes } from "../navigation/types";
+import { CallDock } from "../navigation/call-access";
 import { Avatar, Empty, layout, Page, ReadStatus } from "../ui/layout";
 import { styles as text, colors } from "../ui/theme";
 
@@ -14,7 +15,8 @@ function stamp(value: string) {
 }
 
 export default function ConversationScreen() {
-  const { params } = useRoute<RouteProp<HomeRoutes, "Conversation">>();
+  const { params } = useRoute<RouteProp<RootRoutes, "Conversation">>();
+  const navigation = useAppNavigation();
   const { workspace, user } = useWorkspace();
   const messages = useRead<Message[]>([], useCallback(() => workspace.api.messages(params.channelId), [workspace, params.channelId]));
   const list = useRef<FlatList<Message>>(null);
@@ -38,6 +40,7 @@ export default function ConversationScreen() {
         </View>
       </View>}
     />
+    <CallDock onOpen={() => navigation.navigate("Call")} />
   </Page>;
 }
 const s = StyleSheet.create({

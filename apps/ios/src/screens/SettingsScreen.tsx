@@ -5,6 +5,7 @@ import { Avatar, Content, layout, Page } from "../ui/layout";
 import { styles as text } from "../ui/theme";
 import { useCall, useWorkspace, useWorkspaceState } from "../workspace-context";
 import { useAppNavigation } from "../navigation/types";
+import { CallDock } from "../navigation/call-access";
 import { version } from "../../package.json";
 
 export default function SettingsScreen() {
@@ -21,5 +22,5 @@ export default function SettingsScreen() {
       { text: "Cancelar", style: "cancel" }, { text: "Sair da conta", style: "destructive", onPress: () => { void workspace.logout(); } },
     ])}>{state.signingOut ? "Saindo…" : "Sair da conta"}</Button>
     <Text style={text.footnote}>Turtle para iPhone · versão {version}</Text>
-  </Content></Page>;
+  </Content><CallDock onOpen={() => navigation.navigate("Call")} /></Page>;
 }

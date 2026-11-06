@@ -106,6 +106,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_i
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'online';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS icon_key text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+-- Responder a uma mensagem (sem chave estrangeira: a resposta continua quando a original é apagada).
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to text;
+CREATE INDEX IF NOT EXISTS messages_reply_to_idx ON messages (reply_to);
 -- Anexos do chat (os arquivos ficam na pasta de uploads).
 CREATE TABLE IF NOT EXISTS attachments (
   id text PRIMARY KEY,

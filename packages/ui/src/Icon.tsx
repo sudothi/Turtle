@@ -143,6 +143,7 @@ const icons = {
     </>
   ),
   paperclip: <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.1-8.1a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.8 1.8 0 0 1-2.6-2.6l7.3-7.3" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />,
+  reply: <path d="M10 4.5 2.8 11.3 10 18v-4.2c4.9 0 8.5 1.6 11.2 5.7-.7-6.3-4.3-10.4-11.2-11.2z" fill="currentColor" />,
   pencil: (
     <>
       <path d="M4 20l1-4.8L15.6 4.6a2 2 0 0 1 2.8 0l1 1a2 2 0 0 1 0 2.8L8.8 19z" fill="currentColor" />

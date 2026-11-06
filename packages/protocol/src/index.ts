@@ -16,6 +16,21 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 /** Imagem que o app mostra direto no chat (o resto vira um cartão de download). */
 export const isInlineImage = (a: Pick<Attachment, "mime">) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime);
 
+/** Prévia da mensagem respondida (texto cortado, para desenhar a linha acima da resposta). */
+export const replyPreviewSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  content: z.string(),
+  /** Quantos arquivos a mensagem respondida tem (mostra "clique para ver o anexo" quando não há texto). */
+  attachments: z.number().int().default(0),
+});
+export type ReplyPreview = z.infer<typeof replyPreviewSchema>;
+/** Tamanho máximo do texto da prévia da resposta. */
+export const REPLY_PREVIEW_CHARS = 200;
+
 export const messageSchema = z.object({
   id: z.string(),
   channelId: z.string(),
@@ -30,6 +45,9 @@ export const messageSchema = z.object({
   /** Quando foi editada pela última vez (mostra "(editado)"). */
   editedAt: z.string().nullable().default(null),
   attachments: z.array(attachmentSchema).default([]),
+  /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
+  replyToId: z.string().nullable().default(null),
+  replyTo: replyPreviewSchema.nullable().default(null),
 });
 export type Message = z.infer<typeof messageSchema>;
 
@@ -258,6 +276,8 @@ export const clientEvent = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
+    /** Responder a uma mensagem do mesmo canal. */
+    replyTo: z.string().max(64).optional(),
   }),
   /** channelId null = saiu da voz. */
   z.object({

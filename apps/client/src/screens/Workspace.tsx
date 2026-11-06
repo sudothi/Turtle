@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MENTION_RE, dmTitle, mentionedIds, serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
+import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
 import { Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
@@ -321,9 +321,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         if (!parsed.success) return;
         const evt = parsed.data;
         if (evt.t === "message") onMessage.current(evt.message);
-        if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current)
-          setMessages((l) => l.map((x) => (x.id === evt.message.id ? evt.message : x)));
-        if (evt.t === "messageDelete" && evt.channelId === currentRef.current) setMessages((l) => l.filter((x) => x.id !== evt.id));
+        if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current) {
+          const m = evt.message;
+          // Atualiza a mensagem e a prévia dela nas respostas.
+          setMessages((l) => l.map((x) => (x.id === m.id ? m : x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, content: m.content.slice(0, REPLY_PREVIEW_CHARS) } } : x)));
+        }
+        if (evt.t === "messageDelete" && evt.channelId === currentRef.current)
+          setMessages((l) => l.filter((x) => x.id !== evt.id).map((x) => (x.replyTo?.id === evt.id ? { ...x, replyTo: null } : x)));
         if (evt.t === "read") setUnread((u) => {
           if (!u[evt.channelId]) return u;
           const n = { ...u };
@@ -363,9 +367,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     return () => { closed = true; clearTimeout(retry); ws.current?.close(); };
   }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
 
-  const send = useCallback((content: string, attachments: string[] = []) => {
+  const send = useCallback((content: string, attachments: string[] = [], replyTo?: string) => {
     if (!activeId) return;
-    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content, attachments }));
+    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content, attachments, ...(replyTo ? { replyTo } : {}) }));
   }, [activeId]);
 
   const openDm = useCallback((dm: Dm) => {
@@ -398,7 +402,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     }
     if (m.userId === user.id) return;
     if (m.channelId === readingRef.current && appFocused()) return markRead(m.channelId);
-    const mention = mentionedIds(m.content).includes(user.id);
+    // Responder a uma mensagem minha conta como menção (como no Discord).
+    const mention = mentionedIds(m.content).includes(user.id) || m.replyTo?.userId === user.id;
     setUnread((u) => {
       const prev = u[m.channelId];
       return { ...u, [m.channelId]: { channelId: m.channelId, serverId: ch?.serverId ?? null, count: (prev?.count ?? 0) + 1, mentions: (prev?.mentions ?? 0) + (mention ? 1 : 0) } };

@@ -12,6 +12,8 @@ import {
 import {
   ATTACHMENT_MAX_BYTES,
   type Attachment,
+  REPLY_PREVIEW_CHARS,
+  type ReplyPreview,
   editMessageBody,
   renameChannelBody,
   SERVER_ICON_MAX_BYTES,
@@ -281,17 +283,34 @@ export async function buildApp({
   const toAttachment = ({ messageId: _m, ...a }: { id: string; messageId: string | null; key: string; name: string; size: number; mime: string; width: number | null; height: number | null }): Attachment => a;
   const messageCols = {
     id: messages.id, channelId: messages.channelId, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey,
-    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt,
+    isAdmin: users.isAdmin, canInvite: users.canInvite, content: messages.content, createdAt: messages.createdAt, editedAt: messages.editedAt, replyTo: messages.replyTo,
   };
-  /** Linhas do banco (com o autor) viram mensagens com os anexos. */
-  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null }[]): Promise<Message[]> {
+  /** Prévias das mensagens respondidas (as que não existem mais ficam de fora). */
+  async function replyPreviews(ids: string[]): Promise<Map<string, ReplyPreview>> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return new Map();
+    const rows = await db
+      .select({ id: messages.id, userId: messages.userId, username: users.username, displayName: users.displayName, avatar: users.avatarKey, content: messages.content })
+      .from(messages)
+      .innerJoin(users, eq(users.id, messages.userId))
+      .where(inArray(messages.id, unique));
+    const files = rows.length
+      ? await db.select({ messageId: attachments.messageId, n: count() }).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).groupBy(attachments.messageId)
+      : [];
+    return new Map(rows.map((r) => [r.id, { ...r, content: r.content.slice(0, REPLY_PREVIEW_CHARS), attachments: Number(files.find((f) => f.messageId === r.id)?.n ?? 0) }]));
+  }
+  /** Linhas do banco (com o autor) viram mensagens com os anexos e a prévia da resposta. */
+  async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null; replyTo: string | null }[]): Promise<Message[]> {
     const files = rows.length ? await db.select(attachmentCols).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).orderBy(asc(attachments.createdAt)) : [];
-    return rows.map(({ isAdmin, canInvite, ...r }) => ({
+    const replies = await replyPreviews(rows.flatMap((r) => (r.replyTo ? [r.replyTo] : [])));
+    return rows.map(({ isAdmin, canInvite, replyTo, ...r }) => ({
       ...r,
       staff: canInviteAccounts({ isAdmin, canInvite }),
       createdAt: r.createdAt.toISOString(),
       editedAt: r.editedAt?.toISOString() ?? null,
       attachments: files.filter((f) => f.messageId === r.id).map(toAttachment),
+      replyToId: replyTo,
+      replyTo: (replyTo && replies.get(replyTo)) || null,
     }));
   }
   const loadMessage = async (id: string) => {
@@ -1070,8 +1089,9 @@ export async function buildApp({
             LEFT JOIN read_states r ON r.channel_id = c.id AND r.user_id = ${id}
             WHERE d.user_id = ${id})
         SELECT mine.id AS "channelId", mine.server_id AS "serverId", count(m.id)::int AS count,
-               (count(m.id) FILTER (WHERE m.content LIKE ${token}))::int AS mentions
+               (count(m.id) FILTER (WHERE m.content LIKE ${token} OR r.user_id = ${id}))::int AS mentions
           FROM mine JOIN messages m ON m.channel_id = mine.id AND m.created_at > mine.since AND m.user_id <> ${id}
+          LEFT JOIN messages r ON r.id = m.reply_to
           GROUP BY mine.id, mine.server_id`);
       const list = (Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows) as Unread[];
       return list.map((r) => ({ channelId: r.channelId, serverId: r.serverId ?? null, count: Number(r.count), mentions: Number(r.mentions) }) satisfies Unread);
@@ -1289,12 +1309,20 @@ export async function buildApp({
           : [];
         if (picked.length !== new Set(evt.attachments).size)
           return socket.send(JSON.stringify({ t: "error", error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
+        // Resposta: só a uma mensagem que ainda existe no mesmo canal.
+        const replyTo = evt.replyTo ? (await replyPreviews([evt.replyTo])).get(evt.replyTo) : undefined;
+        if (evt.replyTo) {
+          const target = replyTo && (await db.select({ c: messages.channelId }).from(messages).where(eq(messages.id, evt.replyTo)).limit(1))[0];
+          if (!target || target.c !== channel.id)
+            return socket.send(JSON.stringify({ t: "error", error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
+        }
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(), editedAt: null,
           attachments: evt.attachments.map((id) => toAttachment(picked.find((f) => f.id === id)!)),
+          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null,
         };
-        await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt) });
+        await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));
         await markRead(user.id, channel.id);
         if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });

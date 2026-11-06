@@ -770,6 +770,39 @@ describe("chat do dia a dia", () => {
     m.close();
   });
 
+  it("responder: cita a mensagem do mesmo canal, conta como menção e mostra apagada quando somem", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    say(m.ws, geral, "pergunta do membro");
+    await settle();
+    const original = m.events.find((e) => e.t === "message" && e.message.content === "pergunta do membro").message;
+    expect(original.replyToId).toBeNull();
+    await post(`/channels/${geral}/read`, {}, membro);
+    d.ws.send(JSON.stringify({ t: "send", channelId: geral, content: "resposta do dono", replyTo: original.id }));
+    await settle();
+    const reply = m.events.find((e) => e.t === "message" && e.message.content === "resposta do dono").message;
+    expect(reply.replyToId).toBe(original.id);
+    expect(reply.replyTo).toMatchObject({ id: original.id, userId: membroId, username: "dia-membro", content: "pergunta do membro", attachments: 0 });
+    // responder a mim conta como menção nas não lidas
+    expect((await get("/unread", membro)).body.find((u: any) => u.channelId === geral)).toMatchObject({ count: 1, mentions: 1 });
+    // o histórico traz a prévia
+    const hist = (await get(`/channels/${geral}/messages`, dono)).body;
+    expect(hist.find((x: any) => x.id === reply.id).replyTo.content).toBe("pergunta do membro");
+    // não dá para responder a mensagem de outro canal nem a uma que não existe
+    const outro = (await post(`/servers/${serverId}/channels`, { name: "outro" }, dono)).body.id;
+    d.ws.send(JSON.stringify({ t: "send", channelId: outro, content: "x", replyTo: original.id }));
+    d.ws.send(JSON.stringify({ t: "send", channelId: geral, content: "y", replyTo: "naoexiste" }));
+    await settle();
+    expect(d.events.filter((e) => e.t === "error" && /respondida/.test(e.error))).toHaveLength(2);
+    // apagar a original: a resposta continua, sem a prévia
+    expect((await del(`/messages/${original.id}`, membro)).status).toBe(200);
+    const after = (await get(`/channels/${geral}/messages`, dono)).body.find((x: any) => x.id === reply.id);
+    expect(after).toMatchObject({ replyToId: original.id, replyTo: null });
+    await post(`/channels/${geral}/read`, {}, membro);
+    d.close();
+    m.close();
+  });
+
   it("anexos: imagem sem metadados, arquivo baixável, só no próprio canal, e somem com a mensagem", async () => {
     const sharp = (await import("sharp")).default;
     const jpg = new Uint8Array(await sharp({ create: { width: 40, height: 20, channels: 3, background: "#123" } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: "segredo" } } }).toBuffer());

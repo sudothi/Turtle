@@ -83,6 +83,8 @@ export const api = {
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
+  pin: (id: string, on: boolean) => req<Message>(on ? "PUT" : "DELETE", `/messages/${id}/pin`),
+  pins: (channelId: string) => req<Message[]>("GET", `/channels/${channelId}/pins`),
   react: (id: string, emoji: string, add: boolean) => req<Message>(add ? "PUT" : "DELETE", `/messages/${id}/reactions/${encodeURIComponent(emoji)}`),
   searchChannel: (channelId: string, q: string) => req<Message[]>("GET", `/channels/${channelId}/search?q=${encodeURIComponent(q)}`),
   storage: () => req<{ used: number; quota: number }>("GET", "/me/storage"),

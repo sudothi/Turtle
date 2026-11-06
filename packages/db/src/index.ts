@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -117,6 +117,7 @@ BEGIN
 END $$;
 -- Responder a uma mensagem (sem chave estrangeira: a resposta continua quando a original é apagada).
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to text;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_at timestamptz;
 CREATE INDEX IF NOT EXISTS messages_reply_to_idx ON messages (reply_to);
 -- Anexos do chat (os arquivos ficam na pasta de uploads).
 CREATE TABLE IF NOT EXISTS attachments (

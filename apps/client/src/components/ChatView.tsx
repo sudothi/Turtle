@@ -85,6 +85,29 @@ function SearchPanel({ channelId, serverId, names, onClose }: { channelId: strin
   );
 }
 
+/** Mensagens fixadas do canal (a lista é recarregada a cada fixar/desafixar). */
+function PinsPanel({ channelId, names, tick, onClose }: { channelId: string; names: Map<string, string>; tick: number; onClose: () => void }) {
+  const [list, setList] = useState<Message[] | null>(null);
+  useEffect(() => { api.pins(channelId).then(setList).catch(() => setList([])); }, [channelId, tick]);
+  return (
+    <div className="search-panel lino" role="region" aria-label="Mensagens fixadas">
+      <div className="search-row">
+        <b>Mensagens fixadas</b>
+        <button type="button" className="plain-btn" onClick={onClose}>Fechar</button>
+      </div>
+      <ul className="search-results" aria-live="polite">
+        {list?.length === 0 && <li className="t-muted">Nenhuma mensagem fixada.</li>}
+        {list?.map((m) => (
+          <li key={m.id}>
+            <b>{names.get(m.userId) ?? m.displayName ?? m.username}</b> <time className="t-muted" dateTime={m.createdAt}>{stamp(m.createdAt)}</time>
+            <div className="search-text">{decodeMentions(m.content, names) || (m.attachments.length ? "(arquivo)" : "")}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Desenha a formatação básica (negrito, itálico, código, spoiler, links) sem injetar HTML. */
 function Rich({ nodes }: { nodes: RichNode[] }) {
   return (
@@ -122,8 +145,8 @@ function Spoiler({ children }: { children: React.ReactNode }) {
 }
 
 /** Texto da mensagem com as menções `<@id>` trocadas pelo nome de exibição atual. */
-function MessageText({ content, names, onProfile, edited }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null }) {
-  if (!content && !edited) return null;
+function MessageText({ content, names, onProfile, edited, pinned }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null; pinned?: boolean }) {
+  if (!content && !edited && !pinned) return null;
   return (
     <div className="msg-text">
       {splitMentions(content).map((p, i) =>
@@ -135,6 +158,7 @@ function MessageText({ content, names, onProfile, edited }: { content: string; n
           </button>
         ),
       )}
+      {pinned && <span className="msg-edited" title="Mensagem fixada"> 📌</span>}
       {edited && <span className="msg-edited" title={`Editada: ${stamp(edited)}`}> (editado)</span>}
     </div>
   );
@@ -256,7 +280,7 @@ function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (text
 }
 
 /** Menu de ações de uma mensagem no celular (abre com toque longo), vindo de baixo. */
-function MessageSheet({ message, text, canEdit, canDelete, onReply, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; onReply: () => void; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
+function MessageSheet({ message, text, canEdit, canDelete, canPin, onPin, onReply, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; canPin: boolean; onPin: () => void; onReply: () => void; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(onClose, 600); }).catch(() => {});
@@ -269,6 +293,7 @@ function MessageSheet({ message, text, canEdit, canDelete, onReply, onEdit, onDe
         <button type="button" role="menuitem" className="m-sheet-item" onClick={onReply}><Icon name="reply" size={20} /> Responder</button>
         {text && <button type="button" role="menuitem" className="m-sheet-item" onClick={copy}><Icon name="file" size={20} /> {copied ? "Copiado!" : "Copiar texto"}</button>}
         {canEdit && <button type="button" role="menuitem" className="m-sheet-item" onClick={onEdit}><Icon name="pencil" size={20} /> Editar mensagem</button>}
+        {canPin && <button type="button" role="menuitem" className="m-sheet-item" onClick={onPin}><Icon name="pin" size={20} /> {message.pinned ? "Desafixar mensagem" : "Fixar mensagem"}</button>}
         <button type="button" role="menuitem" className="m-sheet-item" onClick={onProfile}><Icon name="profile" size={20} /> Ver perfil</button>
         {canDelete && <button type="button" role="menuitem" className="m-sheet-item danger" onClick={onDelete}><Icon name="trash" size={20} /> Apagar mensagem</button>}
         <button type="button" className="m-sheet-cancel" onClick={onClose}>Cancelar</button>
@@ -646,6 +671,12 @@ export function ChatView({
   };
   const [picking, setPicking] = useState<string>();
   const [searching, setSearching] = useState(false);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinTick, setPinTick] = useState(0);
+  const canPin = dm || !!canModerate;
+  const togglePin = (m: Message) => {
+    void api.pin(m.id, !m.pinned).then(() => setPinTick((n) => n + 1)).catch((err: Error) => window.alert(err.message));
+  };
   const toggleReaction = (m: Message, emoji: string) => {
     setPicking(undefined);
     const mine = m.reactions.find((r) => r.emoji === emoji)?.userIds.includes(meId) ?? false;
@@ -675,6 +706,11 @@ export function ChatView({
             </div>
           )}
         </span>
+        {canPin && (
+          <button type="button" title={m.pinned ? "Desafixar" : "Fixar"} aria-label={m.pinned ? "Desafixar mensagem" : "Fixar mensagem"} onClick={() => togglePin(m)}>
+            <Icon name="pin" size={18} />
+          </button>
+        )}
         {mine && m.content !== "" && (
           <button type="button" title="Editar" aria-label="Editar mensagem" onClick={() => setEditing(m.id)}>
             <Icon name="pencil" size={18} />
@@ -693,7 +729,7 @@ export function ChatView({
       <EditBox initial={decodeMentions(m.content, names)} onSave={(v) => void saveEdit(m, v)} onCancel={() => { setEditing(undefined); input.current?.focus(); }} />
     ) : (
       <>
-        <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
+        <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} pinned={m.pinned} />
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
         {m.reactions.length > 0 && (
           <div className="reactions">
@@ -723,6 +759,9 @@ export function ChatView({
         <IconButton label="Buscar mensagens" active={searching} onClick={() => setSearching((v) => !v)}>
           <span aria-hidden="true">🔍</span>
         </IconButton>
+        <IconButton label="Mensagens fixadas" active={pinsOpen} onClick={() => setPinsOpen((v) => !v)}>
+          <Icon name="pin" />
+        </IconButton>
         {!dm && canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />
@@ -732,6 +771,7 @@ export function ChatView({
           <Icon name="users" />
         </IconButton>}
       </ChannelHeader>
+      {pinsOpen && <PinsPanel channelId={channel.id} names={names} tick={pinTick} onClose={() => setPinsOpen(false)} />}
       {searching && <SearchPanel channelId={channel.id} serverId={dm ? undefined : channel.serverId} names={names} onClose={() => setSearching(false)} />}
 
       <div ref={list} className="messages" role="log" aria-label={dm ? `Conversa com ${channel.name}` : `Mensagens em #${channel.name}`} onScroll={onScroll}>
@@ -905,6 +945,8 @@ export function ChatView({
         message={sheet}
         canEdit={sheet.userId === meId && sheet.content !== ""}
         canDelete={sheet.userId === meId || (!!canModerate && !dm)}
+        canPin={canPin}
+        onPin={() => { const m = sheet; setSheet(undefined); togglePin(m); }}
         text={decodeMentions(sheet.content, names)}
         onReply={() => { const m = sheet; setSheet(undefined); startReply(m); }}
         onEdit={() => { setEditing(sheet.id); setSheet(undefined); }}

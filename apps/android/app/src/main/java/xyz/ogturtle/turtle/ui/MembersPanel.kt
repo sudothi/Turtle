@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import xyz.ogturtle.turtle.AppViewModel
+import xyz.ogturtle.turtle.activityOf
 import xyz.ogturtle.turtle.UiState
 import xyz.ogturtle.turtle.data.Member
 import xyz.ogturtle.turtle.ui.theme.Ink
@@ -43,7 +44,7 @@ fun MembersPanel(state: UiState, vm: AppViewModel, serverId: String?, onProfile:
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             if (members.isEmpty()) item { Text("Abra um canal de um servidor para ver os membros.", color = Ink.Muted, modifier = Modifier.padding(16.dp)) }
             if (on.isNotEmpty()) item { SectionLabel("Online — ${on.size}", Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp)) }
-            items(on, key = { "on-${it.userId}" }) { MemberRow(it, if (it.userId in state.dnd) "busy" else "online", vm, true, onProfile) }
+            items(on, key = { "on-${it.userId}" }) { MemberRow(it, if (it.userId in state.dnd) "busy" else "online", vm, true, onProfile, state.activityOf(it.userId)) }
             if (off.isNotEmpty()) item { SectionLabel("Offline — ${off.size}", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) }
             items(off, key = { "off-${it.userId}" }) { MemberRow(it, null, vm, false, onProfile) }
         }
@@ -51,19 +52,26 @@ fun MembersPanel(state: UiState, vm: AppViewModel, serverId: String?, onProfile:
 }
 
 @Composable
-private fun MemberRow(m: Member, status: String?, vm: AppViewModel, online: Boolean, onProfile: (String) -> Unit) {
+private fun MemberRow(m: Member, status: String?, vm: AppViewModel, online: Boolean, onProfile: (String) -> Unit, activity: String? = null) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).clickable { onProfile(m.userId) }.padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(m.shown, vm.api.fileUrl(m.avatar), size = 36.dp, status = status)
         Spacer(Modifier.width(12.dp))
-        Text(m.shown, color = if (online) Ink.Paper else Ink.Faint, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (m.staff) {
-            Spacer(Modifier.width(6.dp))
-            Text("TURTLE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Ink.Ink0,
-                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Ink.Paper).padding(horizontal = 4.dp, vertical = 1.dp))
+        Column(Modifier.weight(1f, fill = false)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(m.shown, color = if (online) Ink.Paper else Ink.Faint, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (m.staff) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("TURTLE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Ink.Ink0,
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Ink.Paper).padding(horizontal = 4.dp, vertical = 1.dp))
+                }
+                roleLabel[m.role]?.let { Text(it, color = Ink.Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp)) }
+            }
+            activity?.let {
+                Text(it, color = Ink.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
-        roleLabel[m.role]?.let { Text(it, color = Ink.Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp)) }
     }
 }

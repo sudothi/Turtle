@@ -1,5 +1,8 @@
 package xyz.ogturtle.turtle.data
 
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -26,7 +29,7 @@ sealed interface ServerEvent {
     /** Servidores, canais, membros, amigos ou conversas mudaram: buscar de novo. */
     data object Refresh : ServerEvent
     /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
-    data class Presence(val online: Set<String>, val busy: Set<String>) : ServerEvent
+    data class Presence(val online: Set<String>, val busy: Set<String>, val activities: Map<String, Activity> = emptyMap()) : ServerEvent
     data class VoiceStates(val states: List<VoiceState>) : ServerEvent
     data class Error(val text: String) : ServerEvent
     /** Alguém está te ligando numa DM ou grupo. `silent` = você está em Não perturbe (só notificar). */
@@ -38,6 +41,11 @@ sealed interface ServerEvent {
 private fun ids(e: kotlinx.serialization.json.JsonElement?): Set<String> =
     (e as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }?.toSet() ?: emptySet()
 
+private val activityMap = MapSerializer(String.serializer(), Activity.serializer())
+/** Jogo de cada pessoa visível; campo ausente ou estranho vira mapa vazio (não derruba o evento). */
+private fun activities(e: kotlinx.serialization.json.JsonElement?): Map<String, Activity> =
+    if (e == null) emptyMap() else runCatching { TurtleJson.decodeFromJsonElement(activityMap, e) }.getOrDefault(emptyMap())
+
 fun parseServerEvent(text: String): ServerEvent? {
     val o = runCatching { TurtleJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
     fun str(k: String) = o[k]?.jsonPrimitive?.contentOrNull
@@ -48,7 +56,7 @@ fun parseServerEvent(text: String): ServerEvent? {
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
             "sync", "friends", "channel", "userUpdate" -> ServerEvent.Refresh // userUpdate só chega a quem divide servidor/DM/amizade
-            "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
+            "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]), activities(o["activities"]))
             "voiceStates" -> ServerEvent.VoiceStates(
                 TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),
             )

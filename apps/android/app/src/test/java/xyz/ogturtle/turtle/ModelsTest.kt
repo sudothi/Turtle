@@ -1,5 +1,7 @@
 package xyz.ogturtle.turtle
 
+import xyz.ogturtle.turtle.data.text
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import xyz.ogturtle.turtle.data.Channel
@@ -66,6 +68,13 @@ class ProfileAndPresenceTest {
     fun parsesPresence() {
         val e = xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"presence","online":["a","b"],"busy":["b"]}""")
         assertEquals(xyz.ogturtle.turtle.data.ServerEvent.Presence(setOf("a", "b"), setOf("b")), e)
+    }
+
+    @Test
+    fun parsesActivities() {
+        val e = xyz.ogturtle.turtle.data.parseServerEvent("""{"t":"presence","online":["a"],"busy":[],"activities":{"a":{"game":"lol","phase":"queue","detail":"ARAM","since":null}}}""")
+        val p = e as xyz.ogturtle.turtle.data.ServerEvent.Presence
+        assertEquals("Jogando League of Legends · Na fila · ARAM", p.activities["a"]!!.text())
     }
 
     @Test

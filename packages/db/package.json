@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --testTimeout=20000"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",

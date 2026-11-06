@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { shownName } from "@turtle/protocol";
 import { useCall, usePresence, useWorkspace } from "../workspace-context";
 import { Avatar, IconButton } from "../ui/layout";
+import { Notice } from "../ui/components";
 import { Icon, type IconName } from "../ui/Icon";
 import { colors, fonts, styles as text } from "../ui/theme";
 import { useAppNavigation } from "./types";
@@ -52,12 +53,13 @@ export default function ProfileBar({ onHeightChange }: { onHeightChange: (height
           <View style={s.handle} />
           <View style={s.sheetHeader}>
             <Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} size={56} online={presence.connected} />
-            <View style={s.summary}><Text accessibilityRole="header" style={text.subtitle}>{shownName(user)}</Text><Text style={text.caption}>@{user.username}</Text><Text style={text.caption}>{status}</Text></View>
+            <View style={s.summary}><Text accessibilityRole="header" numberOfLines={2} style={text.subtitle}>{shownName(user)}</Text><Text numberOfLines={1} style={text.caption}>@{user.username}</Text><Text numberOfLines={1} style={text.caption}>{status}</Text></View>
             <IconButton name="close" label="Fechar perfil" onPress={() => dismiss()} />
           </View>
           <ScrollView bounces={false} contentContainerStyle={s.actions}>
             {inCall && <>
               <Text accessibilityRole="header" style={[text.serverTitle, { paddingHorizontal: 12, marginTop: 8 }]}>{call.channelName}</Text>
+              <Notice>{call.error}</Notice>
               <ProfileAction icon="speaker" label="Abrir chamada e áudio" onPress={() => openRoute("Call")} />
               <ProfileAction icon={call.muted ? "mic-off" : "mic"} label={call.muted ? "Abrir microfone" : "Fechar microfone"} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} />
               <ProfileAction icon={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir" : "Ensurdecer"} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />

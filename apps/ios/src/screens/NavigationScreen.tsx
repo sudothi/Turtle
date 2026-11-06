@@ -4,10 +4,11 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { dmTitle, shownName, type Dm } from "@turtle/protocol";
 import { useCall, useDirectory, usePresence, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation } from "../navigation/types";
-import { CallDock, useJoinCall } from "../navigation/call-access";
-import { Avatar, Empty, IconButton, ReadStatus } from "../ui/layout";
+import { useJoinCall } from "../navigation/call-access";
+import { Avatar, Empty, ReadStatus } from "../ui/layout";
 import { Icon } from "../ui/Icon";
 import { TurtleMark } from "../ui/brand";
+import ProfileBar from "../navigation/ProfileBar";
 import { colors, fonts, styles as text } from "../ui/theme";
 
 function SidebarRow({ title, leading, selected, onPress }: { title: string; leading: ReactNode; selected?: boolean; onPress: () => void }) {
@@ -20,28 +21,6 @@ function Category({ title, children }: { title: string; children: ReactNode }) {
 function RailItem({ title, selected, children, onPress }: { title: string; selected: boolean; children: ReactNode; onPress: () => void }) {
   return <View style={s.railSlot}>{selected && <View style={s.marker} />}<Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => [s.railIcon, selected && s.railSelected, pressed && { opacity: 0.7 }]}>{children}</Pressable></View>;
 }
-function UserPanel() {
-  const { user, workspace } = useWorkspace();
-  const call = useCall();
-  const presence = usePresence();
-  const navigation = useAppNavigation();
-  const insets = useSafeAreaInsets();
-  return <View style={{ backgroundColor: colors.userPanel, paddingBottom: insets.bottom }}>
-    <CallDock controls={false} onOpen={() => navigation.navigate("Call")} />
-    <View style={s.userPanel}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Configurações de ${shownName(user)}`} onPress={() => navigation.navigate("Settings")} style={s.userIdentity}>
-        <Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} size={32} online={presence.connected} />
-        <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={[text.label, { fontSize: 14 }]}>{shownName(user)}</Text><Text numberOfLines={1} style={text.caption}>{presence.connected ? "Online" : "Reconectando…"}</Text></View>
-      </Pressable>
-      {call.status !== "idle" && <>
-        <IconButton name={call.muted ? "mic-off" : "mic"} label={call.muted ? "Abrir microfone" : "Fechar microfone"} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} />
-        <IconButton name={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir" : "Ensurdecer"} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />
-      </>}
-      <IconButton name="settings" label="Configurações" onPress={() => navigation.navigate("Settings")} />
-    </View>
-  </View>;
-}
-
 // Keep rail and contextual sidebar together, as on web/Android. Native-stack
 // transitions provide the iPhone content/back gesture without owning the call.
 export default function NavigationScreen() {
@@ -52,6 +31,7 @@ export default function NavigationScreen() {
   const navigation = useAppNavigation();
   const join = useJoinCall();
   const insets = useSafeAreaInsets();
+  const [profileHeight, setProfileHeight] = useState(72);
   const [place, setPlace] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const conversations = useRead<Dm[]>([], useCallback(() => workspace.api.dms(), [workspace]));
@@ -67,9 +47,10 @@ export default function NavigationScreen() {
     setSelected(channelId);
     navigation.navigate("Conversation", { channelId, title, serverId });
   };
-  return <SafeAreaView edges={["left", "right"]} style={s.shell}>
+  return <SafeAreaView edges={["left", "right"]} style={s.shell}><View style={{ flex: 1 }}>
+    <View style={s.panes}>
     <SafeAreaView edges={["top", "bottom"]} style={s.rail}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.railContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.railContent, { paddingBottom: profileHeight + 24 }]}>
         <RailItem title="Mensagens diretas" selected={!entry} onPress={() => setPlace(undefined)}><TurtleMark color={!entry ? colors.rail : colors.paper} /></RailItem>
         <View style={s.divider} />
         {directory.data.map(({ server }) => <RailItem key={server.id} title={server.name} selected={server.id === entry?.server.id} onPress={() => setPlace(server.id)}>
@@ -83,7 +64,7 @@ export default function NavigationScreen() {
           <Text numberOfLines={1} accessibilityRole="header" style={s.headerTitle}>{entry?.server.name || "Mensagens diretas"}</Text>{entry && <Icon name="chevron-down" size={18} color={colors.paper} />}
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={s.list} refreshControl={<RefreshControl refreshing={directory.loading || (!entry && conversations.loading)} onRefresh={() => { void workspace.directory.refresh(); if (!entry) conversations.refresh(); }} tintColor={colors.paper} />}>
+      <ScrollView contentContainerStyle={[s.list, { paddingBottom: profileHeight + insets.bottom + 24 }]} refreshControl={<RefreshControl refreshing={directory.loading || (!entry && conversations.loading)} onRefresh={() => { void workspace.directory.refresh(); if (!entry) conversations.refresh(); }} tintColor={colors.paper} />}>
         <ReadStatus loading={directory.loading && !directory.data.length} error={directory.error} retry={workspace.directory.refresh} />
         {!entry ? <>
           <SidebarRow title="Amigos" leading={<Icon name="users" size={24} />} selected={selected === "friends"} onPress={() => { setSelected("friends"); navigation.navigate("Friends"); }} />
@@ -103,13 +84,15 @@ export default function NavigationScreen() {
           {!entry.channels.length && <Empty title="Nenhum canal">Os canais deste servidor aparecerão aqui.</Empty>}
         </>}
       </ScrollView>
-      <UserPanel />
     </View>
-  </SafeAreaView>;
+    </View>
+    <ProfileBar onHeightChange={setProfileHeight} />
+  </View></SafeAreaView>;
 }
 
 const s = StyleSheet.create({
-  shell: { flex: 1, flexDirection: "row", backgroundColor: colors.rail },
+  shell: { flex: 1, backgroundColor: colors.rail },
+  panes: { flex: 1, flexDirection: "row" },
   rail: { width: 72, backgroundColor: colors.rail }, railContent: { paddingVertical: 12, gap: 8, alignItems: "center" },
   railSlot: { width: 72, alignItems: "center", justifyContent: "center", minHeight: 48 },
   railIcon: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.input, overflow: "hidden" },
@@ -126,6 +109,4 @@ const s = StyleSheet.create({
   dmCategory: { paddingHorizontal: 8, marginTop: 16, marginBottom: 8 },
   groupAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.elevated, alignItems: "center", justifyContent: "center" },
   voiceMember: { minHeight: 32, marginLeft: 30, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 8 },
-  userPanel: { paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", borderTopWidth: 2, borderColor: colors.rail },
-  userIdentity: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
 });

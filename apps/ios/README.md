@@ -6,7 +6,7 @@ React Native/Expo com build nativo próprio, LiveKit e Keychain. Alvo: iOS 26.0 
 
 - **Barra de servidores:** tartaruga para mensagens diretas e ícones dos servidores, como na web/desktop e no Android. Selecionar um servidor atualiza a lista lateral de canais de texto/voz. O cabeçalho do servidor abre membros e atualização dos canais.
 - **Mensagens diretas:** entrada para Amigos e lista de conversas existentes. Amigos tem filtros Online/Todos/Pendentes e busca por nome/usuário. Abrir um canal ou conversa mostra o histórico; voltar pelo botão ou gesto retorna à mesma seleção lateral.
-- **Painel do usuário:** avatar, presença e engrenagem no rodapé da lista lateral. Configurações abre conta, origem do servidor, áudio e saída da conta com confirmação.
+- **Barra de perfil:** flutua na base sobre as duas colunas, com avatar, nome e presença/estado de voz. Tocar no perfil abre um painel inferior com configurações e controles da chamada ativa. O atalho à direita abre configurações ou a chamada. Configurações inclui conta, origem do servidor, áudio e saída da conta com confirmação.
 - **Chamada:** modal com grade de participantes e controles de microfone, escuta, saída de áudio e desconexão. Fechar o modal mantém a chamada; a barra de voz no rodapé permite voltar a ela nas outras telas, inclusive membros e configurações.
 
 A interface usa as mesmas cores tinta/papel, famílias Figtree/Bricolage Grotesque e desenhos vetoriais da web. Listas e categorias seguem a organização existente, com alvos de toque de pelo menos 44 pt no iPhone.
@@ -56,8 +56,8 @@ Para a navegação da #48, validar também:
 
 1. Compare com web/desktop: barra vertical de servidores, mensagens diretas, categorias de canais, seleção, tipografia e painel do usuário. Alterne servidores, abra canais/conversas e volte por botão/gesto, mantendo a seleção lateral.
 2. Durante uma chamada, abrir outra conversa e outro servidor, membros e configurações; retornar pela barra. Confirmar que áudio e mudo permanecem iguais e que o microfone não reabre ao voltar de ensurdecer.
-3. Tocar no cabeçalho do servidor, cancelar a ação, abrir/fechar membros, acessar configurações pela engrenagem e cancelar logout. Tudo deve funcionar por toque, com retorno previsível.
-4. Girar retrato/paisagem, buscar com teclado aberto e aumentar o tamanho de texto no iOS. Conferir controles e conteúdo sem rolagem horizontal; o painel do usuário e a barra de voz também devem continuar legíveis.
+3. Tocar no cabeçalho do servidor, cancelar a ação e abrir/fechar membros. Abrir o painel pelo perfil, fechar pelo botão/fundo, acessar configurações e cancelar logout. Durante a chamada, testar os controles no painel e abrir a tela de áudio. Fechar o painel mantém a chamada.
+4. Girar retrato/paisagem, buscar com teclado aberto e aumentar o tamanho de texto no iOS. Conferir controles e conteúdo sem rolagem horizontal; a barra flutuante deve respeitar a área inferior e o último item das duas listas deve continuar alcançável por rolagem. O painel de perfil deve permitir rolar suas ações.
 5. Com VoiceOver, conferir nomes e seleção dos servidores/canais, categorias recolhíveis, filtros de amigos, campos de busca, ícones de ação, participantes e retorno dos modais. Não marcar VoiceOver como validado apenas por presença de rótulos no código.
 6. Usar sem rede e tentar novamente. Ao perder acesso a conversa/servidor, o conteúdo inacessível deve ser removido e deve aparecer um erro compreensível.
 

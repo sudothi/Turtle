@@ -1,7 +1,7 @@
 name: Desktop (Windows)
 # Gera o instalador do Windows. Roda em PRs que mexem no desktop e sob demanda (Actions > Run workflow).
-# O instalador fica em "Artifacts" na página da execução; publicar no VPS é um passo manual
-# (ver docs/planos/instalador-desktop.md).
+# O instalador fica em "Artifacts" na página da execução. Para publicar no site, rode este
+# workflow na main (Run workflow) e depois Actions > Publish desktop (VPS).
 on:
   workflow_dispatch:
   pull_request:

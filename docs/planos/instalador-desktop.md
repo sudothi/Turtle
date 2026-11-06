@@ -45,3 +45,16 @@ Issue #37. O app desktop instalado abre `https://app.ogturtle.xyz`, com a cara d
 - `apps/desktop/build/`: ícone e imagens BMP do instalador (gerados por `pnpm --filter @turtle/desktop arte`).
 - `apps/desktop/src/updater.ts`, `splash.ts`, `tray.ts`: atualização, splash e bandeja.
 - `.github/workflows/desktop.yml`: build do instalador no Windows.
+
+## Publicar pelo GitHub Actions
+
+1. Actions > **Desktop (Windows)** > Run workflow (branch main). Gera o artefato `turtle-windows`
+   (válido por 14 dias).
+2. Actions > **Publish desktop (VPS)** > Run workflow. Baixa o artefato e envia por ssh usando a
+   mesma chave de deploy; o ramo `publish-desktop` de `infra/deploy.sh` só aceita
+   `Turtle-Setup-*.exe`, `.blockmap` e `latest.yml`, grava o `latest.yml` por último e guarda as 3
+   últimas versões.
+
+Uma única vez na VPS (precisa de ok): copiar o `infra/deploy.sh` atualizado para `~/turtle/deploy.sh`
+(`mkdir -p ~/turtle/desktop` o script faz sozinho), e conferir o bloco `/desktop/*` do Caddy e o
+volume `./desktop:/srv/desktop:ro` no compose de produção (`docker compose up -d caddy` se faltar).

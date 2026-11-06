@@ -713,6 +713,14 @@ describe("amigos e mensagens diretas", () => {
   });
 
 
+  it("prévia de links: exige login e não alcança endereço interno", async () => {
+    expect((await get(`/link-preview?url=${encodeURIComponent("http://example.com")}`, "")).status).toBe(401);
+    expect((await get(`/link-preview?url=${encodeURIComponent("http://169.254.169.254/latest/meta-data/")}`, a)).status).toBe(404);
+    expect((await get(`/link-preview?url=${encodeURIComponent("file:///etc/passwd")}`, a)).status).toBe(404);
+    expect((await get(`/link-preview`, a)).status).toBe(400);
+  });
+
+
   it("fixar: participantes da DM fixam, lista de fixadas e quem não participa não vê", async () => {
     const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
     const A = await wsOpen(a);

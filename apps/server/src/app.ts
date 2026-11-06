@@ -61,6 +61,7 @@ import {
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
+import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
 
 export interface AppOptions {
   db: Db;
@@ -91,6 +92,8 @@ export interface AppOptions {
   maxDiskUsageRatio?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
+  /** Só para testes: deixa a prévia de links alcançar endereços locais. */
+  linkPreviewAllowPrivate?: boolean;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
   roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
   /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
@@ -149,7 +152,7 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService,
+  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
@@ -1541,6 +1544,25 @@ export async function buildApp({
       Number((await db.select({ n: sql<number>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(eq(attachments.userId, userId)))[0]?.n ?? 0);
     const fmtMb = (b: number) => (b / 1024 / 1024).toFixed(b >= 10 * 1024 * 1024 ? 0 : 1);
     /** Uso da cota de anexos da própria conta (mostrado em Configurações). */
+    // ---- Prévia de links ----
+    // O servidor busca a página (só endereços públicos, sem imagem, 512 KB, 5 s); o cliente nunca toca no site de terceiros.
+    const previewLimit = attemptLimiter({ max: 30, windowMs: 60_000 });
+    const previewCache = new Map<string, { at: number; preview: LinkPreview | null }>();
+    authed.get<{ Querystring: { url?: string } }>("/link-preview", async (req, reply) => {
+      const url = String(req.query.url ?? "").slice(0, 2000);
+      if (!url) return reply.code(400).send({ error: "link inválido" });
+      const key = me(req).id;
+      if (previewLimit.blockedFor(key)) return reply.code(429).send({ error: "devagar" });
+      let hit = previewCache.get(url);
+      if (!hit || Date.now() - hit.at > 3_600_000) {
+        previewLimit.hit(key);
+        hit = { at: Date.now(), preview: await fetchLinkPreview(url, { allowPrivate: linkPreviewAllowPrivate }) };
+        if (previewCache.size >= 500) previewCache.delete(previewCache.keys().next().value!);
+        previewCache.set(url, hit);
+      }
+      return hit.preview ?? reply.code(404).send({ error: "sem prévia" });
+    });
+
     authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));
     /** Envia um arquivo para usar na próxima mensagem do canal (evento "send" com `attachments`). */
     authed.post<{ Params: { id: string } }>("/channels/:id/attachments", async (req, reply) => {

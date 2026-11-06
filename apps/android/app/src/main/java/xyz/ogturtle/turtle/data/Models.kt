@@ -54,6 +54,27 @@ data class Dm(
 @Serializable
 data class Unread(val channelId: String, val serverId: String? = null, val count: Int = 0, val mentions: Int = 0)
 
+/** Quem está numa chamada de voz (evento `voiceStates` do servidor). */
+@Serializable
+data class VoiceState(
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatar: String? = null,
+    val channelId: String,
+    val serverId: String? = null,
+    val muted: Boolean = false,
+    val deafened: Boolean = false,
+    val camera: Boolean = false,
+    val screen: Boolean = false,
+) {
+    val shown get() = displayName?.takeIf { it.isNotBlank() } ?: username
+}
+
+/** Resposta de POST /voice/:canal/token. */
+@Serializable
+data class VoiceToken(val url: String, val token: String)
+
 @Serializable
 data class Friend(val user: Person, val status: String)
 
@@ -121,28 +142,6 @@ data class ProfileView(
 ) {
     val shown get() = displayName?.takeIf { it.isNotBlank() } ?: username
 }
-
-/** Quem está em qual canal de voz (para a barra lateral, mesmo fora da chamada). */
-@Serializable
-data class VoiceState(
-    val userId: String,
-    val username: String,
-    val displayName: String? = null,
-    val avatar: String? = null,
-    val staff: Boolean = false,
-    val channelId: String,
-    val serverId: String = "",
-    val muted: Boolean = false,
-    val deafened: Boolean = false,
-    val camera: Boolean = false,
-    val screen: Boolean = false,
-) {
-    val shown get() = displayName?.takeIf { it.isNotBlank() } ?: username
-}
-
-/** Resposta de POST /voice/:channelId/token. */
-@Serializable
-data class VoiceToken(val url: String, val token: String)
 
 val Person.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username
 val User.shownName get() = displayName?.takeIf { it.isNotBlank() } ?: username

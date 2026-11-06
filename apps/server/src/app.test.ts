@@ -803,6 +803,35 @@ describe("chat do dia a dia", () => {
     m.close();
   });
 
+  it("nonce: confirma o envio, reenvio não duplica e erro volta com o nonce", async () => {
+    const d = await listen(dono);
+    const m = await listen(membro);
+    const msg = { t: "send", channelId: geral, content: "mensagem única", nonce: "n-123" };
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const first = d.events.find((e) => e.t === "message" && e.message.content === "mensagem única");
+    expect(first.nonce).toBe("n-123");
+    // a conexão caiu antes da confirmação: o cliente reenvia o mesmo nonce
+    d.ws.send(JSON.stringify(msg));
+    await settle();
+    const confirms = d.events.filter((e) => e.t === "message" && e.nonce === "n-123");
+    expect(confirms).toHaveLength(2);
+    expect(confirms[1].message.id).toBe(first.message.id);
+    // os outros recebem uma vez só, e o histórico tem uma só
+    expect(m.events.filter((e) => e.t === "message" && e.message.content === "mensagem única")).toHaveLength(1);
+    expect((await get(`/channels/${geral}/messages`, dono)).body.filter((x: any) => x.content === "mensagem única")).toHaveLength(1);
+    // outra pessoa com o mesmo nonce não é confundida
+    m.ws.send(JSON.stringify({ ...msg, content: "do membro" }));
+    await settle();
+    expect(m.events.find((e) => e.t === "message" && e.nonce === "n-123" && e.message.content === "do membro")).toBeTruthy();
+    // falha: o erro diz qual envio foi
+    d.ws.send(JSON.stringify({ t: "send", channelId: "nao-existe", content: "x", nonce: "n-err" }));
+    await settle();
+    expect(d.events.find((e) => e.t === "error" && e.nonce === "n-err")).toBeTruthy();
+    d.close();
+    m.close();
+  });
+
   it("anexos: imagem sem metadados, arquivo baixável, só no próprio canal, e somem com a mensagem", async () => {
     const sharp = (await import("sharp")).default;
     const jpg = new Uint8Array(await sharp({ create: { width: 40, height: 20, channels: 3, background: "#123" } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: "segredo" } } }).toBuffer());

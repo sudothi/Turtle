@@ -10,7 +10,7 @@ import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
 import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
-import { ChatView } from "../components/ChatView";
+import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
@@ -23,6 +23,10 @@ import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../comp
 
 const MEMBERS_KEY = "turtle.membersOpen";
 /** Página do histórico (o servidor manda até 50 por vez). */
+/** Evento de envio de uma mensagem da fila. */
+const sendEvent = (o: Outgoing) => ({
+  t: "send", channelId: o.channelId, content: o.content, attachments: o.attachments, nonce: o.nonce, ...(o.replyTo ? { replyTo: o.replyTo } : {}),
+});
 const PAGE = 50;
 const DM_PANEL_KEY = "turtle.dmPanel";
 const SERVER_KEY = "turtle.server";
@@ -52,6 +56,11 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [busy, setBusy] = useState<string[]>([]);
   /** Ainda há mensagens mais antigas no canal aberto. */
   const [hasMore, setHasMore] = useState(false);
+  /** Mensagens enviadas ainda sem confirmação do servidor (ou que falharam). */
+  const [outbox, setOutbox] = useState<Outgoing[]>([]);
+  const outboxRef = useRef(outbox);
+  outboxRef.current = outbox;
+  const reconnectNow = useRef<() => void>(() => {});
   const [editingChannel, setEditingChannel] = useState<Channel>();
   const [voiceStates, setVoiceStates] = useState<VoiceState[]>([]);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
@@ -308,19 +317,44 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   useEffect(() => {
     let closed = false;
     let retry: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    let opened = false;
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const s = new WebSocket(`${proto}://${location.host}/ws?token=${getToken()}`);
       ws.current = s;
       s.onopen = () => {
+        attempts = 0;
         voice.resendState();
         void loadUnread().catch(() => {});
+        // Reenvia o que ficou sem confirmação (o servidor ignora o que já tinha entrado, pelo nonce).
+        for (const o of outboxRef.current) if (o.status === "sending") s.send(JSON.stringify(sendEvent(o)));
+        // Reconectou: busca a última página da conversa aberta (chegou mensagem durante a queda).
+        if (opened && currentRef.current) {
+          const id = currentRef.current;
+          api.messages(id).then((fresh) => {
+            if (currentRef.current !== id) return;
+            setMessages((old) => {
+              const byId = new Map(fresh.map((m) => [m.id, m]));
+              const cut = fresh[0]?.createdAt ?? "";
+              return [...old.filter((m) => m.createdAt < cut && !byId.has(m.id)), ...fresh];
+            });
+          }).catch(() => {});
+        }
+        opened = true;
       };
       s.onmessage = (ev) => {
         const parsed = serverEvent.safeParse(JSON.parse(ev.data));
         if (!parsed.success) return;
         const evt = parsed.data;
-        if (evt.t === "message") onMessage.current(evt.message);
+        if (evt.t === "message") {
+          if (evt.nonce) setOutbox((l) => (l.some((o) => o.nonce === evt.nonce) ? l.filter((o) => o.nonce !== evt.nonce) : l));
+          onMessage.current(evt.message);
+        }
+        if (evt.t === "error" && evt.nonce) {
+          const nonce = evt.nonce;
+          setOutbox((l) => l.map((o) => (o.nonce === nonce ? { ...o, status: "failed", error: evt.error } : o)));
+        }
         if (evt.t === "messageUpdate" && evt.message.channelId === currentRef.current) {
           const m = evt.message;
           // Atualiza a mensagem e a prévia dela nas respostas.
@@ -360,17 +394,62 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       };
       s.onclose = (ev) => {
         if (ev.code === 4401) return onLogout();
-        if (!closed) retry = setTimeout(connect, 2000);
+        // Espera crescente (1, 2, 4… até 10 s) com um pouco de sorteio, para todos não voltarem juntos.
+        const wait = Math.min(10_000, 1000 * 2 ** attempts++) * (0.75 + Math.random() * 0.5);
+        if (!closed) retry = setTimeout(connect, wait);
       };
     };
     connect();
-    return () => { closed = true; clearTimeout(retry); ws.current?.close(); };
+    // Rede voltou, app voltou para a frente ou a pessoa pediu para reenviar: tenta na hora, sem esperar a vez.
+    reconnectNow.current = () => {
+      const st = ws.current?.readyState;
+      if (closed || st === WebSocket.OPEN || st === WebSocket.CONNECTING) return;
+      clearTimeout(retry);
+      attempts = 0;
+      connect();
+    };
+    const wake = () => { if (document.visibilityState === "visible") reconnectNow.current(); };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      closed = true;
+      clearTimeout(retry);
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      ws.current?.close();
+    };
   }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
 
+  /** Envia pelo WebSocket se estiver aberto; senão fica na fila e vai quando reconectar. */
+  const transmit = useCallback((o: Outgoing) => {
+    const s = ws.current;
+    if (s?.readyState === WebSocket.OPEN) s.send(JSON.stringify(sendEvent(o)));
+    else reconnectNow.current();
+  }, []);
+  // Sem confirmação em 15 s: marca como não enviada (a pessoa escolhe reenviar ou descartar).
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now();
+      if (outboxRef.current.some((o) => o.status === "sending" && now - o.at > 15_000))
+        setOutbox((l) => l.map((o) => (o.status === "sending" && now - o.at > 15_000 ? { ...o, status: "failed", error: "sem conexão com o servidor" } : o)));
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
   const send = useCallback((content: string, attachments: string[] = [], replyTo?: string) => {
     if (!activeId) return;
-    ws.current?.send(JSON.stringify({ t: "send", channelId: activeId, content, attachments, ...(replyTo ? { replyTo } : {}) }));
-  }, [activeId]);
+    const o: Outgoing = { nonce: crypto.randomUUID(), channelId: activeId, content, attachments, replyTo, status: "sending", at: Date.now() };
+    setOutbox((l) => [...l, o]);
+    transmit(o);
+  }, [activeId, transmit]);
+  const retrySend = useCallback((nonce: string) => {
+    const o = outboxRef.current.find((x) => x.nonce === nonce);
+    if (!o) return;
+    const again = { ...o, status: "sending" as const, error: undefined, at: Date.now() };
+    setOutbox((l) => l.map((x) => (x.nonce === nonce ? again : x)));
+    transmit(again);
+  }, [transmit]);
+  const discardSend = useCallback((nonce: string) => setOutbox((l) => l.filter((x) => x.nonce !== nonce)), []);
+  const pendingHere = outbox.filter((o) => o.channelId === activeId);
 
   const openDm = useCallback((dm: Dm) => {
     setHome(true);
@@ -622,6 +701,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
               members={dmMembers}
               meId={user.id}
               onSend={send}
+              outbox={pendingHere}
+              onRetry={retrySend}
+              onDiscard={discardSend}
+              me={user}
               membersOpen={false}
               onToggleMembers={() => {}}
               canInvite={false}
@@ -667,6 +750,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             members={members}
             meId={user.id}
             onSend={send}
+            outbox={pendingHere}
+            onRetry={retrySend}
+            onDiscard={discardSend}
+            me={user}
             membersOpen={mobile ? drawer : membersOpen}
             onToggleMembers={toggleMembers}
             canInvite

@@ -916,3 +916,14 @@ a.auth-brand { text-decoration: none; }
 .app.m .msg-reply { padding-left: 48px; }
 .app.m .msg-reply::before { left: 18px; width: 24px; }
 @media (prefers-reduced-motion: reduce) { .msg.flash { animation: none; background: rgba(255, 255, 255, 0.12); } }
+
+/* Mensagens ainda sem confirmação: só ficam apagadas se demorarem (envio normal leva milissegundos). */
+.msg.outgoing .msg-status { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
+.msg.outgoing.sending .msg-status, .msg.outgoing.sending .msg-text { animation: t-outgoing-wait 0s linear 0.7s both; }
+.msg.outgoing.sending .msg-status { visibility: hidden; animation-name: t-outgoing-show; }
+@keyframes t-outgoing-wait { to { opacity: 0.55; } }
+@keyframes t-outgoing-show { to { visibility: visible; } }
+.msg.outgoing.failed .msg-text { opacity: 0.55; text-decoration: line-through dashed var(--text-faint); }
+.msg.outgoing.failed .msg-status { color: var(--paper); font-style: normal; font-weight: 700; }
+.msg-failed { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.msg-failed .link { text-decoration: underline; color: var(--paper); cursor: pointer; }

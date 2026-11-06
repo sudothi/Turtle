@@ -196,6 +196,14 @@ export async function buildApp({
     broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
   };
 
+  /** Nonces de envio recentes (10 min) por conta: o reenvio depois de uma queda não duplica a mensagem. */
+  const sentNonces = new Map<string, { id: string; at: number }>();
+  const rememberNonce = (key: string, id: string) => {
+    const now = Date.now();
+    if (sentNonces.size > 5000) for (const [k, v] of sentNonces) if (now - v.at > 10 * 60_000) sentNonces.delete(k);
+    sentNonces.set(key, { id, at: now });
+  };
+
   // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
   const voice = new Map<Socket, VoiceState>();
   const voiceStatesFor = (socket: Socket): ServerEvent => {
@@ -1292,6 +1300,14 @@ export async function buildApp({
           broadcastVoice();
           return;
         }
+        // Reenvio de algo que já entrou (a conexão caiu antes da confirmação): só confirma de novo.
+        const nonceKey = evt.nonce ? `${user.id}:${evt.nonce}` : undefined;
+        const already = nonceKey ? sentNonces.get(nonceKey) : undefined;
+        if (already) {
+          const prev = await loadMessage(already.id);
+          if (prev) socket.send(JSON.stringify({ t: "message", message: prev, nonce: evt.nonce } satisfies ServerEvent));
+          return;
+        }
         const channel = await findChannel(evt.channelId);
         const isDm = channel?.kind === "dm";
         const allowed = !channel
@@ -1300,21 +1316,21 @@ export async function buildApp({
             ? await isDmMember(channel.id, user.id)
             : channel.kind === "text" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
         if (!channel || !allowed)
-          return socket.send(JSON.stringify({ t: "error", error: "canal não existe" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "canal não existe" } satisfies ServerEvent));
         if (isDm && (await dmBlocked(channel.id)))
-          return socket.send(JSON.stringify({ t: "error", error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "não é possível enviar mensagem para essa pessoa" } satisfies ServerEvent));
         // Anexos: só os que a própria pessoa enviou para este canal e ainda não usou.
         const picked = evt.attachments.length
           ? await db.select(attachmentCols).from(attachments).where(and(inArray(attachments.id, evt.attachments), eq(attachments.userId, user.id), eq(attachments.channelId, channel.id), isNull(attachments.messageId)))
           : [];
         if (picked.length !== new Set(evt.attachments).size)
-          return socket.send(JSON.stringify({ t: "error", error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
+          return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "anexo inválido; envie o arquivo de novo" } satisfies ServerEvent));
         // Resposta: só a uma mensagem que ainda existe no mesmo canal.
         const replyTo = evt.replyTo ? (await replyPreviews([evt.replyTo])).get(evt.replyTo) : undefined;
         if (evt.replyTo) {
           const target = replyTo && (await db.select({ c: messages.channelId }).from(messages).where(eq(messages.id, evt.replyTo)).limit(1))[0];
           if (!target || target.c !== channel.id)
-            return socket.send(JSON.stringify({ t: "error", error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
+            return socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, error: "a mensagem respondida não existe mais" } satisfies ServerEvent));
         }
         const message: Message = {
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
@@ -1324,9 +1340,10 @@ export async function buildApp({
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));
+        if (nonceKey) rememberNonce(nonceKey, message.id);
         await markRead(user.id, channel.id);
-        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
-        else toServer(channel.serverId!, { t: "message", message });
+        if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message, nonce: evt.nonce });
+        else toServer(channel.serverId!, { t: "message", message, nonce: evt.nonce });
       };
     });
   });

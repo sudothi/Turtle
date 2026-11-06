@@ -278,6 +278,11 @@ export const clientEvent = z.discriminatedUnion("t", [
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
     /** Responder a uma mensagem do mesmo canal. */
     replyTo: z.string().max(64).optional(),
+    /**
+     * Id gerado pelo cliente: volta no evento `message` (ou `error`) para confirmar o envio, e o servidor
+     * ignora o reenvio do mesmo nonce (quando a conexão caiu antes da confirmação).
+     */
+    nonce: z.string().max(64).optional(),
   }),
   /** channelId null = saiu da voz. */
   z.object({
@@ -289,7 +294,7 @@ export const clientEvent = z.discriminatedUnion("t", [
 });
 export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),
-  z.object({ t: z.literal("message"), message: messageSchema }),
+  z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
   z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
   /** Você leu a conversa em outro aparelho: tira a marca de não lida. */
@@ -303,7 +308,8 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
-  z.object({ t: z.literal("error"), error: z.string() }),
+  /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
+  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
 ]);
 
 export type ClientEvent = z.infer<typeof clientEvent>;

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, type WebContents } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, session, shell, type WebContents } from "electron";
 import { appIcon } from "./paths.js";
 import { Splash } from "./splash.js";
 import { createTray } from "./tray.js";
@@ -176,6 +176,23 @@ else {
       if (fromApp(event.sender) && win && !win.isFocused()) win.flashFrame(true);
     });
     ipcMain.on("win:focus", (event) => fromApp(event.sender) && showWindow());
+    // Atalhos globais de mudo e ensurdecer: o site manda as teclas; ao apertar, o processo principal avisa o site.
+    ipcMain.on("shortcuts:set", (event, s: unknown) => {
+      if (!fromApp(event.sender) || !s || typeof s !== "object") return;
+      globalShortcut.unregisterAll();
+      const seen = new Set<string>();
+      for (const which of ["mute", "deafen"] as const) {
+        const key = (s as Record<string, unknown>)[which];
+        if (typeof key !== "string" || !key || key.length > 60 || seen.has(key)) continue;
+        seen.add(key);
+        try {
+          globalShortcut.register(key, () => win?.webContents.send("shortcut:fired", which));
+        } catch {
+          // tecla inválida: ignora
+        }
+      }
+    });
+    app.on("will-quit", () => globalShortcut.unregisterAll());
     const splash = new Splash();
     if (await updateOnLaunch(splash)) return; // fecha para instalar a versão nova
     splash.status("Abrindo…");

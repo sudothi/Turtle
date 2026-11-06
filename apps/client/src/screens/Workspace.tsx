@@ -3,6 +3,7 @@ import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, sh
 import { Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
+import { desktop, loadShortcuts } from "../desktop";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -287,6 +288,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     };
   }, [markRead]);
   useEffect(() => askNotificationsOnFirstClick(), []);
+  // Atalhos globais do app desktop: registra os guardados e reage ao aperto (o som sai do efeito de mudo/ensurdecer).
+  useEffect(() => {
+    const d = desktop();
+    if (!d?.setShortcuts || !d.onShortcut) return;
+    d.setShortcuts(loadShortcuts());
+    return d.onShortcut((which) => void (which === "mute" ? voice.toggleMute() : voice.toggleDeafen()));
+  }, [voice]);
 
   // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
   const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });

@@ -1,5 +1,5 @@
-import Fastify, { type FastifyRequest } from "fastify";
-import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
+import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
+import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "livekit-server-sdk";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { createReadStream } from "node:fs";
@@ -72,6 +72,34 @@ export interface AppOptions {
   trustProxy?: string[] | boolean;
   /** Tentativas de login/cadastro por IP a cada 10 min e erros de senha por nome a cada 15 min. Padrão: 20 e 8. */
   authLimit?: { perIp: number; perName: number };
+  /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
+  heartbeatMs?: number;
+  /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
+  voiceGraceMs?: number;
+  /** Só para testes: substitui o cliente da API de salas do LiveKit. */
+  roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
+  /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
+  logger?: FastifyServerOptions["logger"];
+}
+
+/** Esconde o token da sessão que o WebSocket leva na URL (`/ws?token=...`). */
+export const hideToken = (url: string) => url.replace(/([?&]token=)[^&]*/g, "$1***");
+
+/** Configuração dos logs de produção: JSON numa linha, sem o cabeçalho Authorization nem o token do WebSocket. */
+export function serverLogger(level = "info", stream?: { write(line: string): void }) {
+  return {
+    level,
+    ...(stream ? { stream } : {}),
+    redact: ["req.headers.authorization", "req.headers.cookie"],
+    serializers: {
+      req: (req: { method: string; url: string; ip?: string; headers?: Record<string, unknown> }) => ({
+        method: req.method,
+        url: hideToken(req.url),
+        ip: req.ip,
+        ua: req.headers?.["user-agent"],
+      }),
+    },
+  };
 }
 
 /** Hash de uma senha aleatória, para o login de um nome que não existe levar o mesmo tempo. */
@@ -93,14 +121,20 @@ export const voiceRoomName = (channelId: string) => `voice-${channelId}`;
 interface Socket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  on(event: "message" | "close", cb: (...args: any[]) => void): void;
+  on(event: "message" | "close" | "pong", cb: (...args: any[]) => void): void;
+  ping?(): void;
+  terminate?(): void;
 }
 
 /** Cargos que podem gerir canais e expulsar membros. */
 const canManage = (role: ServerRole | undefined) => role === "owner" || role === "admin";
 
-export async function buildApp({ db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 } }: AppOptions) {
-  const app = Fastify({ logger: false, trustProxy });
+export async function buildApp({
+  db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
+  trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
+  heartbeatMs = 30_000, voiceGraceMs = 30_000, roomService,
+}: AppOptions) {
+  const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);
@@ -122,7 +156,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
   }
 
   const room = livekit
-    ? new RoomServiceClient(livekit.url.replace(/^ws/, "http"), livekit.apiKey, livekit.apiSecret)
+    ? (roomService ?? new RoomServiceClient(livekit.url.replace(/^ws/, "http"), livekit.apiKey, livekit.apiSecret))
     : undefined;
 
   const online = new Map<Socket, User>();
@@ -324,7 +358,17 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     return inv;
   }
 
-  app.get("/health", async () => ({ ok: true }));
+  // Saúde de verdade: responde 503 se o banco não responde (o healthcheck do Docker e o monitor externo usam isto).
+  // logLevel warn: o healthcheck do Docker (a cada 30 s) não enche o log.
+  app.get("/health", { logLevel: "warn" }, async (req, reply) => {
+    try {
+      await db.execute(sql`select 1`);
+      return { ok: true };
+    } catch (err) {
+      req.log.error({ err }, "health: banco não responde");
+      return reply.code(503).send({ ok: false, error: "banco não responde" });
+    }
+  });
 
   // Limite de tentativas: por IP (login e cadastro juntos) e por nome de usuário (só erros de senha).
   // Login certo zera o contador do nome. Sem isso, qualquer um na internet testaria senhas sem parar.
@@ -949,7 +993,9 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
           : channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, me(req).id));
       if (!channel || !okChannel) return reply.code(404).send({ error: "canal de voz não existe" });
       const user = me(req);
-      const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "6h" });
+      // Token curto: só serve para entrar. Com a conexão aberta o LiveKit renova sozinho; quem foi expulso
+      // não consegue voltar com um token antigo.
+      const at = new AccessToken(livekit.apiKey, livekit.apiSecret, { identity: user.id, name: user.username, ttl: "10m" });
       at.addGrant({
         room: voiceRoomName(channel.id),
         roomJoin: true,
@@ -1096,23 +1142,105 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
     });
   });
 
+  // Webhooks do LiveKit: o servidor confere quem está de fato nas salas (a lista de quem está na chamada vem do
+  // gateway, que só sabe o que o cliente avisou). Ligar no livekit.yaml: webhook.api_key + webhook.urls.
+  if (livekit && room) {
+    const receiver = new WebhookReceiver(livekit.apiKey, livekit.apiSecret);
+    const checks = new Set<ReturnType<typeof setTimeout>>();
+    app.addHook("onClose", async () => { for (const t of checks) clearTimeout(t); });
+    /** Pode estar nesta sala agora (mesma regra do token)? */
+    const mayJoin = async (channelId: string, userId: string) => {
+      const channel = await findChannel(channelId);
+      if (!channel) return false;
+      if (channel.kind === "dm") return (await isDmMember(channel.id, userId)) && !(await dmBlocked(channel.id));
+      return channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, userId));
+    };
+    const reported = (channelId: string, userId: string) => [...voice.values()].some((v) => v.channelId === channelId && v.userId === userId);
+    app.register(async (hook) => {
+      hook.addContentTypeParser("application/webhook+json", { parseAs: "string" }, (_req, body, done) => done(null, body));
+      hook.post("/livekit/webhook", async (req, reply) => {
+        let evt;
+        try {
+          evt = await receiver.receive(String(req.body ?? ""), req.headers.authorization);
+        } catch {
+          return reply.code(401).send({ error: "assinatura inválida" });
+        }
+        const name = evt.room?.name ?? "";
+        const identity = evt.participant?.identity;
+        if (!name.startsWith("voice-") || !identity) return { ok: true };
+        const channelId = name.slice("voice-".length);
+        if (evt.event === "participant_joined") {
+          // Entrou sem permissão (token antigo de quem foi expulso): sai na hora.
+          if (!(await mayJoin(channelId, identity))) {
+            await room.removeParticipant(name, identity).catch(() => {});
+            return { ok: true };
+          }
+          // Entrou e não avisou o gateway (ouvinte invisível): depois de um tempo, sai.
+          const t = setTimeout(() => {
+            checks.delete(t);
+            if (reported(channelId, identity)) return;
+            void (async () => {
+              const still = await room.getParticipant(name, identity).then(() => true, () => false);
+              if (still && !reported(channelId, identity)) await room.removeParticipant(name, identity).catch(() => {});
+            })();
+          }, voiceGraceMs);
+          t.unref?.();
+          checks.add(t);
+        }
+        if (evt.event === "participant_left" && reported(channelId, identity)) {
+          // Pode ter só trocado de aparelho: confirma com o LiveKit antes de tirar da lista.
+          const still = await room.getParticipant(name, identity).then(() => true, () => false);
+          if (!still) {
+            let changed = false;
+            for (const [s, v] of voice) if (v.channelId === channelId && v.userId === identity) { voice.delete(s); changed = true; }
+            if (changed) broadcastVoice();
+          }
+        }
+        return { ok: true };
+      });
+    });
+  }
+
   app.register(async (instance) => {
     instance.get<{ Querystring: { token?: string } }>("/ws", { websocket: true }, async (socket: Socket, req) => {
       const connected = await userFromToken(req.query.token);
       if (!connected) return socket.close(4401, "unauthorized");
       online.set(socket, connected);
+      // Ping a cada heartbeatMs: quem não responde (notebook dormiu, Wi-Fi caiu sem fechar) é derrubado,
+      // e o close tira a pessoa da presença e da chamada. Qualquer mensagem também conta como sinal de vida.
+      let alive = true;
+      socket.on("pong", () => (alive = true));
+      const beat = setInterval(() => {
+        if (!alive) return socket.terminate ? socket.terminate() : socket.close(4000, "sem resposta");
+        alive = false;
+        socket.ping?.();
+      }, heartbeatMs);
+      beat.unref?.();
       memberships.set(socket, await loadMemberships(connected.id));
       dmSets.set(socket, await loadDmSet(connected.id));
       presence();
       socket.send(JSON.stringify(voiceStatesFor(socket)));
       socket.on("close", () => {
+        clearInterval(beat);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
       });
-      socket.on("message", async (raw: Buffer) => {
+      socket.on("message", (raw: Buffer) => {
+        alive = true;
+        // Um erro aqui (banco fora, por exemplo) não pode virar promessa rejeitada solta: isso derruba o processo.
+        handle(raw).catch((err) => {
+          req.log.error({ err, userId: connected.id }, "ws: erro ao tratar evento");
+          try {
+            socket.send(JSON.stringify({ t: "error", error: "erro no servidor; tente de novo" } satisfies ServerEvent));
+          } catch {
+            // conexão já fechada
+          }
+        });
+      });
+      const handle = async (raw: Buffer) => {
         let evt;
         try {
           evt = clientEvent.parse(JSON.parse(raw.toString()));
@@ -1171,7 +1299,7 @@ export async function buildApp({ db, bootstrapInvite, livekit, clientDir, upload
         await markRead(user.id, channel.id);
         if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
         else toServer(channel.serverId!, { t: "message", message });
-      });
+      };
     });
   });
 

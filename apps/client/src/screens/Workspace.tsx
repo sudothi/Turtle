@@ -299,6 +299,25 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   }, [snap.muted, snap.deafened, snap.screen]);
   useEffect(() => setSoundOutput(snap.prefs.outputId), [snap.prefs.outputId]);
 
+  // ---- Aviso falado (leitor de tela) de quem entra/sai da chamada e de mudo/ensurdecido ----
+  const [liveNote, setLiveNote] = useState("");
+  const lastCall = useRef<{ ids: Map<string, string>; muted: boolean; deafened: boolean; channelId: string | undefined }>({ ids: new Map(), muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId });
+  useEffect(() => {
+    const prev = lastCall.current;
+    const ids = new Map(snap.participants.map((p) => [p.id, p.name] as const));
+    const notes: string[] = [];
+    if (snap.channelId && snap.channelId === prev.channelId) {
+      for (const [id, name] of ids) if (!prev.ids.has(id) && !snap.participants.find((p) => p.id === id)?.isLocal) notes.push(`${name} entrou na chamada`);
+      for (const [id, name] of prev.ids) if (!ids.has(id)) notes.push(`${name} saiu da chamada`);
+    }
+    if (snap.channelId) {
+      if (snap.deafened !== prev.deafened) notes.push(snap.deafened ? "Você ensurdeceu" : "Você voltou a ouvir");
+      else if (snap.muted !== prev.muted) notes.push(snap.muted ? "Você está mudo" : "Você está com o microfone ligado");
+    }
+    lastCall.current = { ids, muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId };
+    if (notes.length) setLiveNote(notes.join(". "));
+  }, [snap.participants, snap.muted, snap.deafened, snap.channelId]);
+
   // Título da janela com o que está esperando você (aparece na barra de tarefas).
   const waiting = Object.values(unread).reduce((n, u) => n + (u.serverId === null ? 1 : u.mentions), 0);
   useEffect(() => {
@@ -635,6 +654,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveNote}</div>
       <ServerRail
         servers={servers}
         activeId={serverId}

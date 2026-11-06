@@ -927,3 +927,8 @@ a.auth-brand { text-decoration: none; }
 .msg.outgoing.failed .msg-status { color: var(--paper); font-style: normal; font-weight: 700; }
 .msg-failed { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
 .msg-failed .link { text-decoration: underline; color: var(--paper); cursor: pointer; }
+
+/* Só para leitores de tela */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Quem fala também aparece por forma (barrinhas ao lado do nome), não só pela borda */
+.tile.speaking .tile-name::before { content: "▂▅▇"; letter-spacing: -1px; margin-right: 6px; font-size: 12px; }

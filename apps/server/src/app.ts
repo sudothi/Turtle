@@ -1317,6 +1317,8 @@ export async function buildApp({
           }
         });
       };
+      const floodSecond = attemptLimiter({ max: 10, windowMs: 1_000 });
+      const floodWindow = attemptLimiter({ max: 60, windowMs: 10_000 });
       const handle = async (raw: Buffer) => {
         let evt;
         try {
@@ -1327,6 +1329,13 @@ export async function buildApp({
         // O perfil pode ter mudado desde que a conexão abriu.
         const user = online.get(socket) ?? connected;
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
+        // Contra flood: por conexão, no máximo 10 eventos por segundo e 60 a cada 10 s (ping não conta).
+        if (evt.t !== "auth") {
+          if (floodSecond.blockedFor("c") || floodWindow.blockedFor("c"))
+            return socket.send(JSON.stringify({ t: "error", error: "calma: eventos demais; tente de novo em instantes" } satisfies ServerEvent));
+          floodSecond.hit("c");
+          floodWindow.hit("c");
+        }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
         if (evt.t === "voice") {
           if (evt.channelId === null) {

@@ -729,7 +729,7 @@ describe("chat do dia a dia", () => {
     const d = await listen(dono);
     for (let i = 0; i < 12; i++) {
       say(d.ws, geral, `n${i}`);
-      await new Promise((r) => setTimeout(r, 3));
+      await new Promise((r) => setTimeout(r, 110)); // abaixo do limite de 10 eventos por segundo do WS
     }
     await settle();
     const last = (await get(`/channels/${geral}/messages?limit=5`, dono)).body;
@@ -1129,6 +1129,29 @@ describe("conexão do WebSocket", () => {
     const closed = new Promise<number>((r) => bad.ws.on("close", (code) => r(code)));
     bad.ws.send(JSON.stringify({ t: "auth", token: "falso" }));
     expect(await closed).toBe(4401);
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("flood no WebSocket", () => {
+  it("passa de 10 eventos por segundo e o servidor recusa o excesso; ping não conta", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-flood" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const token = ((await (await fetch(url + "/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inviteCode: "boot-flood", username: "flood", password: "12345678" }) })).json()) as any).token;
+    const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${token}`);
+    const events: any[] = [];
+    ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+    await new Promise((r) => ws.on("open", r));
+    await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "ping" }));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(events.filter((e) => e.t === "pong")).toHaveLength(30);
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "voice", channelId: null, muted: false, deafened: false }));
+    await settle();
+    expect(events.filter((e) => e.t === "error" && /eventos demais/.test(e.error)).length).toBeGreaterThanOrEqual(15);
+    ws.close();
     await a.close();
     await h.close();
   });

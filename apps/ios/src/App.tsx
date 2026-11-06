@@ -14,10 +14,28 @@ export default function App() {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [localError, setLocalError] = useState<string>();
   useEffect(() => { void session.restore(); }, []);
-  return <SafeAreaProvider><View style={s.safe}><StatusBar style="light" />
-    {state.phase === "restoring" && <View style={s.center}><Heading detail="Abrindo sua conversa…" /><ActivityIndicator color={colors.paper} /></View>}
-    {state.phase === "signedOut" && <SafeAreaView style={s.flex}><AuthScreen initialError={state.error} /></SafeAreaView>}
-    {state.phase === "signedIn" && <WorkspaceProvider api={state.api} user={state.user}><AppNavigation /></WorkspaceProvider>}
-    {state.phase === "offline" && <View style={s.center}><Heading detail="Vamos tentar de novo." /><Notice>{localError || state.error}</Notice><Text style={s.body}>Sua sessão continua salva neste iPhone.</Text><Button onPress={() => void session.restore()}>Tentar novamente</Button><Button secondary onPress={() => { void session.logout().catch(error => setLocalError(errorText(error))); }}>Sair da conta</Button><Button secondary onPress={() => { void Linking.openSettings(); }}>Abrir Ajustes</Button></View>}
-  </View></SafeAreaProvider>;
+  return <SafeAreaProvider>
+    <View style={s.safe}>
+      <StatusBar style="light" />
+      {state.phase === "signedIn" ? (
+        <WorkspaceProvider api={state.api} user={state.user}><AppNavigation /></WorkspaceProvider>
+      ) : (
+        <SafeAreaView style={s.flex}>
+          {state.phase === "restoring" && <View style={s.center}>
+            <Heading detail="Abrindo sua conversa…" />
+            <ActivityIndicator color={colors.paper} accessibilityLabel="Restaurando sessão" />
+          </View>}
+          {state.phase === "signedOut" && <AuthScreen initialError={state.error} />}
+          {state.phase === "offline" && <View style={s.center}>
+            <Heading detail="Vamos tentar de novo." />
+            <Notice>{localError || state.error}</Notice>
+            <Text style={s.body}>Sua sessão continua salva neste iPhone.</Text>
+            <Button onPress={() => { setLocalError(undefined); void session.restore(); }}>Tentar novamente</Button>
+            <Button secondary onPress={() => { void session.logout().catch(error => setLocalError(errorText(error))); }}>Sair da conta</Button>
+            <Button secondary onPress={() => { void Linking.openSettings().catch(error => setLocalError(errorText(error))); }}>Abrir Ajustes</Button>
+          </View>}
+        </SafeAreaView>
+      )}
+    </View>
+  </SafeAreaProvider>;
 }

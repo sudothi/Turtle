@@ -37,12 +37,12 @@ export function CallDock() {
       <Text style={text.caption}>{callStatus(call.status)}</Text><Text style={text.label}>{call.channelName}</Text>
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={call.muted ? "Abrir microfone" : "Fechar microfone"} accessibilityState={{ disabled: call.status !== "connected" || call.busy || call.deafened }} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} style={s.control}>
-      <Text style={text.label}>{call.muted ? "Mudo" : "Mic"}</Text>
+      <Text style={[text.label, { textAlign: "center" }]}>{call.muted ? "Abrir mic" : "Fechar mic"}</Text>
     </Pressable>
   </View>;
 }
 const s = StyleSheet.create({
   dock: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 2, borderColor: colors.paper, backgroundColor: colors.panel, paddingHorizontal: 16, paddingVertical: 6 },
   open: { flex: 1, minHeight: 44, justifyContent: "center", gap: 3, paddingVertical: 6 },
-  control: { minWidth: 56, minHeight: 44, alignItems: "center", justifyContent: "center", padding: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 8 },
+  control: { minWidth: 64, maxWidth: 112, minHeight: 44, alignItems: "center", justifyContent: "center", padding: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 8 },
 });

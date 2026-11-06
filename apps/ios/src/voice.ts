@@ -27,6 +27,7 @@ export class Voice {
   constructor(private readonly api: Pick<Api, "voiceToken">, private readonly report: (value: VoiceReport) => void, private readonly active: () => boolean) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
+  clearError = () => this.set({ error: undefined });
   private set(patch: Partial<VoiceSnapshot>) {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach(fn => fn());

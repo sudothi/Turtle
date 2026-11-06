@@ -5,7 +5,7 @@ const config: ExpoConfig = {
   slug: "turtle-ios",
   version: "0.1.0",
   platforms: ["ios"],
-  orientation: "portrait",
+  orientation: "default",
   userInterfaceStyle: "dark",
   ios: {
     bundleIdentifier: "xyz.ogturtle.mobile",

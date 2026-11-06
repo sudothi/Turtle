@@ -1,13 +1,13 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { DarkTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { BottomTabBar, createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { HomeRoutes, RootRoutes, ServerRoutes, TabRoutes } from "./types";
-import { CallDock } from "./call-access";
-import { colors, styles as text } from "../ui/theme";
+import TabBar from "./TabBar";
+import { colors } from "../ui/theme";
 import { Notice } from "../ui/components";
 import { ToolbarButton } from "../ui/layout";
-import { useCall, useWorkspaceState } from "../workspace-context";
+import { useCall, useWorkspace, useWorkspaceState } from "../workspace-context";
 import HomeScreen from "../screens/HomeScreen";
 import SettingsScreen from "../screens/SettingsScreen";
 import CallScreen from "../screens/CallScreen";
@@ -20,7 +20,7 @@ const Home = createNativeStackNavigator<HomeRoutes>();
 const Servers = createNativeStackNavigator<ServerRoutes>();
 const Tabs = createBottomTabNavigator<TabRoutes>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: colors.background, card: colors.panel, primary: colors.paper, text: colors.paper, border: colors.line } };
-const header = { headerStyle: { backgroundColor: colors.panel }, headerTintColor: colors.paper, contentStyle: { backgroundColor: colors.background }, headerBackTitle: "Voltar" };
+const header = { headerStyle: { backgroundColor: colors.panel }, headerTitleStyle: { fontSize: 20, fontWeight: "800" as const }, headerTintColor: colors.paper, contentStyle: { backgroundColor: colors.background }, headerBackTitle: "Voltar" };
 
 function HomeStack() {
   return <Home.Navigator screenOptions={header}>
@@ -36,20 +36,19 @@ function ServerStack() {
   </Servers.Navigator>;
 }
 function MainTabs() {
-  return <Tabs.Navigator tabBar={props => <View><CallDock /><BottomTabBar {...props} /></View>} screenOptions={{
+  return <Tabs.Navigator tabBar={props => <TabBar {...props} />} screenOptions={{
     headerStyle: header.headerStyle, headerTintColor: colors.paper,
-    tabBarActiveTintColor: colors.paper, tabBarInactiveTintColor: colors.muted,
-    tabBarStyle: { backgroundColor: colors.panel, borderTopColor: colors.line },
-    tabBarLabelStyle: { fontSize: 12, fontWeight: "600" },
+    headerTitleStyle: header.headerTitleStyle,
   }}>
-    <Tabs.Screen name="HomeTab" component={HomeStack} options={{ title: "Início", headerShown: false, tabBarIcon: ({ color }) => <Text accessible={false} style={{ color, fontSize: 22 }}>⌂</Text> }} />
-    <Tabs.Screen name="ServersTab" component={ServerStack} options={{ title: "Servidores", headerShown: false, tabBarIcon: ({ color }) => <Text accessible={false} style={{ color, fontSize: 22 }}>☷</Text> }} />
-    <Tabs.Screen name="Settings" component={SettingsScreen} options={{ title: "Configurações", tabBarIcon: ({ color }) => <Text accessible={false} style={{ color, fontSize: 22 }}>⚙</Text> }} />
+    <Tabs.Screen name="HomeTab" component={HomeStack} options={{ title: "Início", headerShown: false }} />
+    <Tabs.Screen name="ServersTab" component={ServerStack} options={{ title: "Servidores", headerShown: false }} />
+    <Tabs.Screen name="Settings" component={SettingsScreen} options={{ title: "Configurações" }} />
   </Tabs.Navigator>;
 }
 export default function AppNavigation() {
   const state = useWorkspaceState();
   const call = useCall();
+  const { workspace } = useWorkspace();
   return <NavigationContainer theme={theme}>
     <View style={{ flex: 1 }}>
       <Root.Navigator screenOptions={header}>
@@ -57,7 +56,7 @@ export default function AppNavigation() {
         <Root.Screen name="Call" component={CallScreen} options={({ navigation }) => ({ title: "Chamada", presentation: "modal", headerLeft: () => <ToolbarButton label="Fechar" onPress={() => navigation.goBack()} /> })} />
         <Root.Screen name="Members" component={MembersScreen} getId={({ params }) => params.serverId} options={({ navigation }) => ({ title: "Membros", presentation: "modal", headerLeft: () => <ToolbarButton label="Fechar" onPress={() => navigation.goBack()} /> })} />
       </Root.Navigator>
-      {(state.error || (call.status === "idle" && call.error)) && <View style={{ padding: 12 }}><Notice>{state.error || call.error}</Notice></View>}
+      {(state.error || (call.status === "idle" && call.error)) && <View style={{ padding: 12, gap: 4 }}><Notice>{state.error || call.error}</Notice><ToolbarButton label="Fechar aviso" onPress={() => { workspace.clearError(); workspace.voice.clearError(); }} /></View>}
     </View>
   </NavigationContainer>;
 }

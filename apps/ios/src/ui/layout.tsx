@@ -19,7 +19,7 @@ export function Page({ children, modal = false }: { children: ReactNode; modal?:
   return <SafeAreaView edges={modal ? ["left", "right", "bottom"] : ["left", "right"]} style={layout.page}>{children}</SafeAreaView>;
 }
 export function Content({ children, ...props }: ScrollViewProps) {
-  return <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={layout.content} {...props}>{children}</ScrollView>;
+  return <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets contentContainerStyle={layout.content} {...props}>{children}</ScrollView>;
 }
 export function Empty({ title, children }: { title: string; children: string }) {
   return <View style={layout.section}><Text accessibilityRole="header" style={text.subtitle}>{title}</Text><Text style={text.body}>{children}</Text></View>;

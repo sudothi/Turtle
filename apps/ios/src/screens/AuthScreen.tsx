@@ -29,7 +29,7 @@ export default function AuthScreen({ initialError }: { initialError?: string }) 
     finally { setBusy(false); }
   };
   return <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.auth}>
+    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={s.auth}>
       <Heading detail="Uma conversa entre amigos." />
       <View style={s.form}>
         <Text accessibilityRole="header" style={s.title}>{register ? "Chegou seu convite." : "Bom ter você aqui."}</Text>

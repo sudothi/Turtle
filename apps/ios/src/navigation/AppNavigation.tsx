@@ -4,6 +4,7 @@ import { DarkTheme, NavigationContainer, useNavigationContainerRef } from "@reac
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootRoutes } from "./types";
 import { colors, fonts, styles as text } from "../ui/theme";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { shownName } from "@turtle/protocol";
 import { Button, Notice } from "../ui/components";
 import { IconButton } from "../ui/layout";
@@ -41,7 +42,7 @@ export default function AppNavigation() {
     }).catch(() => {});
   }}>
     <View style={{ flex: 1 }}>
-      {presence.ring && presence.ring.channelId !== call.channelId && <View accessibilityLiveRegion="polite" style={{ padding: 12, gap: 8, backgroundColor: colors.userPanel }}>
+      {presence.ring && presence.ring.channelId !== call.channelId && <SafeAreaView edges={["top", "left", "right"]} accessibilityLiveRegion="polite" style={{ padding: 12, gap: 8, backgroundColor: colors.userPanel }}>
         <Text style={text.label}>{shownName(presence.ring.from)} está chamando</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
           <Button onPress={() => {
@@ -52,7 +53,7 @@ export default function AppNavigation() {
           }}>Atender</Button>
           <Button secondary onPress={() => workspace.gateway.dismissRing(true)}>Recusar</Button>
         </View>
-      </View>}
+      </SafeAreaView>}
       <Root.Navigator screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: colors.panel }, headerTintColor: colors.paper,
         headerTitleStyle: { fontFamily: fonts.semibold, fontSize: 16 },

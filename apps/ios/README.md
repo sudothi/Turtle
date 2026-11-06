@@ -1,10 +1,10 @@
 # Turtle para iPhone
 
-React Native/Expo com build nativo próprio, LiveKit e Keychain. Alvo: iOS 26.0 ou posterior. A versão 0.3 acrescenta chat com envio confirmado, menções por toque, histórico paginado e rascunhos locais à navegação e às chamadas de voz. O convite de cadastro não adiciona a conta a um servidor: entre no servidor pelo web/desktop nesta versão.
+React Native/Expo com build nativo próprio, LiveKit e Keychain. Alvo: iOS 26.0 ou posterior. A versão 0.4 acrescenta social, servidores/administração, perfil com imagens, câmera e recepção de telas ao chat e à voz nativos. O convite de cadastro não adiciona a conta a um servidor: use o botão + para entrar com um convite de servidor.
 
 ## Navegação e escopo
 
-- **Barra de servidores:** tartaruga para mensagens diretas e ícones dos servidores, como na web/desktop e no Android. Selecionar um servidor atualiza a lista lateral de canais de texto/voz. O cabeçalho do servidor abre membros e atualização dos canais.
+- **Barra de servidores:** tartaruga para mensagens diretas e ícones dos servidores, como na web/desktop e no Android. Selecionar um servidor atualiza a lista lateral de canais de texto/voz. O cabeçalho do servidor abre membros, opções de administração e atualização dos canais.
 - **Mensagens diretas:** entrada para Amigos e lista de conversas existentes. Amigos tem filtros Online/Todos/Pendentes e busca por nome/usuário. Abrir um canal ou conversa mostra o histórico; voltar pelo botão ou gesto retorna à mesma seleção lateral.
 - **Barra de perfil:** flutua na base sobre as duas colunas, com avatar, nome e presença/estado de voz. Tocar no perfil abre um painel inferior com configurações e controles da chamada ativa. O atalho à direita abre configurações ou a chamada. Configurações inclui conta, origem do servidor, áudio e saída da conta com confirmação.
 - **Chamada:** modal com grade de participantes e controles de microfone, escuta, saída de áudio e desconexão. Fechar o modal mantém a chamada; a barra de voz no rodapé permite voltar a ela nas outras telas, inclusive membros e configurações.
@@ -15,7 +15,7 @@ O chat de canal, DM e grupo compartilha um compositor acima do teclado, sugestõ
 
 Os rascunhos e textos pendentes são salvos no iPhone, separados por origem, conta e conversa; logout os remove. O texto do compositor passa a uma mensagem pendente **Enviando…**; a requisição só é enviada depois de salvar essa tentativa no iPhone. A confirmação HTTP ou o evento do gateway mostra a mensagem persistida uma única vez. Falhas deixam o texto visível como **Não enviada** ou **Envio sem confirmação**. **Tentar novamente** reaproveita a mesma identificação; não há reenvio automático ao reconectar ou reabrir o app. Mensagens definitivamente recusadas também podem voltar ao rascunho quando ele está vazio.
 
-O backend desta entrega precisa estar atualizado antes do app: `POST /channels/:id/messages` confirma texto com um `requestId` UUID. A tabela `message_receipts`, criada pela migração idempotente de inicialização, impede duplicação e reenvio de mensagens já apagadas; guarda a impressão digital do conteúdo, sem manter seu texto após exclusão. O envio WebSocket antigo continua compatível. A paginação aceita `before`, `limit` e o novo desempate `beforeId`. Envio de anexos, ações de edição/exclusão, gerenciamento social/de servidores e edição de perfil continuam nas próximas entregas.
+O backend desta entrega precisa estar atualizado antes do app: `POST /channels/:id/messages` confirma texto com um `requestId` UUID. A tabela `message_receipts`, criada pela migração idempotente de inicialização, impede duplicação e reenvio de mensagens já apagadas; guarda a impressão digital do conteúdo, sem manter seu texto após exclusão. O envio WebSocket antigo continua compatível. A paginação aceita `before`, `limit` e o novo desempate `beforeId`. Envio de anexos e ações de edição/exclusão continuam fora deste compositor. Social, servidores/administração e perfil têm telas nativas na versão 0.4.
 
 ## Testar pelo Xcode
 
@@ -31,7 +31,7 @@ Conecte e desbloqueie o iPhone, aceite confiar no Mac e selecione o dispositivo 
 
 O build de desenvolvimento usa Metro no Mac. Para reiniciar Metro, rode `pnpm ios`; computador e telefone precisam se alcançar pela rede. Expo Go não suporta o módulo nativo LiveKit. Para testar sem Metro e com o app instalado pela AltStore, use o IPA Release abaixo.
 
-Ao atualizar para 0.3, execute `pnpm ios:device` novamente: AsyncStorage e Expo Crypto acrescentam código nativo. Só reiniciar o Metro não instala esses módulos no app antigo. Ao usar `pnpm ios`, o simulador selecionado deve já conter o build de desenvolvimento.
+Ao atualizar para 0.4, execute `pnpm ios:device` novamente: armazenamento, criptografia e seleção/recorte de imagens incluem módulos nativos. Só reiniciar o Metro não instala esses módulos no app antigo. Ao usar `pnpm ios`, o simulador selecionado deve já conter o build de desenvolvimento.
 
 O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configurar servidor** permite outra origem HTTPS. Para definir outro padrão no build, copie `.env.example` para `.env.local` nesta pasta e altere `EXPO_PUBLIC_API_ORIGIN`. As variáveis `EXPO_PUBLIC_*` entram no app; use apenas endereços públicos. O LiveKit vem da resposta autenticada do backend. Não há credenciais Apple nem chaves secretas LiveKit no app.
 
@@ -41,7 +41,7 @@ O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configura
 pnpm ios:ipa
 ```
 
-O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.3.0.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; build number e bundle ID ficam em `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
+O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.4.0-build4.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; o build number vem de `package.json` e o bundle ID de `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
 
 Instale AltServer no Mac/Windows e AltStore Classic no iPhone seguindo os guias oficiais abaixo. Cada participante usa sua própria conta Apple gratuita. Transfira o IPA ao iPhone, abra AltStore > My Apps > `+` e selecione-o. Autorize confiança/Modo Desenvolvedor quando solicitado. O fluxo de importação, reassinatura e renovação ainda exige validação no aparelho do grupo.
 
@@ -50,7 +50,7 @@ Contas gratuitas exigem renovação em 7 dias e têm limites de apps/App IDs; co
 ## Roteiro de aceite em aparelho
 
 1. Instale o IPA pela Classic. Entre com uma conta do Turtle e abra web/desktop com **outra conta**: a mesma identidade LiveKit derruba a chamada anterior.
-2. Confira senha inválida, cadastro com convite inválido/válido, relançamento restaurando sessão e falta de rede preservando o token. Para entrar num servidor novo, use web/desktop e depois **Atualizar canais** no iPhone.
+2. Confira senha inválida, cadastro com convite inválido/válido, relançamento restaurando sessão e falta de rede preservando o token. Para entrar num servidor novo, use o botão + na barra de servidores e confira o convite antes de entrar.
 3. Entre no mesmo canal de voz nos dois clientes. Teste **Só ouvir**, microfone permitido/negado, mudo, ensurdecer, participantes e saída via alto-falante/fones/Bluetooth. Retomar escuta não deve reabrir o microfone.
 4. No IPA Release, converse por 30 minutos com tela bloqueada e troque de apps. Teste também com microfone fechado, só escuta e períodos de silêncio: esses casos podem ter limites diferentes de execução em segundo plano.
 5. Faça Wi-Fi → celular, modo avião → reconexão e interrupção por ligação/Siri. Confira áudio e presença dos dois lados ao retornar. Saia da chamada e da conta e verifique que o microfone parou.
@@ -74,8 +74,15 @@ Para a navegação da #48, validar também:
 5. Modo avião durante a escrita/envio, retorno à rede e mais de uma página recebida durante a desconexão. Conferir texto preservado, histórico sem lacunas/duplicação e recuperação de edições/exclusões de outro cliente.
 6. Teclado aberto em retrato/paisagem, texto ampliado, VoiceOver e chamada ativa: compositor, sugestões, botões e barra de voz devem permanecer acessíveis. Registrar a validação no menor iPhone suportado; testes de unidade não comprovam posição visual ou foco do teclado.
 
-## Limites desta prova
+## Limites da versão
 
-Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. A presença ainda usa o gateway existente: é reenviada após reconexão/retorno, mas o backend a remove quando o WebSocket cai. Continuidade de presença/voz em todos os casos de suspensão exige a #54 e validação real. Não há CallKit/PushKit, push, chamadas recebidas, câmera ou transmissão de tela nesta versão. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
+Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. A presença ainda usa o gateway existente: é reenviada após reconexão/retorno, mas o backend a remove quando o WebSocket cai. Continuidade de presença/voz em todos os casos de suspensão exige a #54 e validação real. Não há CallKit/PushKit, push nem publicação da tela do iPhone nesta versão. Há câmera, recepção de telas e cartão de chamada recebida com o app ativo. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
 
 Testes de unidade e build não comprovam áudio, permissões, entitlements ou duração em tela bloqueada. O aceite da #46 depende da instalação final em iPhone real; mantenha resultados não executados como pendentes.
+
+
+## Paridade e distribuição da versão 0.4
+
+O [guia iOS](../../docs/planos/ios.md) registra decisão de stack, iOS mínimo, matriz de capacidades, notas de distribuição, limites de push/tela e o roteiro completo de aceite físico das issues #45–#59. O IPA traz checksum e manifesto ao lado do arquivo. Atualize o build nativo para instalar os módulos de seleção/recorte de imagem; reiniciar Metro não basta.
+
+Social, servidores, perfil e chamadas usam os mesmos tokens e fontes da navegação aprovada. Configurações dá acesso a perfil, bloqueados e administração (quando permitida). O botão + abre criação/entrada em servidor. Perfis de amigos/membros abrem DMs e ações sociais; conversas têm participantes/grupos e entrada para chamada.

@@ -53,7 +53,7 @@ export default function AuthScreen({ initialError }: { initialError?: string }) 
       </View>
       <Pressable accessibilityRole="button" onPress={() => setServerSettings(!serverSettings)} disabled={busy} style={s.link}><Text style={s.caption}>Configurar servidor</Text></Pressable>
       {serverSettings && <Field label="Endereço do servidor" value={origin} onChangeText={setOrigin} editable={!busy} keyboardType="url" placeholder="https://app.ogturtle.xyz" />}
-      <Text style={s.footnote}>Primeira versão · voz no iPhone</Text>
+      <Text style={s.footnote}>Turtle para iPhone</Text>
     </ScrollView>
   </KeyboardAvoidingView>;
 }

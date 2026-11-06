@@ -1,5 +1,5 @@
 import type { ExpoConfig } from "expo/config";
-import { version } from "./package.json";
+import { version, iosBuildNumber } from "./package.json";
 
 const config: ExpoConfig = {
   name: "Turtle",
@@ -10,7 +10,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "dark",
   ios: {
     bundleIdentifier: "xyz.ogturtle.mobile",
-    buildNumber: "3",
+    buildNumber: iosBuildNumber,
     supportsTablet: false,
     infoPlist: {
       UIBackgroundModes: ["audio"],
@@ -22,7 +22,7 @@ const config: ExpoConfig = {
   plugins: [
     ["expo-build-properties", { ios: { deploymentTarget: "26.0" } }],
     "expo-secure-store",
-    ["expo-image-picker", { photosPermission: "Escolha uma foto para seu avatar ou banner no Turtle.", cameraPermission: false, microphonePermission: false }],
+    ["expo-image-picker", { photosPermission: "Escolha uma foto para seu avatar ou banner no Turtle.", cameraPermission: "Permita a câmera para ativar o vídeo nas chamadas do Turtle.", microphonePermission: "Permita o microfone para falar nas chamadas do Turtle." }],
     "@livekit/react-native-expo-plugin",
     ["@config-plugins/react-native-webrtc", {
       microphonePermission: "Permita o microfone para falar nas chamadas do Turtle.",

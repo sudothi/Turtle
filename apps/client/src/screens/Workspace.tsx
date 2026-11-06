@@ -321,9 +321,11 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     let opened = false;
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      const s = new WebSocket(`${proto}://${location.host}/ws?token=${getToken()}`);
+      // O token vai na primeira mensagem, não na URL (assim não aparece em log de proxy nem de servidor).
+      const s = new WebSocket(`${proto}://${location.host}/ws`);
       ws.current = s;
       s.onopen = () => {
+        s.send(JSON.stringify({ t: "auth", token: getToken() ?? "" }));
         attempts = 0;
         voice.resendState();
         void loadUnread().catch(() => {});

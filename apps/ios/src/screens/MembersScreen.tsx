@@ -6,6 +6,7 @@ import { usePresence, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation, type RootRoutes } from "../navigation/types";
 import { CallDock } from "../navigation/call-access";
 import { Avatar, Content, Empty, ListRow, Page, ReadStatus } from "../ui/layout";
+import { PersonRow } from "../ui/PersonRow";
 import { colors, styles as text } from "../ui/theme";
 
 const roleLabel = { owner: "Dono", admin: "Administrador", member: "Membro" };
@@ -26,8 +27,7 @@ export default function MembersScreen() {
       <ReadStatus loading={members.loading && !members.data.length} error={members.error} retry={members.refresh} />
       {(["owner", "admin", "member"] as const).map(role => {
         const group = matching.filter(member => member.role === role);
-        return group.length ? <View key={role} style={{ gap: 4, marginTop: 12 }}><Text accessibilityRole="header" style={text.serverTitle}>{roleLabel[role]} — {group.length}</Text>{group.map(member => <ListRow key={member.userId} title={shownName(member)}
-          detail={presence.busy.includes(member.userId) ? "Não perturbe" : presence.online.includes(member.userId) ? "Online" : "Offline"}
+        return group.length ? <View key={role} style={{ gap: 4, marginTop: 12 }}><Text accessibilityRole="header" style={text.serverTitle}>{roleLabel[role]} — {group.length}</Text>{group.map(member => <PersonRow userId={member.userId} key={member.userId} title={shownName(member)}
           leading={<Avatar name={shownName(member)} uri={workspace.api.fileUrl(member.avatar)} size={32} online={presence.online.includes(member.userId)} />}
           onPress={() => navigation.navigate("Profile", { userId: member.userId })}
         />)}</View> : null;

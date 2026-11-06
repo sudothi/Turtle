@@ -318,6 +318,8 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** Recusar a chamada que está tocando numa DM ou grupo (quem ligou fica sabendo). */
+  z.object({ t: z.literal("ringDecline"), channelId: z.string() }),
   /** Primeira mensagem da conexão: o token da sessão (em vez de ir na URL do WebSocket). */
   z.object({ t: z.literal("auth"), token: z.string().max(200) }),
   /** Texto e/ou anexos já enviados por POST /channels/:id/attachments. */
@@ -356,6 +358,12 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
+  /** Alguém está te ligando numa DM ou grupo. `silent`: você está em Não perturbe (só notificar, sem tocar). */
+  z.object({ t: z.literal("ring"), channelId: z.string(), from: z.object({ id: z.string(), username: z.string(), displayName: z.string().nullable(), avatar: z.string().nullable() }), silent: z.boolean().default(false) }),
+  /** A chamada parou de tocar: atendida, cancelada, recusada ou passou de 30 s. */
+  z.object({ t: z.literal("ringEnd"), channelId: z.string() }),
+  /** Quem você ligou recusou (`busy`: estava em Não perturbe ou recusou na hora). */
+  z.object({ t: z.literal("ringDeclined"), channelId: z.string(), by: z.string() }),
   /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
   z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
 ]);

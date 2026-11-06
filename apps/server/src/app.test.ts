@@ -334,6 +334,24 @@ describe("servidores", () => {
     expect((await patch(`/servers/${lagoa}`, { name: "Lagoa 2" }, ana)).status).toBe(200);
     expect((await get("/servers", bia)).body.find((x: any) => x.id === lagoa).name).toBe("Lagoa 2");
   });
+  it("banir: expulsa, não volta por convite, lista e desbane; admin não bane admin nem dono", async () => {
+    const code = (await post(`/servers/${lagoa}/invites`, {}, ana)).body.code;
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200); // caio volta (expulso, não banido)
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, {}, caio)).status).toBe(403); // membro não bane
+    expect((await post(`/servers/${lagoa}/bans/${anaId}`, {}, bia)).status).toBe(403); // admin não bane o dono
+    expect((await post(`/servers/${lagoa}/bans/${biaId}`, {}, bia)).status).toBe(400); // nem a si mesmo
+    expect((await post(`/servers/${lagoa}/bans/${caioId}`, { reason: "spam" }, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/channels`, caio)).status).toBe(404);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(403);
+    const list = (await get(`/servers/${lagoa}/bans`, bia)).body;
+    expect(list).toMatchObject([{ userId: caioId, username: "caio", reason: "spam" }]);
+    expect((await get(`/servers/${lagoa}/bans`, caio)).status).toBe(404); // fora do servidor
+    expect((await del(`/servers/${lagoa}/bans/${caioId}`, bia)).status).toBe(200);
+    expect((await get(`/servers/${lagoa}/bans`, ana)).body).toEqual([]);
+    expect((await post(`/invites/${code}/join`, {}, caio)).status).toBe(200);
+    expect((await del(`/servers/${lagoa}/members/${caioId}`, ana)).status).toBe(200); // deixa como estava
+  });
+
 
   it("dono não sai sem passar a posse; passar respeita o limite de 2 do novo dono", async () => {
     expect((await del(`/servers/${lagoa}/members/${anaId}`, ana)).status).toBe(403);
@@ -631,6 +649,34 @@ describe("amigos e mensagens diretas", () => {
     await post(`/friends/${aId}`, {}, c);
   });
 
+  it("chamada em DM toca para a outra pessoa; recusar avisa quem ligou; atender para o toque", async () => {
+    const dm = (await post(`/dms/${cId}`, {}, a)).body.channelId as string;
+    const [A, C, B] = await Promise.all([wsOpen(a), wsOpen(c), wsOpen(b)]);
+    const wait = () => new Promise((r) => setTimeout(r, 250));
+    const voiceEvt = (channelId: string | null) => JSON.stringify({ t: "voice", channelId, muted: false, deafened: false });
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.find((e) => e.t === "ring")).toMatchObject({ channelId: dm, from: { id: aId }, silent: false });
+    expect(B.events.some((e) => e.t === "ring")).toBe(false);
+    expect(A.events.some((e) => e.t === "ring")).toBe(false);
+    // recusar: quem ligou fica sabendo e o toque para
+    C.ws.send(JSON.stringify({ t: "ringDecline", channelId: dm }));
+    await wait();
+    expect(A.events.find((e) => e.t === "ringDeclined")).toMatchObject({ channelId: dm, by: cId });
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    // quem ligou sai e liga de novo: toca outra vez; atender para o toque
+    A.ws.send(voiceEvt(null));
+    await wait();
+    C.events.length = 0;
+    A.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ring")).toBe(true);
+    C.ws.send(voiceEvt(dm));
+    await wait();
+    expect(C.events.some((e) => e.t === "ringEnd" && e.channelId === dm)).toBe(true);
+    for (const x of [A, B, C]) x.ws.close();
+  });
+
   it("grupo: só amigos, mensagens chegam a todos, adicionar, sair e chamada", async () => {
     await post(`/friends/${bId}`, {}, a);
     await post(`/friends/${aId}`, {}, b);
@@ -729,7 +775,7 @@ describe("chat do dia a dia", () => {
     const d = await listen(dono);
     for (let i = 0; i < 12; i++) {
       say(d.ws, geral, `n${i}`);
-      await new Promise((r) => setTimeout(r, 3));
+      await new Promise((r) => setTimeout(r, 110)); // abaixo do limite de 10 eventos por segundo do WS
     }
     await settle();
     const last = (await get(`/channels/${geral}/messages?limit=5`, dono)).body;
@@ -1129,6 +1175,56 @@ describe("conexão do WebSocket", () => {
     const closed = new Promise<number>((r) => bad.ws.on("close", (code) => r(code)));
     bad.ws.send(JSON.stringify({ t: "auth", token: "falso" }));
     expect(await closed).toBe(4401);
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("cota de anexos", () => {
+  it("recusa com 413 quando passa da cota e mostra o uso em /me/storage", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150 });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const token = (await json("/auth/register", { inviteCode: "boot-cota", username: "cota", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Cota" }, token);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    const text = chans.find((c) => c.kind === "text").id;
+    const send = async (n: number) => {
+      const form = new FormData();
+      form.append("file", new Blob(["x".repeat(n)], { type: "text/plain" }), "a.txt");
+      return fetch(url + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+    };
+    expect((await send(100)).status).toBe(200);
+    const over = await send(100);
+    expect(over.status).toBe(413);
+    expect(((await over.json()) as any).error).toMatch(/cota/);
+    const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+    expect(st).toEqual({ used: 100, quota: 150 });
+    await a.close();
+    await h.close();
+  });
+});
+
+describe("flood no WebSocket", () => {
+  it("passa de 10 eventos por segundo e o servidor recusa o excesso; ping não conta", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-flood" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const token = ((await (await fetch(url + "/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inviteCode: "boot-flood", username: "flood", password: "12345678" }) })).json()) as any).token;
+    const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${token}`);
+    const events: any[] = [];
+    ws.on("message", (raw) => events.push(JSON.parse(raw.toString())));
+    await new Promise((r) => ws.on("open", r));
+    await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "ping" }));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(events.filter((e) => e.t === "pong")).toHaveLength(30);
+    for (let i = 0; i < 30; i++) ws.send(JSON.stringify({ t: "voice", channelId: null, muted: false, deafened: false }));
+    await settle();
+    expect(events.filter((e) => e.t === "error" && /eventos demais/.test(e.error)).length).toBeGreaterThanOrEqual(15);
+    ws.close();
     await a.close();
     await h.close();
   });

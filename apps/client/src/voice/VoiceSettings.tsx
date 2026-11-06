@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { micConstraints, needsAudioProcessor, type AudioPrefs, type NoiseMode } from "./prefs";
 import { createRnnoiseGraph, type RnnoiseGraph } from "./rnnoise";
 import type { VoiceClient } from "./client";
+import { desktop, loadShortcuts, saveShortcuts, toAccelerator, type Shortcuts } from "../desktop";
 
 const noiseLabels: Record<NoiseMode, string> = {
   gtcrn: "GTCRN (recomendado · rede neural)",
@@ -44,6 +45,50 @@ const calcDb = (buf: Float32Array) => {
 };
 
 const dbToPct = (db: number) => Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
+
+/** Atalhos globais de mudo e ensurdecer (só no app desktop): clique no campo e aperte a combinação. */
+function ShortcutSettings() {
+  const [keys, setKeys] = useState<Shortcuts>(loadShortcuts);
+  const [rec, setRec] = useState<keyof Shortcuts | null>(null);
+  const [warn, setWarn] = useState("");
+  const set = (which: keyof Shortcuts, value: string) => {
+    if (value && keys[which === "mute" ? "deafen" : "mute"] === value) return setWarn("Essa combinação já está em uso pelo outro atalho.");
+    setWarn("");
+    const next = { ...keys, [which]: value };
+    setKeys(next);
+    saveShortcuts(next);
+  };
+  const field = (which: keyof Shortcuts, label: string) => (
+    <div className="shortcut-row">
+      <span>{label}</span>
+      <button
+        type="button"
+        aria-label={`Atalho de ${label.toLowerCase()}`}
+        onClick={() => setRec(which)}
+        onBlur={() => setRec(null)}
+        onKeyDown={(e) => {
+          if (rec !== which) return;
+          e.preventDefault();
+          if (e.key === "Escape") return setRec(null);
+          if (e.key === "Backspace" || e.key === "Delete") { setRec(null); return set(which, ""); }
+          const acc = toAccelerator(e.nativeEvent);
+          if (acc) { setRec(null); set(which, acc); }
+        }}
+      >
+        {rec === which ? "Aperte a combinação…" : keys[which] || "Sem atalho"}
+      </button>
+    </div>
+  );
+  return (
+    <div className="voice-field">
+      <h4>Atalhos globais</h4>
+      {field("mute", "Mutar")}
+      {field("deafen", "Ensurdecer")}
+      <p className="dim">Funcionam até com o jogo em tela cheia. Backspace limpa o atalho. Aperte-para-falar ainda não está disponível.</p>
+      {warn && <p role="alert" className="dim">{warn}</p>}
+    </div>
+  );
+}
 
 /** Teste de microfone: medidor de nível (entrada vs filtrado) e, opcionalmente, ouvir a si mesmo com o filtro escolhido. */
 function MicTest({ prefs }: { prefs: AudioPrefs }) {
@@ -225,6 +270,7 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
           />
         </label>
         <MicTest prefs={prefs} />
+        {desktop()?.setShortcuts && <ShortcutSettings />}
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>
       </div>
     </div>

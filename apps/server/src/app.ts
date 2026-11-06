@@ -7,7 +7,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -80,6 +80,8 @@ export interface AppOptions {
   authLimit?: { perIp: number; perName: number };
   /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
   heartbeatMs?: number;
+  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 2 GB. */
+  attachmentQuotaBytes?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
@@ -138,7 +140,7 @@ const canManage = (role: ServerRole | undefined) => role === "owner" || role ===
 export async function buildApp({
   db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
-  heartbeatMs = 30_000, voiceGraceMs = 30_000, roomService,
+  heartbeatMs = 30_000, attachmentQuotaBytes = 2 * 1024 ** 3, voiceGraceMs = 30_000, roomService,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
@@ -226,7 +228,29 @@ export async function buildApp({
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Toque de chamada em DM/grupo: um por canal; para quando alguém atende, quem ligou sai, recusam todos ou passam 30 s.
+  const RING_MS = 30_000;
+  const rings = new Map<string, { callerId: string; targets: Set<string>; timer: ReturnType<typeof setTimeout> }>();
+  const endRing = (channelId: string, only?: string) => {
+    const r = rings.get(channelId);
+    if (!r) return;
+    if (only) {
+      r.targets.delete(only);
+      toUsers([only], { t: "ringEnd", channelId });
+      if (r.targets.size) return;
+    } else toUsers(r.targets, { t: "ringEnd", channelId });
+    clearTimeout(r.timer);
+    rings.delete(channelId);
+  };
+  /** Chamado a cada mudança de voz: encerra o toque de quem já foi atendido ou cancelado. */
+  const syncRings = () => {
+    for (const [channelId, r] of rings) {
+      const inCall = [...voice.values()].filter((v) => v.channelId === channelId);
+      if (!inCall.some((v) => v.userId === r.callerId) || inCall.some((v) => v.userId !== r.callerId)) endRing(channelId);
+    }
+  };
   const broadcastVoice = () => {
+    syncRings();
     for (const s of online.keys()) s.send(JSON.stringify(voiceStatesFor(s)));
   };
   /** Tira da chamada quem deixou de ser membro (some das listas e perde a conexão de áudio). */
@@ -366,7 +390,7 @@ export async function buildApp({
   };
   const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
   sweeper.unref();
-  app.addHook("onClose", async () => clearInterval(sweeper));
+  app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
 
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
@@ -478,7 +502,12 @@ export async function buildApp({
       return reply.code(409).send({ error: "nome já em uso" });
     }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
-    await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
+    // Marca o convite numa única operação: se dois cadastros usarem o mesmo código ao mesmo tempo, só um vence.
+    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code });
+    if (!claimed.length) {
+      await db.delete(users).where(eq(users.id, id));
+      return reply.code(403).send({ error: "convite inválido" });
+    }
     return { token: await startSession(id, req), user };
   });
 
@@ -916,6 +945,40 @@ export async function buildApp({
       return { ok: true };
     });
 
+    // Banimentos: mesmas regras de expulsar (dono bane qualquer um; admin só membro comum).
+    const canModerate = (role: ServerRole, target: ServerRole | undefined) => role === "owner" || (role === "admin" && (!target || target === "member"));
+    authed.get<{ Params: { id: string } }>("/servers/:id/bans", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      const rows = await db
+        .select({ userId: serverBans.userId, username: users.username, displayName: users.displayName, reason: serverBans.reason, createdAt: serverBans.createdAt })
+        .from(serverBans).innerJoin(users, eq(users.id, serverBans.userId)).where(eq(serverBans.serverId, req.params.id)).orderBy(desc(serverBans.createdAt));
+      return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+    });
+    authed.post<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      const role = await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin");
+      if (!role) return;
+      if (req.params.user === me(req).id) return reply.code(400).send({ error: "você não pode banir a si mesmo" });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (target === "owner") return reply.code(403).send({ error: "o dono não pode ser banido" });
+      if (!canModerate(role, target)) return reply.code(403).send({ error: "sem permissão" });
+      if (!(await db.select({ id: users.id }).from(users).where(eq(users.id, req.params.user)).limit(1)).length) return reply.code(404).send({ error: "pessoa não existe" });
+      const reason = typeof (req.body as any)?.reason === "string" ? (req.body as any).reason.trim().slice(0, 200) || null : null;
+      await db.insert(serverBans).values({ serverId: req.params.id, userId: req.params.user, bannedBy: me(req).id, reason }).onConflictDoNothing();
+      if (target) {
+        await db.delete(serverMembers).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, req.params.user)));
+        await dropFromCalls(req.params.id, req.params.user);
+        await refreshMemberships(req.params.user);
+        toUsers([req.params.user], { t: "sync" });
+        toServer(req.params.id, { t: "sync" });
+      }
+      return { ok: true };
+    });
+    authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
+      await db.delete(serverBans).where(and(eq(serverBans.serverId, req.params.id), eq(serverBans.userId, req.params.user)));
+      return { ok: true };
+    });
+
     authed.post<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const body = createInviteBody.safeParse(req.body ?? {});
@@ -930,6 +993,8 @@ export async function buildApp({
       const inv = await usableServerInvite(req.params.code);
       if (!inv) return reply.code(404).send({ error: "convite inválido ou vencido" });
       const server = (await findServer(inv.serverId))!;
+      if ((await db.select({ u: serverBans.userId }).from(serverBans).where(and(eq(serverBans.serverId, inv.serverId), eq(serverBans.userId, me(req).id))).limit(1)).length)
+        return reply.code(403).send({ error: "você foi banido deste servidor" });
       if (!(await roleIn(inv.serverId, me(req).id))) {
         await db.insert(serverMembers).values({ serverId: inv.serverId, userId: me(req).id, role: "member" });
         await db.update(serverInvites).set({ uses: sql`${serverInvites.uses} + 1` }).where(eq(serverInvites.code, inv.code));
@@ -1295,6 +1360,11 @@ export async function buildApp({
       attachmentsBy.set(userId, recent);
       return true;
     };
+    const attachmentUsage = async (userId: string) =>
+      Number((await db.select({ n: sql<number>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(eq(attachments.userId, userId)))[0]?.n ?? 0);
+    const fmtMb = (b: number) => (b / 1024 / 1024).toFixed(b >= 10 * 1024 * 1024 ? 0 : 1);
+    /** Uso da cota de anexos da própria conta (mostrado em Configurações). */
+    authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));
     /** Envia um arquivo para usar na próxima mensagem do canal (evento "send" com `attachments`). */
     authed.post<{ Params: { id: string } }>("/channels/:id/attachments", async (req, reply) => {
       const channel = await findChannel(req.params.id);
@@ -1307,6 +1377,9 @@ export async function buildApp({
       if (!raw || part.file.truncated || raw.length > ATTACHMENT_MAX_BYTES) return reply.code(413).send({ error: `arquivo grande demais (máximo ${ATTACHMENT_MAX_BYTES / 1024 / 1024} MB)` });
       if (!raw.length) return reply.code(400).send({ error: "arquivo vazio" });
       const out = await processAttachment(raw);
+      const used = await attachmentUsage(me(req).id);
+      if (used + out.data.length > attachmentQuotaBytes)
+        return reply.code(413).send({ error: `cota de anexos cheia (${fmtMb(used)} de ${fmtMb(attachmentQuotaBytes)} MB); apague mensagens com arquivos para liberar espaço` });
       const name = (part.filename || "arquivo").split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120) || "arquivo";
       const key = await files.save(out.data, out.ext);
       const att: Attachment = { id: newId(), key, name, size: out.data.length, mime: out.mime, width: out.width, height: out.height };
@@ -1453,6 +1526,8 @@ export async function buildApp({
           }
         });
       };
+      const floodSecond = attemptLimiter({ max: 10, windowMs: 1_000 });
+      const floodWindow = attemptLimiter({ max: 60, windowMs: 10_000 });
       const handle = async (raw: Buffer) => {
         let evt;
         try {
@@ -1463,7 +1538,22 @@ export async function buildApp({
         // O perfil pode ter mudado desde que a conexão abriu.
         const user = online.get(socket) ?? connected;
         if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
+        // Contra flood: por conexão, no máximo 10 eventos por segundo e 60 a cada 10 s (ping não conta).
+        if (evt.t !== "auth") {
+          if (floodSecond.blockedFor("c") || floodWindow.blockedFor("c"))
+            return socket.send(JSON.stringify({ t: "error", error: "calma: eventos demais; tente de novo em instantes" } satisfies ServerEvent));
+          floodSecond.hit("c");
+          floodWindow.hit("c");
+        }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "ringDecline") {
+          const r = rings.get(evt.channelId);
+          if (r?.targets.has(user.id)) {
+            toUsers([r.callerId], { t: "ringDeclined", channelId: evt.channelId, by: user.id });
+            endRing(evt.channelId, user.id);
+          }
+          return;
+        }
         if (evt.t === "voice") {
           if (evt.channelId === null) {
             if (voice.delete(socket)) broadcastVoice();
@@ -1479,10 +1569,26 @@ export async function buildApp({
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
           // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
           for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
+          // Primeira pessoa a entrar na chamada de uma DM/grupo: toca para as outras (só a quem está conectado).
+          const alreadyThere = [...voice.values()].some((v) => v.channelId === channel.id);
+          const ringTargets = channel.kind === "dm" && !alreadyThere && !rings.has(channel.id)
+            ? (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channel.id))).map((r) => r.id).filter((id) => id !== user.id)
+            : [];
           voice.set(socket, {
             userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId ?? "",
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,
           });
+          if (ringTargets.length) {
+            const from = { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar };
+            const targets = new Set(ringTargets);
+            const timer = setTimeout(() => endRing(channel.id), RING_MS);
+            timer.unref?.();
+            rings.set(channel.id, { callerId: user.id, targets, timer });
+            for (const s of online.keys()) {
+              const u = online.get(s)!;
+              if (targets.has(u.id)) s.send(JSON.stringify({ t: "ring", channelId: channel.id, from, silent: u.status === "busy" } satisfies ServerEvent));
+            }
+          }
           broadcastVoice();
           return;
         }

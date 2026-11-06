@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
-import { Button, Icon, IconButton } from "@turtle/ui";
+import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
+import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
+import { desktop, loadShortcuts } from "../desktop";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -287,6 +288,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     };
   }, [markRead]);
   useEffect(() => askNotificationsOnFirstClick(), []);
+  // Atalhos globais do app desktop: registra os guardados e reage ao aperto (o som sai do efeito de mudo/ensurdecer).
+  useEffect(() => {
+    const d = desktop();
+    if (!d?.setShortcuts || !d.onShortcut) return;
+    d.setShortcuts(loadShortcuts());
+    return d.onShortcut((which) => void (which === "mute" ? voice.toggleMute() : voice.toggleDeafen()));
+  }, [voice]);
 
   // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
   const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });
@@ -298,6 +306,25 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     lastSnap.current = { muted: snap.muted, deafened: snap.deafened, screen: snap.screen };
   }, [snap.muted, snap.deafened, snap.screen]);
   useEffect(() => setSoundOutput(snap.prefs.outputId), [snap.prefs.outputId]);
+
+  // ---- Aviso falado (leitor de tela) de quem entra/sai da chamada e de mudo/ensurdecido ----
+  const [liveNote, setLiveNote] = useState("");
+  const lastCall = useRef<{ ids: Map<string, string>; muted: boolean; deafened: boolean; channelId: string | undefined }>({ ids: new Map(), muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId });
+  useEffect(() => {
+    const prev = lastCall.current;
+    const ids = new Map(snap.participants.map((p) => [p.id, p.name] as const));
+    const notes: string[] = [];
+    if (snap.channelId && snap.channelId === prev.channelId) {
+      for (const [id, name] of ids) if (!prev.ids.has(id) && !snap.participants.find((p) => p.id === id)?.isLocal) notes.push(`${name} entrou na chamada`);
+      for (const [id, name] of prev.ids) if (!ids.has(id)) notes.push(`${name} saiu da chamada`);
+    }
+    if (snap.channelId) {
+      if (snap.deafened !== prev.deafened) notes.push(snap.deafened ? "Você ensurdeceu" : "Você voltou a ouvir");
+      else if (snap.muted !== prev.muted) notes.push(snap.muted ? "Você está mudo" : "Você está com o microfone ligado");
+    }
+    lastCall.current = { ids, muted: snap.muted, deafened: snap.deafened, channelId: snap.channelId };
+    if (notes.length) setLiveNote(notes.join(". "));
+  }, [snap.participants, snap.muted, snap.deafened, snap.channelId]);
 
   // Título da janela com o que está esperando você (aparece na barra de tarefas).
   const waiting = Object.values(unread).reduce((n, u) => n + (u.serverId === null ? 1 : u.mentions), 0);
@@ -393,6 +420,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           setBusy(evt.busy);
         }
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
+        if (evt.t === "ring") onRing.current(evt);
+        if (evt.t === "ringEnd") setRings((l) => l.filter((x) => x.channelId !== evt.channelId));
+        if (evt.t === "ringDeclined") setLiveNote("Chamada recusada");
       };
       s.onclose = (ev) => {
         if (ev.code === 4401) {
@@ -474,6 +504,35 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   }, [chooseServer, showContent]);
 
   // Mensagem nova chegando: lista, não lidas, som e notificação. Fica num ref para ver o estado atual sem reconectar.
+  // ---- Chamadas tocando (DM e grupo) ----
+  const [rings, setRings] = useState<Extract<ServerEvent, { t: "ring" }>[]>([]);
+  const onRing = useRef<(r: Extract<ServerEvent, { t: "ring" }>) => void>(() => {});
+  onRing.current = (r) => {
+    setRings((l) => [...l.filter((x) => x.channelId !== r.channelId), r]);
+    if (r.silent && appFocused()) return;
+    const dm = dms.find((d) => d.channelId === r.channelId);
+    if (!appFocused() || r.silent)
+      showNotification(`${shownName(r.from)} está te ligando`, dm?.group ? dmTitle(dm) : "Chamada de voz", fileUrl(r.from.avatar), () => {
+        if (dm) openDm(dm);
+      });
+  };
+  useEffect(() => {
+    if (!rings.some((r) => !r.silent)) return;
+    playSound("ring");
+    const t = setInterval(() => playSound("ring"), 2500);
+    return () => clearInterval(t);
+  }, [rings]);
+  const answerRing = (r: Extract<ServerEvent, { t: "ring" }>) => {
+    setRings((l) => l.filter((x) => x.channelId !== r.channelId));
+    const dm = dms.find((d) => d.channelId === r.channelId);
+    if (dm) openDm(dm);
+    setDmCall(true);
+    void voice.join(r.channelId);
+  };
+  const declineRing = (r: Extract<ServerEvent, { t: "ring" }>) => {
+    setRings((l) => l.filter((x) => x.channelId !== r.channelId));
+    ws.current?.send(JSON.stringify({ t: "ringDecline", channelId: r.channelId }));
+  };
   const onMessage = useRef<(m: Message) => void>(() => {});
   onMessage.current = (m: Message) => {
     if (m.channelId === currentRef.current) setMessages((l) => (l.some((x) => x.id === m.id) ? l : [...l, m]));
@@ -639,6 +698,19 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
+      {rings.length > 0 && (
+        <div className="ring-stack" role="alertdialog" aria-label="Chamada recebida">
+          {rings.map((r) => (
+            <div key={r.channelId} className="ring-card lino">
+              <Avatar name={shownName(r.from)} src={fileUrl(r.from.avatar)} size={40} />
+              <span><b>{shownName(r.from)}</b> está te ligando{r.silent ? " (Não perturbe)" : ""}</span>
+              <Button size="sm" onClick={() => answerRing(r)}>Atender</Button>
+              <Button size="sm" variant="ghost" onClick={() => declineRing(r)}>Recusar</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{liveNote}</div>
       <ServerRail
         servers={servers}
         activeId={serverId}

@@ -5,7 +5,7 @@ import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 
 /** Escolha de qualidade e áudio antes de transmitir a tela ou uma janela. */
 export function ShareModal({ snap, voice, onClose }: { snap: VoiceSnapshot; voice: VoiceClient; onClose: () => void }) {
-  const { screenProfile, screenAudio } = snap.prefs;
+  const { screenProfile, screenAudio, screenSimulcast } = snap.prefs;
   return (
     <Modal
       title="Transmitir tela"
@@ -50,6 +50,14 @@ export function ShareModal({ snap, voice, onClose }: { snap: VoiceSnapshot; voic
           Incluir o áudio do computador
           <br />
           <span className="t-muted">Use fone de ouvido, senão a voz dos outros volta para a chamada como eco.</span>
+        </span>
+      </label>
+      <label className="share-audio">
+        <input type="checkbox" checked={screenSimulcast} onChange={(e) => voice.setScreenSimulcast(e.target.checked)} />
+        <span>
+          Enviar também uma versão menor (para quem tem rede fraca)
+          <br />
+          <span className="t-muted">540p a 15 fps, ~0,8 Mb/s extras. Usa mais a placa de vídeo; se a transmissão cair de fps, desligue.</span>
         </span>
       </label>
     </Modal>

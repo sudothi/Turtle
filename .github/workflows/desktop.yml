@@ -16,7 +16,39 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @turtle/desktop typecheck
-      - run: pnpm desktop:dist
+      # Assinatura (Azure Trusted Signing): só roda se o Environment "windows-signing" existir com os
+      # segredos AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET e as variáveis AZURE_SIGN_ENDPOINT,
+      # AZURE_SIGN_ACCOUNT, AZURE_SIGN_PROFILE, AZURE_SIGN_PUBLISHER. Ver docs/planos/assinatura-windows.md.
+      # Sem eles, gera o instalador sem assinatura, como antes.
+      - name: Gerar instalador
+        shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
+        run: |
+          if [ -n "$AZURE_CLIENT_SECRET" ] && [ -n "$AZURE_SIGN_ACCOUNT" ]; then
+            echo "Assinando com Azure Trusted Signing" >> "$GITHUB_STEP_SUMMARY"
+            pnpm desktop:dist \
+              -c.win.azureSignOptions.endpoint="$AZURE_SIGN_ENDPOINT" \
+              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGN_ACCOUNT" \
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_SIGN_PROFILE" \
+              -c.win.azureSignOptions.publisherName="$AZURE_SIGN_PUBLISHER" \
+              -c.win.publisherName="$AZURE_SIGN_PUBLISHER"
+          else
+            echo "Instalador SEM assinatura (segredos do Azure não configurados)" >> "$GITHUB_STEP_SUMMARY"
+            pnpm desktop:dist
+          fi
+      # Enquanto não houver assinatura, o SHA-256 do instalador vai no resumo da execução para conferência.
+      - name: SHA-256 do instalador
+        shell: bash
+        run: |
+          cd apps/desktop/release
+          { echo '### SHA-256'; echo '```'; sha256sum Turtle-Setup-*.exe; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: turtle-windows

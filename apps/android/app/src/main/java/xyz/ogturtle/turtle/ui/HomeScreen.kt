@@ -71,10 +71,12 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import xyz.ogturtle.turtle.AppViewModel
+import xyz.ogturtle.turtle.activityOf
 import xyz.ogturtle.turtle.R
 import xyz.ogturtle.turtle.UiState
 import xyz.ogturtle.turtle.data.Channel
@@ -597,6 +599,9 @@ private fun FriendList(state: UiState, vm: AppViewModel, onProfile: (String) -> 
                                 Column(Modifier.weight(1f)) {
                                     Text(f.user.shownName, style = MaterialTheme.typography.titleMedium)
                                     if (f.user.displayName != null) Text("@${f.user.username}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+                                    if (f.user.id in state.online) state.activityOf(f.user.id)?.let {
+                                        Text(it, color = Ink.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                                 if (status == "incoming") {
                                     IconButton(onClick = { vm.setFriend(f.user.id, true) {} }) {

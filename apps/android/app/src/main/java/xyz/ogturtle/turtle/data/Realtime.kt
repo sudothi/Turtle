@@ -26,7 +26,7 @@ sealed interface ServerEvent {
     /** Servidores, canais, membros, amigos ou conversas mudaram: buscar de novo. */
     data object Refresh : ServerEvent
     /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
-    data class Presence(val online: Set<String>, val busy: Set<String>) : ServerEvent
+    data class Presence(val online: Set<String>, val busy: Set<String>, val activities: Map<String, Activity> = emptyMap()) : ServerEvent
     data class VoiceStates(val states: List<VoiceState>) : ServerEvent
     data class Error(val text: String) : ServerEvent
     /** Alguém está te ligando numa DM ou grupo. `silent` = você está em Não perturbe (só notificar). */
@@ -48,7 +48,12 @@ fun parseServerEvent(text: String): ServerEvent? {
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
             "sync", "friends", "channel", "userUpdate" -> ServerEvent.Refresh // userUpdate só chega a quem divide servidor/DM/amizade
-            "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
+            "presence" -> ServerEvent.Presence(
+                ids(o["online"]), ids(o["busy"]),
+                runCatching {
+                    o["activities"]?.let { TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.MapSerializer(kotlinx.serialization.builtins.serializer<String>(), Activity.serializer()), it) }
+                }.getOrNull() ?: emptyMap(),
+            )
             "voiceStates" -> ServerEvent.VoiceStates(
                 TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),
             )

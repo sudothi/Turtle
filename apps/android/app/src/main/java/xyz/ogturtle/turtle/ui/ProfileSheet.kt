@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import xyz.ogturtle.turtle.AppViewModel
+import xyz.ogturtle.turtle.activityOf
 import xyz.ogturtle.turtle.data.ApiException
 import xyz.ogturtle.turtle.data.ProfileView
 import xyz.ogturtle.turtle.ui.theme.Ink
@@ -91,6 +92,7 @@ fun ProfileSheet(userId: String, myId: String?, vm: AppViewModel, onDismiss: () 
                         }
                     }
                     Text("@${p.username}", color = Ink.Muted)
+                    if (p.id in vm.state.value.online) vm.state.value.activityOf(p.id)?.let { Text(it, color = Ink.PaperDim, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
                     p.bio?.takeIf { it.isNotBlank() }?.let {
                         SectionLabel("Sobre mim", Modifier.padding(top = 16.dp, bottom = 4.dp))
                         Text(it, color = Ink.PaperDim)

@@ -3,6 +3,28 @@ package xyz.ogturtle.turtle.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/** O que a pessoa está jogando (só o desktop detecta; o Android só mostra). */
+@Serializable
+data class Activity(val game: String, val phase: String? = null, val detail: String? = null, val since: String? = null)
+
+private val gameNames = mapOf(
+    "lol" to "League of Legends", "valorant" to "VALORANT", "cs2" to "Counter-Strike 2", "dota2" to "Dota 2",
+    "fortnite" to "Fortnite", "minecraft" to "Minecraft", "roblox" to "Roblox", "gta5" to "GTA V",
+    "rocketleague" to "Rocket League", "apex" to "Apex Legends",
+)
+private val phaseNames = mapOf("lobby" to "No saguão", "queue" to "Na fila", "champSelect" to "Escolhendo campeão", "inGame" to "Em partida")
+
+/** "Jogando League of Legends · Na fila · Ranqueada · 12 min" (igual ao web). */
+fun Activity.text(nowMs: Long = System.currentTimeMillis()): String {
+    val mins = since?.let { runCatching { (nowMs - java.time.Instant.parse(it).toEpochMilli()) / 60_000 }.getOrNull() }
+    val time = when {
+        mins == null || mins < 1 -> null
+        mins >= 60 -> "${mins / 60} h ${mins % 60} min"
+        else -> "$mins min"
+    }
+    return listOfNotNull("Jogando ${gameNames[game] ?: game}", phase?.let { phaseNames[it] }, detail?.takeIf { it.isNotBlank() }, time).joinToString(" · ")
+}
+
 /** Modelos espelham packages/protocol (apps/server responde exatamente esses formatos). */
 @Serializable
 data class User(

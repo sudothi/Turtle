@@ -52,6 +52,8 @@ data class UiState(
     val online: Set<String> = emptySet(),
     /** Quem está em Não perturbe. */
     val dnd: Set<String> = emptySet(),
+    /** Jogo de quem está jogando (vem na presença; o Android não informa o próprio). */
+    val activities: Map<String, Activity> = emptyMap(),
     /** Enviando anexos (mostra a barra de progresso no chat). */
     val uploading: Boolean = false,
     /** Quem está em cada chamada de voz (de todos os meus servidores e conversas). */
@@ -71,6 +73,16 @@ internal fun inviteCode(text: String): String = text.trim().trimEnd('/').substri
 
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
 internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it.id == m.id }) this else this + m
+
+/** Linha de atividade: jogo, ou "Em chamada em #sala · Servidor" (só chamadas que o servidor já me mostra). */
+fun UiState.activityOf(userId: String): String? {
+    activities[userId]?.let { return it.text() }
+    val v = voiceStates.firstOrNull { it.userId == userId } ?: return null
+    val sid = v.serverId ?: return "Em chamada em uma conversa"
+    val ch = channels[sid]?.firstOrNull { it.id == v.channelId }?.name ?: "voz"
+    val srv = servers.firstOrNull { it.id == sid }?.name
+    return "Em chamada em #$ch" + (srv?.let { " · $it" } ?: "")
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
@@ -382,7 +394,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             is ServerEvent.RingEnd -> endRing(e.channelId)
             is ServerEvent.RingDeclined -> _state.update { it.copy(error = "Chamada recusada") }
-            is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
+            is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy, activities = e.activities) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
         }

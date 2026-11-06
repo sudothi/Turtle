@@ -35,6 +35,8 @@ export default function NavigationScreen() {
   const [place, setPlace] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const conversations = useRead<Dm[]>([], useCallback(() => workspace.api.dms(), [workspace]));
+  const unread = useRead([], useCallback(() => workspace.api.unread(), [workspace]));
+  const count = (id: string) => unread.data.find(item => item.channelId === id)?.count ?? 0;
   const entry = directory.data.find(value => value.server.id === place);
   const serverActions = () => {
     if (!entry) return;
@@ -70,7 +72,7 @@ export default function NavigationScreen() {
           <SidebarRow title="Amigos" leading={<Icon name="users" size={24} />} selected={selected === "friends"} onPress={() => { setSelected("friends"); navigation.navigate("Friends"); }} />
           <View style={s.dmCategory}><Text style={text.serverTitle}>Conversas</Text></View>
           <ReadStatus loading={conversations.loading && !conversations.data.length} error={conversations.error} retry={conversations.refresh} />
-          {conversations.data.map(dm => <SidebarRow key={dm.channelId} title={dmTitle(dm)} selected={selected === dm.channelId} leading={dm.group ? <View style={s.groupAvatar}><Icon name="users" color={colors.paperDim} /></View> : <Avatar name={dmTitle(dm)} uri={workspace.api.fileUrl(dm.users[0]?.avatar)} size={32} online={presence.online.includes(dm.users[0]?.id || "")} />} onPress={() => openConversation(dm.channelId, dmTitle(dm))} />)}
+          {conversations.data.map(dm => <SidebarRow key={dm.channelId} title={`${dmTitle(dm)}${count(dm.channelId) ? ` · ${count(dm.channelId)} não lidas` : ""}`} selected={selected === dm.channelId} leading={dm.group ? <View style={s.groupAvatar}><Icon name="users" color={colors.paperDim} /></View> : <Avatar name={dmTitle(dm)} uri={workspace.api.fileUrl(dm.users[0]?.avatar)} size={32} online={presence.online.includes(dm.users[0]?.id || "")} />} onPress={() => openConversation(dm.channelId, dmTitle(dm))} />)}
           {!conversations.loading && !conversations.error && !conversations.data.length && <Text style={[text.caption, { paddingHorizontal: 8 }]}>Nenhuma conversa ainda.</Text>}
         </> : <>
           {([['text', 'Canais de texto', 'hash'], ['voice', 'Canais de voz', 'speaker']] as const).map(([kind, title, icon]) => <Category key={kind} title={title}>

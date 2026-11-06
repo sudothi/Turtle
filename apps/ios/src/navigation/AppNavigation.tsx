@@ -14,6 +14,10 @@ import CallScreen from "../screens/CallScreen";
 import ConversationScreen from "../screens/ConversationScreen";
 import MembersScreen from "../screens/MembersScreen";
 
+import BlocksScreen from "../screens/BlocksScreen";
+import ProfileScreen from "../screens/ProfileScreen";
+import GroupScreen from "../screens/GroupScreen";
+
 const Root = createNativeStackNavigator<RootRoutes>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: colors.background, card: colors.panel, primary: colors.paper, text: colors.paper, border: colors.rail } };
 
@@ -34,8 +38,11 @@ export default function AppNavigation() {
         <Root.Screen name="Conversation" component={ConversationScreen} getId={({ params }) => params.channelId} options={({ route, navigation }) => ({
           title: route.params.title,
           headerTitle: () => <View style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 240 }}><Icon name={route.params.serverId ? "hash" : "chat"} /><Text numberOfLines={1} style={[text.label, { flexShrink: 1 }]}>{route.params.title}</Text></View>,
-          headerRight: () => route.params.serverId ? <IconButton name="users" label="Membros do servidor" onPress={() => navigation.navigate("Members", { serverId: route.params.serverId!, title: route.params.title })} /> : null,
+          headerRight: () => route.params.serverId ? <IconButton name="users" label="Membros do servidor" onPress={() => navigation.navigate("Members", { serverId: route.params.serverId!, title: route.params.title })} /> : <IconButton name="users" label="Participantes e opções" onPress={() => navigation.navigate("Group", { channelId: route.params.channelId })} />,
         })} />
+        <Root.Screen name="Blocks" component={BlocksScreen} options={{ title: "Pessoas bloqueadas", presentation: "modal" }} />
+        <Root.Screen name="Profile" component={ProfileScreen} options={{ title: "Perfil", presentation: "modal" }} />
+        <Root.Screen name="Group" component={GroupScreen} options={{ title: "Grupo e participantes", presentation: "modal" }} />
         <Root.Screen name="Call" component={CallScreen} options={({ navigation }) => ({ title: "Chamada", presentation: "modal", headerLeft: () => <IconButton name="chevron-down" label="Fechar chamada sem sair" onPress={() => navigation.goBack()} /> })} />
         <Root.Screen name="Members" component={MembersScreen} getId={({ params }) => params.serverId} options={({ navigation }) => ({ title: "Membros", presentation: "modal", headerLeft: () => <IconButton name="close" label="Fechar membros" onPress={() => navigation.goBack()} /> })} />
         <Root.Screen name="Settings" component={SettingsScreen} options={({ navigation }) => ({ title: "Configurações", presentation: "modal", headerLeft: () => <IconButton name="close" label="Fechar configurações" onPress={() => navigation.goBack()} /> })} />

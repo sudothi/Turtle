@@ -15,6 +15,7 @@ export default function SettingsScreen() {
   const navigation = useAppNavigation();
   return <Page><Content>
     <View style={layout.row}><Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} /><View style={layout.rowText}><Text accessibilityRole="header" style={text.subtitle}>{shownName(user)}</Text><Text style={text.caption}>@{user.username}</Text></View></View>
+    <Button secondary onPress={() => navigation.navigate("Blocks")}>Pessoas bloqueadas</Button>
     <Text accessibilityRole="header" style={text.serverTitle}>Conexão</Text>
     <Text selectable style={text.body}>{workspace.api.origin}</Text>
     {call.status !== "idle" && <Button secondary onPress={() => navigation.navigate("Call")}>Abrir chamada e áudio</Button>}

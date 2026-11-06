@@ -1,4 +1,4 @@
-import { channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
+import { createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -30,12 +30,12 @@ export class Api {
     return url.toString();
   }
 
-  private async request<Schema extends z.ZodTypeAny>(path: string, schema: Schema, body?: unknown): Promise<z.output<Schema>> {
+  private async request<Schema extends z.ZodTypeAny>(path: string, schema: Schema, body?: unknown, method = body === undefined ? "GET" : "POST"): Promise<z.output<Schema>> {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 15_000);
     try {
       const response = await this.transport(`${this.origin}${path}`, {
-        method: body === undefined ? "GET" : "POST",
+        method,
         headers: {
           accept: "application/json",
           ...(body === undefined ? {} : { "content-type": "application/json" }),
@@ -68,6 +68,19 @@ export class Api {
   members = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/members`, z.array(memberSchema));
   friends = () => this.request("/friends", z.array(friendSchema));
   dms = () => this.request("/dms", z.array(dmSchema));
+  profile = (id: string) => this.request(`/users/${encodeURIComponent(id)}`, profileViewSchema);
+  addFriend = (id: string) => this.request(`/friends/${encodeURIComponent(id)}`, z.object({ status: z.enum(["friend", "outgoing"]) }), {});
+  addFriendByName = (username: string) => this.request("/friends", z.object({ status: z.enum(["friend", "outgoing"]) }), { username: username.trim() });
+  removeFriend = (id: string) => this.request(`/friends/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
+  openDm = (id: string) => this.request(`/dms/${encodeURIComponent(id)}`, dmSchema, {});
+  createGroup = (userIds: string[], name?: string) => this.request("/dms", dmSchema, createGroupBody.parse({ userIds, name: name?.trim() || undefined }));
+  addToGroup = (id: string, userId: string) => this.request(`/dms/${encodeURIComponent(id)}/members`, dmSchema, { userId });
+  leaveGroup = (id: string) => this.request(`/dms/${encodeURIComponent(id)}/members/me`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
+  blocks = () => this.request("/blocks", z.array(personSchema));
+  block = (id: string) => this.request(`/blocks/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), {});
+  unblock = (id: string) => this.request(`/blocks/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
+  unread = () => this.request("/unread", z.array(unreadSchema));
+  markRead = (id: string) => this.request(`/channels/${encodeURIComponent(id)}/read`, z.object({ ok: z.literal(true) }), {});
   messages = (id: string, page: { before?: string; beforeId?: string; limit?: number } = {}) => {
     const query = new URLSearchParams({ limit: String(page.limit ?? 50) });
     if (page.before) query.set("before", page.before);

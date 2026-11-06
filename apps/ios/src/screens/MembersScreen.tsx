@@ -29,6 +29,7 @@ export default function MembersScreen() {
         return group.length ? <View key={role} style={{ gap: 4, marginTop: 12 }}><Text accessibilityRole="header" style={text.serverTitle}>{roleLabel[role]} — {group.length}</Text>{group.map(member => <ListRow key={member.userId} title={shownName(member)}
           detail={presence.busy.includes(member.userId) ? "Não perturbe" : presence.online.includes(member.userId) ? "Online" : "Offline"}
           leading={<Avatar name={shownName(member)} uri={workspace.api.fileUrl(member.avatar)} size={32} online={presence.online.includes(member.userId)} />}
+          onPress={() => navigation.navigate("Profile", { userId: member.userId })}
         />)}</View> : null;
       })}
       {!members.loading && !members.error && !matching.length && <Empty title="Nenhum membro encontrado">Tente outro nome ou atualize esta lista.</Empty>}

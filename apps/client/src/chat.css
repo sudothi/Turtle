@@ -125,3 +125,21 @@
 .server-icon-actions { display: flex; flex-direction: column; gap: 4px; }
 .server-icon-actions > div { display: flex; gap: 6px; margin-top: 4px; }
 .msg.head > .plain-btn { align-self: start; }
+.msg-text a { color: var(--paper); text-decoration: underline; }
+.msg-code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 1px 5px; border-radius: 3px; }
+.msg-codeblock { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 8px 10px; border-radius: 4px; margin: 4px 0; overflow-x: auto; white-space: pre; }
+.msg-codeblock code { font: inherit; }
+.msg-spoiler { cursor: pointer; background: var(--paper-dim); color: transparent; border-radius: 3px; user-select: none; }
+.msg-spoiler.shown { background: var(--ink-3, #222); color: inherit; cursor: auto; user-select: auto; }
+.typing-line { min-height: 18px; font-size: 12px; color: var(--text-muted); padding: 0 16px 2px; }
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction { font-size: 13px; padding: 1px 8px; border: 1px solid var(--text-muted); border-radius: 10px; background: transparent; color: var(--paper-dim); cursor: pointer; }
+.reaction.mine { border-color: var(--paper); color: var(--paper); background: var(--ink-3, #222); }
+.react-pick-wrap { position: relative; display: inline-flex; }
+.react-picker { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; gap: 2px; padding: 4px; background: var(--ink-2); }
+.react-picker button { font-size: 18px; padding: 4px 6px; background: transparent; border: 0; cursor: pointer; }
+.search-panel { margin: 8px 16px; padding: 10px; background: var(--ink-2); }
+.search-row { display: flex; gap: 8px; }
+.search-row input { flex: 1; min-width: 0; }
+.search-results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; display: grid; gap: 8px; }
+.search-text { color: var(--paper-dim); white-space: pre-wrap; overflow-wrap: anywhere; }

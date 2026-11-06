@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import {
-  ATTACHMENT_MAX_BYTES, MAX_ATTACHMENTS, MENTION_RE, encodeMentions, isInlineImage, mentionedIds, shownName, splitMentions,
+  ATTACHMENT_MAX_BYTES, MAX_ATTACHMENTS, MENTION_RE, encodeMentions, isInlineImage, mentionedIds, shownName, splitMentions, parseRichText, type RichNode,
   type Attachment, type Channel, type Member, type Message,
 } from "@turtle/protocol";
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
@@ -43,6 +43,73 @@ export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speake
   );
 }
 
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
+
+/** Busca nesta conversa: digite 2 letras ou mais; mostra as 25 mais recentes que combinam. */
+function SearchPanel({ channelId, names, onClose }: { channelId: string; names: Map<string, string>; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Message[] | null>(null);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) return setResults(null);
+    const t = setTimeout(() => api.searchChannel(channelId, term).then(setResults).catch(() => setResults([])), 300);
+    return () => clearTimeout(t);
+  }, [q, channelId]);
+  return (
+    <div className="search-panel lino" role="search">
+      <div className="search-row">
+        <input autoFocus type="search" value={q} placeholder="Buscar nesta conversa" aria-label="Buscar nesta conversa" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()} />
+        <button type="button" className="plain-btn" onClick={onClose}>Fechar</button>
+      </div>
+      <ul className="search-results" aria-live="polite">
+        {results?.length === 0 && <li className="t-muted">Nada encontrado.</li>}
+        {results?.map((m) => (
+          <li key={m.id}>
+            <b>{names.get(m.userId) ?? m.displayName ?? m.username}</b> <time className="t-muted" dateTime={m.createdAt}>{stamp(m.createdAt)}</time>
+            <div className="search-text">{decodeMentions(m.content, names)}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Desenha a formatação básica (negrito, itálico, código, spoiler, links) sem injetar HTML. */
+function Rich({ nodes }: { nodes: RichNode[] }) {
+  return (
+    <>
+      {nodes.map((n, i) => {
+        switch (n.type) {
+          case "text": return n.text;
+          case "bold": return <strong key={i}><Rich nodes={n.children} /></strong>;
+          case "italic": return <em key={i}><Rich nodes={n.children} /></em>;
+          case "code": return <code key={i} className="msg-code">{n.text}</code>;
+          case "codeblock": return <pre key={i} className="msg-codeblock"><code>{n.text}</code></pre>;
+          case "spoiler": return <Spoiler key={i}><Rich nodes={n.children} /></Spoiler>;
+          case "link": return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer">{n.text}</a>;
+        }
+      })}
+    </>
+  );
+}
+
+/** Spoiler: borrado até clicar (ou apertar Enter) para revelar. */
+function Spoiler({ children }: { children: React.ReactNode }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span
+      className={`msg-spoiler${shown ? " shown" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label={shown ? undefined : "Spoiler, clique para mostrar"}
+      onClick={() => setShown(true)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setShown(true)}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** Texto da mensagem com as menções `<@id>` trocadas pelo nome de exibição atual. */
 function MessageText({ content, names, onProfile, edited }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null }) {
   if (!content && !edited) return null;
@@ -50,7 +117,7 @@ function MessageText({ content, names, onProfile, edited }: { content: string; n
     <div className="msg-text">
       {splitMentions(content).map((p, i) =>
         "text" in p ? (
-          p.text
+          <Rich key={i} nodes={parseRichText(p.text)} />
         ) : (
           <button key={i} type="button" className="plain-btn mention" onClick={() => onProfile(p.userId)}>
             @{names.get(p.userId) ?? "alguém"}
@@ -222,7 +289,13 @@ export function ChatView({
   hasMore,
   onLoadOlder,
   canModerate,
+  typing = [],
+  onTyping,
 }: {
+  /** ids de quem está digitando agora neste canal. */
+  typing?: string[];
+  /** Chamado ao digitar (a tela manda o aviso ao servidor, no máximo a cada 3 s). */
+  onTyping?: () => void;
   /** Conversa direta: `channel.name` é o nome da pessoa; sem convite nem lista de membros. */
   dm?: boolean;
   /** Botões extras no cabeçalho (ligar, bloquear, sair do grupo). */
@@ -467,8 +540,13 @@ export function ChatView({
     });
   const uploading = pending.some((p) => !p.done && !p.error);
 
+  const lastTyping = useRef(0);
   const onType = (value: string, caret: number) => {
     setText(value);
+    if (value && onTyping && Date.now() - lastTyping.current > 3000) {
+      lastTyping.current = Date.now();
+      onTyping();
+    }
     setQuery(mentionQuery(value, caret));
     setPick(0);
   };
@@ -555,6 +633,13 @@ export function ChatView({
     if (ask && !window.confirm("Apagar esta mensagem? Não dá para desfazer.")) return;
     await api.deleteMessage(m.id).catch((err: Error) => window.alert(err.message));
   };
+  const [picking, setPicking] = useState<string>();
+  const [searching, setSearching] = useState(false);
+  const toggleReaction = (m: Message, emoji: string) => {
+    setPicking(undefined);
+    const mine = m.reactions.find((r) => r.emoji === emoji)?.userIds.includes(meId) ?? false;
+    void api.react(m.id, emoji, !mine).catch((err: Error) => window.alert(err.message));
+  };
   const mentionsMe = (m: Message) => mentionedIds(m.content).includes(meId) || (m.replyTo?.userId === meId && m.userId !== meId);
 
   if (!channel) return <section className="chat" />;
@@ -567,6 +652,18 @@ export function ChatView({
         <button type="button" title="Responder" aria-label="Responder" onClick={() => startReply(m)}>
           <Icon name="reply" size={18} />
         </button>
+        <span className="react-pick-wrap">
+          <button type="button" title="Reagir" aria-label="Reagir" aria-expanded={picking === m.id} onClick={() => setPicking(picking === m.id ? undefined : m.id)}>
+            <span aria-hidden="true">🙂</span>
+          </button>
+          {picking === m.id && (
+            <div className="react-picker lino" role="menu" aria-label="Escolher reação">
+              {QUICK_REACTIONS.map((e) => (
+                <button key={e} type="button" role="menuitem" aria-label={`Reagir com ${e}`} onClick={() => toggleReaction(m, e)}>{e}</button>
+              ))}
+            </div>
+          )}
+        </span>
         {mine && m.content !== "" && (
           <button type="button" title="Editar" aria-label="Editar mensagem" onClick={() => setEditing(m.id)}>
             <Icon name="pencil" size={18} />
@@ -587,6 +684,19 @@ export function ChatView({
       <>
         <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
+        {m.reactions.length > 0 && (
+          <div className="reactions">
+            {m.reactions.map((r) => {
+              const mineR = r.userIds.includes(meId);
+              const who = r.userIds.map((id) => names.get(id) ?? "alguém").join(", ");
+              return (
+                <button key={r.emoji} type="button" className={`reaction${mineR ? " mine" : ""}`} title={who} aria-pressed={mineR} aria-label={`${r.emoji} ${r.userIds.length}: ${who}`} onClick={() => toggleReaction(m, r.emoji)}>
+                  <span aria-hidden="true">{r.emoji}</span> {r.userIds.length}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </>
     );
 
@@ -599,6 +709,9 @@ export function ChatView({
     >
       <ChannelHeader icon={dm ? "users" : "hash"} name={channel.name}>
         {headerExtra}
+        <IconButton label="Buscar mensagens" active={searching} onClick={() => setSearching((v) => !v)}>
+          <span aria-hidden="true">🔍</span>
+        </IconButton>
         {!dm && canInvite && (
           <IconButton label="Convidar pessoas" onClick={onInvite}>
             <Icon name="user-plus" />
@@ -608,6 +721,7 @@ export function ChatView({
           <Icon name="users" />
         </IconButton>}
       </ChannelHeader>
+      {searching && <SearchPanel channelId={channel.id} names={names} onClose={() => setSearching(false)} />}
 
       <div ref={list} className="messages" role="log" aria-label={dm ? `Conversa com ${channel.name}` : `Mensagens em #${channel.name}`} onScroll={onScroll}>
         {hasMore ? (
@@ -757,6 +871,12 @@ export function ChatView({
               <Icon name="send" size={20} />
             </button>
           </div>
+        </div>
+        <div className="typing-line" aria-live="polite">
+          {(() => {
+            const who = typing.filter((id) => id !== meId).map((id) => { const m = members.find((x) => x.userId === id); return m ? shownName(m) : "Alguém"; });
+            return who.length === 0 ? "" : who.length === 1 ? `${who[0]} está digitando…` : who.length === 2 ? `${who[0]} e ${who[1]} estão digitando…` : "Várias pessoas estão digitando…";
+          })()}
         </div>
         {fileError && <p className="composer-error" role="alert">{fileError}</p>}
       </form>

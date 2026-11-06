@@ -1,17 +1,14 @@
 # Assinatura do instalador do Windows (#102)
 
-Hoje o `Turtle-Setup-*.exe` não é assinado: o Windows mostra o SmartScreen e o auto-update confia só no HTTPS e no hash do `latest.yml` do VPS. Quem invadir o VPS instalaria qualquer programa no grupo.
+**Decisão do thiago (06/11/2026): o instalador não será assinado.** Registrado aqui para ninguém reabrir sem motivo novo.
 
-## O que já está no repositório
-- O workflow "Desktop (Windows)" assina com **Azure Trusted Signing** quando os segredos existem; sem eles, gera sem assinatura como antes.
-- Sempre publica o **SHA-256** do instalador no resumo da execução (conferência manual enquanto não houver assinatura).
+## Consequências
+- O Windows mostra o SmartScreen na primeira instalação ("Mais informações > Executar assim mesmo"); o grupo já sabe disso.
+- O auto-update confia só no HTTPS e no hash do `latest.yml` servido pelo VPS; o `electron-updater` não confere o editor sem assinatura. O risco real é alguém invadir o VPS e trocar o instalador.
 
-## O que falta (precisa do thiago)
-1. Decidir entre Azure Trusted Signing (cerca de US$ 10/mês; confirmar se aceita pessoa física no Brasil) e certificado OV tradicional.
-2. Criar o Environment `windows-signing` no GitHub e preencher:
-   - segredos: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
-   - variáveis: `AZURE_SIGN_ENDPOINT`, `AZURE_SIGN_ACCOUNT`, `AZURE_SIGN_PROFILE`, `AZURE_SIGN_PUBLISHER`
-3. Ligar o job ao Environment (`environment: windows-signing` em `desktop.yml`) depois de criado.
-4. Com o app assinado, o `electron-updater` confere `publisherName` antes de instalar.
+## Mitigações que ficam
+- O workflow "Desktop (Windows)" publica o **SHA-256** do instalador no resumo da execução, para conferir.
+- Manter o VPS protegido: SSH só por chave do usuário `kyo`, fail2ban e atualizações automáticas.
 
-Nenhum segredo vai no código. Com certificado OV, trocar os flags `azureSignOptions` por `certificateFile`/`certificatePassword` vindos de segredos.
+## Por que não Azure
+Para referência: o Azure Trusted Signing não atende pessoa física no Brasil (só EUA e Canadá; organizações em EUA, Canadá, UE e Reino Unido). A alternativa seria um certificado OV (US$ 150–300/ano) com assinatura na nuvem.

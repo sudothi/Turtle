@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOptions } from "fastify";
 import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "livekit-server-sdk";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
@@ -7,7 +7,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -35,7 +35,7 @@ import {
   setInviterBody,
   type Account,
   BANNER_MAX_BYTES,
-  MAX_OWNED_SERVERS,
+  MAX_EMOJI_LENGTH, MAX_OWNED_SERVERS, MAX_REACTION_KINDS,
   clientEvent,
   createChannelBody,
   createInviteBody,
@@ -353,10 +353,16 @@ export async function buildApp({
       : [];
     return new Map(rows.map((r) => [r.id, { ...r, content: r.content.slice(0, REPLY_PREVIEW_CHARS), attachments: Number(files.find((f) => f.messageId === r.id)?.n ?? 0) }]));
   }
+  const groupReactions = (rows: { emoji: string; userId: string }[]) => {
+    const by = new Map<string, string[]>();
+    for (const r of rows) by.set(r.emoji, [...(by.get(r.emoji) ?? []), r.userId]);
+    return [...by].map(([emoji, userIds]) => ({ emoji, userIds }));
+  };
   /** Linhas do banco (com o autor) viram mensagens com os anexos e a prévia da resposta. */
   async function toMessages(rows: { id: string; channelId: string; userId: string; username: string; displayName: string | null; avatar: string | null; isAdmin: boolean; canInvite: boolean; content: string; createdAt: Date; editedAt: Date | null; replyTo: string | null }[]): Promise<Message[]> {
     const files = rows.length ? await db.select(attachmentCols).from(attachments).where(inArray(attachments.messageId, rows.map((r) => r.id))).orderBy(asc(attachments.createdAt)) : [];
     const replies = await replyPreviews(rows.flatMap((r) => (r.replyTo ? [r.replyTo] : [])));
+    const reacts = rows.length ? await db.select().from(reactions).where(inArray(reactions.messageId, rows.map((r) => r.id))).orderBy(asc(reactions.createdAt)) : [];
     return rows.map(({ isAdmin, canInvite, replyTo, ...r }) => ({
       ...r,
       staff: canInviteAccounts({ isAdmin, canInvite }),
@@ -365,6 +371,7 @@ export async function buildApp({
       attachments: files.filter((f) => f.messageId === r.id).map(toAttachment),
       replyToId: replyTo,
       replyTo: (replyTo && replies.get(replyTo)) || null,
+      reactions: groupReactions(reacts.filter((x) => x.messageId === r.id)),
     }));
   }
   const loadMessage = async (id: string) => {
@@ -1288,6 +1295,31 @@ export async function buildApp({
       },
     );
 
+    // ---- Busca ----
+    // Só em conversas que a pessoa vê: o canal pedido, ou todos os canais de texto de um servidor dela.
+    const searchIn = async (channelIds: string[], q: string) => {
+      if (!channelIds.length) return [];
+      const rows = await db
+        .select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId))
+        .where(and(inArray(messages.channelId, channelIds), sql`to_tsvector('portuguese', ${messages.content}) @@ websearch_to_tsquery('portuguese', ${q})`))
+        .orderBy(desc(messages.createdAt)).limit(25);
+      return toMessages(rows);
+    };
+    const searchQuery = (q: unknown) => (typeof q === "string" ? q.trim().slice(0, 100) : "");
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/channels/:id/search", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
+      const q = searchQuery(req.query.q);
+      return q.length < 2 ? [] : searchIn([channel.id], q);
+    });
+    authed.get<{ Params: { id: string }; Querystring: { q?: string } }>("/servers/:id/search", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id))) return;
+      const q = searchQuery(req.query.q);
+      if (q.length < 2) return [];
+      const ids = (await db.select({ id: channels.id }).from(channels).where(and(eq(channels.serverId, req.params.id), eq(channels.kind, "text")))).map((c) => c.id);
+      return searchIn(ids, q);
+    });
+
     // ---- Não lidas ----
     /** Conversas com mensagens de outras pessoas depois da última leitura (canais de texto dos meus servidores e DMs). */
     authed.get("/unread", async (req) => {
@@ -1335,6 +1367,29 @@ export async function buildApp({
       await toChannel(channel, { t: "messageUpdate", message });
       return message;
     });
+    // ---- Reações ----
+    const reactTo = (add: boolean) => async (req: FastifyRequest<{ Params: { id: string; emoji: string } }>, reply: FastifyReply) => {
+      const emoji = req.params.emoji.normalize("NFC");
+      // Só emoji de verdade: sem letras/dígitos soltos nem texto livre.
+      if (!emoji || [...emoji].length > MAX_EMOJI_LENGTH || emoji.length > 32 || !/^[\p{Extended_Pictographic}\p{Emoji_Component}\u200d\ufe0f]+$/u.test(emoji) || /^[\d#*]+$/.test(emoji))
+        return reply.code(400).send({ error: "emoji inválido" });
+      const row = (await db.select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+      const channel = row && (await findChannel(row.channelId));
+      if (!row || !channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "mensagem não existe" });
+      if (add) {
+        const kinds = (await db.selectDistinct({ e: reactions.emoji }).from(reactions).where(eq(reactions.messageId, req.params.id))).map((k) => k.e);
+        if (!kinds.includes(emoji) && kinds.length >= MAX_REACTION_KINDS) return reply.code(400).send({ error: "reações demais nessa mensagem" });
+        await db.insert(reactions).values({ messageId: req.params.id, userId: me(req).id, emoji }).onConflictDoNothing();
+      } else {
+        await db.delete(reactions).where(and(eq(reactions.messageId, req.params.id), eq(reactions.userId, me(req).id), eq(reactions.emoji, emoji)));
+      }
+      const message = (await loadMessage(req.params.id))!;
+      await toChannel(channel, { t: "messageUpdate", message });
+      return message;
+    };
+    authed.put<{ Params: { id: string; emoji: string } }>("/messages/:id/reactions/:emoji", reactTo(true));
+    authed.delete<{ Params: { id: string; emoji: string } }>("/messages/:id/reactions/:emoji", reactTo(false));
+
     /** Apaga a própria mensagem; em servidor, dono e admin também apagam a dos outros. */
     authed.delete<{ Params: { id: string } }>("/messages/:id", async (req, reply) => {
       const row = (await db.select({ userId: messages.userId, channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
@@ -1546,6 +1601,12 @@ export async function buildApp({
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "typing") {
+          const ch = await findChannel(evt.channelId);
+          const ok = !ch ? false : ch.kind === "dm" ? await isDmMember(ch.id, user.id) : ch.kind === "text" && !!ch.serverId && !!memberships.get(socket)?.has(ch.serverId);
+          if (ch && ok) await toChannel(ch, { t: "typing", channelId: ch.id, userId: user.id });
+          return;
+        }
         if (evt.t === "ringDecline") {
           const r = rings.get(evt.channelId);
           if (r?.targets.has(user.id)) {
@@ -1628,7 +1689,7 @@ export async function buildApp({
           id: newId(), channelId: evt.channelId, userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user),
           content: evt.content, createdAt: new Date().toISOString(), editedAt: null,
           attachments: evt.attachments.map((id) => toAttachment(picked.find((f) => f.id === id)!)),
-          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null,
+          replyToId: replyTo?.id ?? null, replyTo: replyTo ?? null, reactions: [],
         };
         await db.insert(messages).values({ id: message.id, channelId: message.channelId, userId: user.id, content: message.content, createdAt: new Date(message.createdAt), replyTo: message.replyToId });
         if (picked.length) await db.update(attachments).set({ messageId: message.id }).where(inArray(attachments.id, picked.map((f) => f.id)));

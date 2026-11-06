@@ -209,6 +209,23 @@ private fun HomeContent(state: UiState, vm: AppViewModel) {
                         },
                     ) { pad ->
                         Column(Modifier.padding(pad).fillMaxSize()) {
+                        // Chamadas tocando (DM e grupo): atender abre a tela da chamada, onde está o botão de entrar.
+                        state.ringing.forEach { r ->
+                            Row(
+                                Modifier.fillMaxWidth().background(Ink.Paper).padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("${r.fromName} está te ligando${if (r.silent) " (Não perturbe)" else ""}", color = Ink.Ink0, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "Atender", color = Ink.Ink0, fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.clickable {
+                                        openId = r.channelId; showFriends = false; place = HOME; dmCallId = r.channelId
+                                        vm.dismissRing(r.channelId)
+                                    }.padding(horizontal = 12.dp, vertical = 10.dp),
+                                )
+                                Text("Recusar", color = Ink.Ink0, modifier = Modifier.clickable { vm.declineRing(r.channelId) }.padding(horizontal = 12.dp, vertical = 10.dp))
+                            }
+                        }
                         val call = state.call
                         // Tela de chamada visível agora (canal de voz ou chamada da conversa).
                         val callScreenId = if (showFriends) null else if (openChannel?.isVoice == true) openId else dmCall?.id

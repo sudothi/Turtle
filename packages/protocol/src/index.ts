@@ -48,6 +48,8 @@ export const messageSchema = z.object({
   /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
   replyToId: z.string().nullable().default(null),
   replyTo: replyPreviewSchema.nullable().default(null),
+  /** Reações agrupadas por emoji, na ordem em que apareceram. */
+  reactions: z.array(z.object({ emoji: z.string(), userIds: z.array(z.string()) })).default([]),
 });
 export type Message = z.infer<typeof messageSchema>;
 
@@ -318,6 +320,8 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** Estou digitando neste canal (o cliente manda no máximo a cada 3 s). */
+  z.object({ t: z.literal("typing"), channelId: z.string() }),
   /** Recusar a chamada que está tocando numa DM ou grupo (quem ligou fica sabendo). */
   z.object({ t: z.literal("ringDecline"), channelId: z.string() }),
   /** Primeira mensagem da conexão: o token da sessão (em vez de ir na URL do WebSocket). */
@@ -358,6 +362,8 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
+  /** Alguém está digitando no canal (some sozinho depois de uns 6 s sem novo aviso). */
+  z.object({ t: z.literal("typing"), channelId: z.string(), userId: z.string() }),
   /** Alguém está te ligando numa DM ou grupo. `silent`: você está em Não perturbe (só notificar, sem tocar). */
   z.object({ t: z.literal("ring"), channelId: z.string(), from: z.object({ id: z.string(), username: z.string(), displayName: z.string().nullable(), avatar: z.string().nullable() }), silent: z.boolean().default(false) }),
   /** A chamada parou de tocar: atendida, cancelada, recusada ou passou de 30 s. */
@@ -370,3 +376,8 @@ export const serverEvent = z.discriminatedUnion("t", [
 
 export type ClientEvent = z.infer<typeof clientEvent>;
 export type ServerEvent = z.infer<typeof serverEvent>;
+export * from "./richtext.js";
+
+/** Máximo de emojis diferentes por mensagem e tamanho de um emoji (em caracteres). */
+export const MAX_REACTION_KINDS = 20;
+export const MAX_EMOJI_LENGTH = 16;

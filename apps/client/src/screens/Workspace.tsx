@@ -420,6 +420,13 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           setBusy(evt.busy);
         }
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
+        if (evt.t === "typing") setTypingBy((all) => ({ ...all, [evt.channelId]: { ...all[evt.channelId], [evt.userId]: Date.now() } }));
+        if (evt.t === "message") setTypingBy((all) => {
+          const who = all[evt.message.channelId];
+          if (!who?.[evt.message.userId]) return all;
+          const { [evt.message.userId]: _gone, ...rest } = who;
+          return { ...all, [evt.message.channelId]: rest };
+        });
         if (evt.t === "ring") onRing.current(evt);
         if (evt.t === "ringEnd") setRings((l) => l.filter((x) => x.channelId !== evt.channelId));
         if (evt.t === "ringDeclined") setLiveNote("Chamada recusada");
@@ -506,6 +513,25 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   // Mensagem nova chegando: lista, não lidas, som e notificação. Fica num ref para ver o estado atual sem reconectar.
   // ---- Chamadas tocando (DM e grupo) ----
   const [rings, setRings] = useState<Extract<ServerEvent, { t: "ring" }>[]>([]);
+  // "Digitando…": quem avisou nos últimos 6 s, por canal.
+  const [typingBy, setTypingBy] = useState<Record<string, Record<string, number>>>({});
+  const typingIds = (channelId?: string) => (channelId ? Object.keys(typingBy[channelId] ?? {}) : []);
+  useEffect(() => {
+    if (!Object.keys(typingBy).length) return;
+    const t = setInterval(() => setTypingBy((all) => {
+      const now = Date.now();
+      const next: typeof all = {};
+      for (const [c, who] of Object.entries(all)) {
+        const alive = Object.fromEntries(Object.entries(who).filter(([, at]) => now - at < 6000));
+        if (Object.keys(alive).length) next[c] = alive;
+      }
+      return Object.keys(next).length === Object.keys(all).length && Object.entries(next).every(([c, w]) => Object.keys(w).length === Object.keys(all[c]!).length) ? all : next;
+    }), 1000);
+    return () => clearInterval(t);
+  }, [typingBy]);
+  const sendTyping = useCallback((channelId: string) => {
+    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "typing", channelId }));
+  }, []);
   const onRing = useRef<(r: Extract<ServerEvent, { t: "ring" }>) => void>(() => {});
   onRing.current = (r) => {
     setRings((l) => [...l.filter((x) => x.channelId !== r.channelId), r]);
@@ -775,6 +801,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             <ChatView
               dm
               channel={dmChannel}
+              typing={typingIds(dmChannel?.id)}
+              onTyping={() => dmChannel && sendTyping(dmChannel.id)}
               messages={messages}
               members={dmMembers}
               meId={user.id}
@@ -824,6 +852,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         ) : (
           <ChatView
             channel={textChannel}
+            typing={typingIds(textChannel?.id)}
+            onTyping={() => textChannel && sendTyping(textChannel.id)}
             messages={messages}
             members={members}
             meId={user.id}

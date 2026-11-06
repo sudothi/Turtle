@@ -56,6 +56,8 @@ data class UiState(
     val uploading: Boolean = false,
     /** Quem está em cada chamada de voz (de todos os meus servidores e conversas). */
     val voiceStates: List<VoiceState> = emptyList(),
+    /** Chamadas tocando agora (DM e grupo). */
+    val ringing: List<ServerEvent.Ring> = emptyList(),
     /** A chamada em que estou agora (null = fora de chamada). */
     val call: CallUi? = null,
 )
@@ -339,6 +341,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun endRing(channelId: String) {
+        _state.update { it.copy(ringing = it.ringing.filterNot { r -> r.channelId == channelId }) }
+        Ringer.stop(getApplication(), channelId)
+    }
+
+    /** Atendi (a tela abre a chamada) ou fechei o cartão: para de tocar aqui. */
+    fun dismissRing(channelId: String) = endRing(channelId)
+
+    fun declineRing(channelId: String) {
+        realtime.sendRingDecline(channelId)
+        endRing(channelId)
+    }
+
     private fun onEvent(e: ServerEvent) {
         when (e) {
             is ServerEvent.NewMessage -> {
@@ -361,6 +376,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is ServerEvent.MessageDelete -> applyDelete(e.channelId, e.id)
             is ServerEvent.Read -> _state.update { cur -> cur.copy(unread = cur.unread.filterNot { it.channelId == e.channelId }) }
             is ServerEvent.VoiceStates -> _state.update { it.copy(voiceStates = e.states) }
+            is ServerEvent.Ring -> {
+                _state.update { it.copy(ringing = it.ringing.filterNot { r -> r.channelId == e.channelId } + e) }
+                Ringer.ring(getApplication(), e)
+            }
+            is ServerEvent.RingEnd -> endRing(e.channelId)
+            is ServerEvent.RingDeclined -> _state.update { it.copy(error = "Chamada recusada") }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy) }
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }

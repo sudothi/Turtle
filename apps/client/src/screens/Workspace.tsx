@@ -3,7 +3,7 @@ import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, sh
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
-import { desktop, loadShortcuts } from "../desktop";
+import { desktop, loadShortcuts, loadShowGame } from "../desktop";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -297,6 +297,22 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     return d.onShortcut((which) => void (which === "mute" ? voice.toggleMute() : voice.toggleDeafen()));
   }, [voice]);
 
+  // Jogo atual (app desktop): o detector só roda com a opção ligada; cada mudança vai ao servidor.
+  const myActivity = useRef<unknown>(null);
+  useEffect(() => {
+    const d = desktop();
+    if (!d?.setActivityEnabled || !d.onActivity) return;
+    const off = d.onActivity((a) => {
+      myActivity.current = a;
+      if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "activity", activity: a }));
+    });
+    d.setActivityEnabled(loadShowGame());
+    return () => {
+      off();
+      d.setActivityEnabled?.(false);
+    };
+  }, []);
+
   // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
   const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });
   useEffect(() => {
@@ -356,6 +372,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         s.send(JSON.stringify({ t: "auth", token: getToken() ?? "" }));
         attempts = 0;
         voice.resendState();
+        // Reconectou: o servidor esqueceu o jogo junto com a conexão antiga.
+        if (myActivity.current) s.send(JSON.stringify({ t: "activity", activity: myActivity.current }));
         void loadUnread().catch(() => {});
         // Reenvia o que ficou sem confirmação (o servidor ignora o que já tinha entrado, pelo nonce).
         for (const o of outboxRef.current) if (o.status === "sending") s.send(JSON.stringify(sendEvent(o)));

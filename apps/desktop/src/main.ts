@@ -4,6 +4,7 @@ import { appIcon } from "./paths.js";
 import { Splash } from "./splash.js";
 import { createTray } from "./tray.js";
 import { updateOnLaunch, watchUpdates } from "./updater.js";
+import { watchGames } from "./games.js";
 
 /** O instalado abre o site publicado; no dev (`pnpm desktop`), o Vite local. */
 const PROD_URL = "https://app.ogturtle.xyz";
@@ -195,6 +196,13 @@ else {
       }
     });
     app.on("will-quit", () => globalShortcut.unregisterAll());
+    // Jogo atual: o site liga/desliga (opção de privacidade) e recebe só as mudanças.
+    const gamesWatch = watchGames((a) => win?.webContents.send("activity:changed", a));
+    ipcMain.on("activity:enable", (event, on: unknown) => {
+      if (!fromApp(event.sender)) return;
+      gamesWatch.set(on === true);
+      gamesWatch.replay();
+    });
     const splash = new Splash();
     if (await updateOnLaunch(splash)) return; // fecha para instalar a versão nova
     splash.status("Abrindo…");

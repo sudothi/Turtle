@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
+import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Activity, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
-import { desktop, loadShortcuts } from "../desktop";
+import { desktop, loadShortcuts, loadShowGame } from "../desktop";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -55,6 +55,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [messages, setMessages] = useState<Message[]>([]);
   const [online, setOnline] = useState<string[]>([]);
   const [busy, setBusy] = useState<string[]>([]);
+  const [activities, setActivities] = useState<Record<string, Activity>>({});
   /** Ainda há mensagens mais antigas no canal aberto. */
   const [hasMore, setHasMore] = useState(false);
   /** Mensagens enviadas ainda sem confirmação do servidor (ou que falharam). */
@@ -296,6 +297,22 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     return d.onShortcut((which) => void (which === "mute" ? voice.toggleMute() : voice.toggleDeafen()));
   }, [voice]);
 
+  // Jogo atual (app desktop): o detector só roda com a opção ligada; cada mudança vai ao servidor.
+  const myActivity = useRef<unknown>(null);
+  useEffect(() => {
+    const d = desktop();
+    if (!d?.setActivityEnabled || !d.onActivity) return;
+    const off = d.onActivity((a) => {
+      myActivity.current = a;
+      if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ t: "activity", activity: a }));
+    });
+    d.setActivityEnabled(loadShowGame());
+    return () => {
+      off();
+      d.setActivityEnabled?.(false);
+    };
+  }, []);
+
   // ---- Sons de mutar, ensurdecer e transmitir (de qualquer botão: barra, chamada ou atalho) ----
   const lastSnap = useRef({ muted: snap.muted, deafened: snap.deafened, screen: snap.screen });
   useEffect(() => {
@@ -355,6 +372,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         s.send(JSON.stringify({ t: "auth", token: getToken() ?? "" }));
         attempts = 0;
         voice.resendState();
+        // Reconectou: o servidor esqueceu o jogo junto com a conexão antiga.
+        if (myActivity.current) s.send(JSON.stringify({ t: "activity", activity: myActivity.current }));
         void loadUnread().catch(() => {});
         // Reenvia o que ficou sem confirmação (o servidor ignora o que já tinha entrado, pelo nonce).
         for (const o of outboxRef.current) if (o.status === "sending") s.send(JSON.stringify(sendEvent(o)));
@@ -402,6 +421,20 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           setKnown((k) => ({ ...k, [evt.channel.id]: evt.channel }));
           if (evt.channel.serverId === serverRef.current) setChannels((c) => (c.some((x) => x.id === evt.channel.id) ? c : [...c, evt.channel]));
         }
+        if (evt.t === "userUpdate") {
+          // Perfil de alguém (ou o meu) mudou: aplica o perfil novo no que já está na tela, sem rebuscar nada.
+          const u = evt.user;
+          const same = { displayName: u.displayName, avatar: u.avatar };
+          setUser((me) => (me.id === u.id ? { ...me, ...same, bio: u.bio, banner: u.banner } : me));
+          setMembers((l) => l.map((m) => (m.userId === u.id ? { ...m, ...same, staff: u.staff } : m)));
+          setFriends((l) => l.map((f) => (f.user.id === u.id ? { ...f, user: { ...f.user, ...same } } : f)));
+          setDms((l) => l.map((d) => (d.users.some((p) => p.id === u.id) ? { ...d, users: d.users.map((p) => (p.id === u.id ? { ...p, ...same } : p)) } : d)));
+          setMessages((l) => l.map((m) => {
+            const mine = m.userId === u.id ? { ...m, ...same, staff: u.staff } : m;
+            return mine.replyTo?.userId === u.id ? { ...mine, replyTo: { ...mine.replyTo, ...same } } : mine;
+          }));
+          setProfileVersion((n) => n + 1);
+        }
         if (evt.t === "sync") {
           void loadServers().then(() => (serverRef.current ? loadServer(serverRef.current, false) : undefined)).catch(() => {});
           // Perfil de alguém mudou: atualiza o meu e as fotos/nomes nas mensagens.
@@ -418,6 +451,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         if (evt.t === "presence") {
           setOnline(evt.online);
           setBusy(evt.busy);
+          setActivities(evt.activities);
         }
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
         if (evt.t === "typing") setTypingBy((all) => ({ ...all, [evt.channelId]: { ...all[evt.channelId], [evt.userId]: Date.now() } }));
@@ -662,7 +696,14 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     if (!u.serverId) continue;
     serverUnread[u.serverId] = { mentions: (serverUnread[u.serverId]?.mentions ?? 0) + u.mentions };
   }
-  const presence = { online: new Set(online), busy: new Set(busy) };
+  // Onde cada pessoa está em chamada (só as chamadas que o servidor já me mostra): "#sala · Servidor" ou "uma conversa".
+  const calls: Record<string, string> = {};
+  for (const v of voiceStates) {
+    const ch = allKnown.find((c) => c.id === v.channelId);
+    const srv = servers.find((x) => x.id === v.serverId);
+    calls[v.userId] = v.serverId ? `#${ch?.name ?? "voz"}${srv ? ` · ${srv.name}` : ""}` : "uma conversa";
+  }
+  const presence = { online: new Set(online), busy: new Set(busy), activities, calls };
   const profileHandlers: ProfileHandlers = {
     meId: user.id,
     online,

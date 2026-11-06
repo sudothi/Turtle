@@ -4,11 +4,11 @@ import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { stat, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -55,6 +55,7 @@ import {
   type Message,
   type Server,
   type ServerEvent,
+  type Activity,
   type ServerRole,
   type User,
   type VoiceState,
@@ -83,8 +84,14 @@ export interface AppOptions {
   authLimit?: { perIp: number; perName: number };
   /** Intervalo do ping do WebSocket; conexão que não responde até o próximo é derrubada. Padrão: 30 s. */
   heartbeatMs?: number;
-  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 2 GB. */
+  /** Cota de anexos por conta, em bytes (soma de attachments.size). Padrão: 500 MB. */
   attachmentQuotaBytes?: number;
+  /** Por quanto tempo os anexos das mensagens ficam no servidor antes de expirar. Padrão: 7 dias. */
+  attachmentRetentionMs?: number;
+  /** Intervalo da limpeza automática de anexos órfãos e vencidos. Padrão: 15 min. */
+  sweepIntervalMs?: number;
+  /** Uso máximo do disco (0 a 1) antes de recusar novos uploads para proteger o banco. Padrão: 0.85 (85%). */
+  maxDiskUsageRatio?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
@@ -143,7 +150,9 @@ const canManage = (role: ServerRole | undefined) => role === "owner" || role ===
 export async function buildApp({
   db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
-  heartbeatMs = 30_000, attachmentQuotaBytes = 2 * 1024 ** 3, voiceGraceMs = 30_000, roomService,
+  heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
+  attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
+  voiceGraceMs = 30_000, roomService,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
@@ -193,12 +202,29 @@ export async function buildApp({
       const set = await loadDmSet(id);
       for (const [s, u] of online) if (u.id === id) dmSets.set(s, set);
     }
+    presence();
+  };
+  /** Amizades (pendentes ou aceitas) de cada conexão: quem tem amizade com você vê sua presença e seu perfil. */
+  const friendSets = new Map<Socket, Set<string>>();
+  const loadFriendSet = async (userId: string) =>
+    new Set(
+      (await db.select().from(friendships).where(or(eq(friendships.userA, userId), eq(friendships.userB, userId)))).map((r) =>
+        r.userA === userId ? r.userB : r.userA,
+      ),
+    );
+  const refreshFriends = async (userIds: Iterable<string>) => {
+    for (const id of new Set(userIds)) {
+      const set = await loadFriendSet(id);
+      for (const [s, u] of online) if (u.id === id) friendSets.set(s, set);
+    }
+    presence();
   };
   const loadMemberships = async (userId: string) =>
     new Set((await db.select({ id: serverMembers.serverId }).from(serverMembers).where(eq(serverMembers.userId, userId))).map((r) => r.id));
   const refreshMemberships = async (userId: string) => {
     const set = await loadMemberships(userId);
     for (const [s, u] of online) if (u.id === userId) memberships.set(s, set);
+    presence();
   };
   const sendWhere = (evt: ServerEvent, allow: (s: Socket) => boolean) => {
     const data = JSON.stringify(evt);
@@ -210,9 +236,43 @@ export async function buildApp({
     const set = new Set(ids);
     sendWhere(evt, (s) => set.has(online.get(s)!.id));
   };
+  const intersects = (a?: Set<string>, b?: Set<string>) => {
+    if (!a || !b) return false;
+    for (const x of a) if (b.has(x)) return true;
+    return false;
+  };
+  /** `viewer` enxerga `other` (presença, perfil) se for a mesma conta ou se dividirem servidor, DM ou amizade. */
+  const sees = (viewer: Socket, other: Socket) =>
+    online.get(viewer)!.id === online.get(other)!.id ||
+    intersects(memberships.get(viewer), memberships.get(other)) ||
+    intersects(dmSets.get(viewer), dmSets.get(other)) ||
+    (friendSets.get(viewer)?.has(online.get(other)!.id) ?? false);
+  /** Cada conexão recebe só a presença de quem ela enxerga (não a lista de todas as contas conectadas). */
+  /** Jogo informado por cada conexão (só memória: some quando ela cai). */
+  const activities = new Map<Socket, Activity>();
   const presence = () => {
-    const people = [...online.values()];
-    broadcast({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] });
+    const sockets = [...online.keys()];
+    for (const viewer of sockets) {
+      const seen = sockets.filter((o) => sees(viewer, o));
+      const people = seen.map((o) => online.get(o)!);
+      const acts: Record<string, Activity> = {};
+      for (const o of seen) {
+        const a = activities.get(o);
+        if (a) acts[online.get(o)!.id] = a;
+      }
+      viewer.send(JSON.stringify({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))], activities: acts } satisfies ServerEvent));
+    }
+  };
+
+  /** Quem deve receber a mudança de perfil de `userId`: ele mesmo e quem divide servidor, DM ou amizade com ele. */
+  const profileAudience = async (userId: string) => {
+    const ids = new Set<string>([userId]);
+    const servers = [...(await loadMemberships(userId))];
+    if (servers.length) for (const r of await db.select({ id: serverMembers.userId }).from(serverMembers).where(inArray(serverMembers.serverId, servers))) ids.add(r.id);
+    const dms = [...(await loadDmSet(userId))];
+    if (dms.length) for (const r of await db.select({ id: dmMembers.userId }).from(dmMembers).where(inArray(dmMembers.channelId, dms))) ids.add(r.id);
+    for (const id of await loadFriendSet(userId)) ids.add(id);
+    return ids;
   };
 
   /** Nonces de envio recentes (10 min) por conta: o reenvio depois de uma queda não duplica a mensagem. */
@@ -391,14 +451,38 @@ export async function buildApp({
   const markRead = (userId: string, channelId: string) =>
     db.insert(readStates).values({ userId, channelId, lastReadAt: new Date() }).onConflictDoUpdate({ target: [readStates.userId, readStates.channelId], set: { lastReadAt: new Date() } });
 
-  // Anexo enviado e nunca usado numa mensagem some depois de uma hora.
-  const sweepOrphans = async () => {
-    const old = await db.select({ id: attachments.id, key: attachments.fileKey }).from(attachments).where(and(isNull(attachments.messageId), lt(attachments.createdAt, new Date(Date.now() - 3_600_000))));
-    if (!old.length) return;
-    await db.delete(attachments).where(inArray(attachments.id, old.map((o) => o.id)));
-    await removeFiles(old.map((o) => o.key));
+  // Anexos órfãos (enviados e nunca usados numa mensagem) somem depois de 1 h;
+  // anexos de mensagens antigas somem depois de `attachmentRetentionMs` (7 dias por padrão), mantendo o texto da conversa.
+  const sweepAttachments = async () => {
+    const now = Date.now();
+    const orphans = await db.select({ id: attachments.id, key: attachments.fileKey }).from(attachments).where(and(isNull(attachments.messageId), lt(attachments.createdAt, new Date(now - 3_600_000))));
+    if (orphans.length) {
+      await db.delete(attachments).where(inArray(attachments.id, orphans.map((o) => o.id)));
+      await removeFiles(orphans.map((o) => o.key));
+    }
+    const expired = await db
+      .select({ id: attachments.id, messageId: attachments.messageId, key: attachments.fileKey, name: attachments.name })
+      .from(attachments)
+      .where(and(isNotNull(attachments.messageId), lt(attachments.createdAt, new Date(now - attachmentRetentionMs))));
+    if (!expired.length) return;
+    await db.delete(attachments).where(inArray(attachments.id, expired.map((e) => e.id)));
+    await removeFiles(expired.map((e) => e.key));
+    const byMsg = new Map<string, string[]>();
+    for (const e of expired) if (e.messageId) byMsg.set(e.messageId, [...(byMsg.get(e.messageId) ?? []), e.name]);
+    for (const [msgId, names] of byMsg) {
+      const row = (await db.select({ id: messages.id, channelId: messages.channelId, content: messages.content }).from(messages).where(eq(messages.id, msgId)).limit(1))[0];
+      if (!row) continue;
+      const rem = (await db.select({ n: count() }).from(attachments).where(eq(attachments.messageId, msgId)))[0]?.n ?? 0;
+      if (rem === 0 && row.content.trim() === "") {
+        await db.update(messages).set({ content: `[anexo expirado: ${names.join(", ")}]` }).where(eq(messages.id, msgId));
+      }
+      const channel = await findChannel(row.channelId);
+      const message = await loadMessage(msgId);
+      if (channel && message) await toChannel(channel, { t: "messageUpdate", message });
+    }
   };
-  const sweeper = setInterval(() => void sweepOrphans().catch(() => {}), 15 * 60_000);
+  void sweepAttachments().catch(() => {});
+  const sweeper = setInterval(() => void sweepAttachments().catch(() => {}), sweepIntervalMs);
   sweeper.unref();
   app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
 
@@ -658,14 +742,17 @@ export async function buildApp({
     });
 
     // ---- Perfil ----
-    /** Propaga o perfil novo: conexões abertas, estado de voz e todo mundo rebusca membros/mensagens. */
+    /** Propaga o perfil novo: conexões abertas, estado de voz e evento userUpdate só para quem divide servidor, DM ou amizade. */
     async function profileChanged(userId: string) {
       const fresh = await loadUser(userId);
       if (!fresh) return;
       for (const [s, u] of online) if (u.id === userId) online.set(s, fresh);
       for (const [s, v] of voice) if (v.userId === userId) voice.set(s, { ...v, displayName: fresh.displayName, avatar: fresh.avatar, staff: canInviteAccounts(fresh) });
       broadcastVoice();
-      broadcast({ t: "sync" });
+      toUsers(await profileAudience(userId), {
+        t: "userUpdate",
+        user: { id: fresh.id, username: fresh.username, displayName: fresh.displayName, bio: fresh.bio, avatar: fresh.avatar, banner: fresh.banner, staff: canInviteAccounts(fresh) },
+      });
       return fresh;
     }
 
@@ -1046,6 +1133,7 @@ export async function buildApp({
       } else if (current.status === "pending" && current.requestedBy !== id) {
         await db.update(friendships).set({ status: "accepted" }).where(and(eq(friendships.userA, current.userA), eq(friendships.userB, current.userB)));
       }
+      await refreshFriends([id, other]);
       toUsers([id, other], { t: "friends" });
       const now = await friendshipOf(id, other);
       return { status: now?.status === "accepted" ? "friend" : "outgoing" };
@@ -1062,6 +1150,7 @@ export async function buildApp({
     authed.delete<{ Params: { userId: string } }>("/friends/:userId", async (req) => {
       const p = pairOf(me(req).id, req.params.userId);
       await db.delete(friendships).where(and(eq(friendships.userA, p.userA), eq(friendships.userB, p.userB)));
+      await refreshFriends([me(req).id, req.params.userId]);
       toUsers([me(req).id, req.params.userId], { t: "friends" });
       return { ok: true };
     });
@@ -1092,11 +1181,13 @@ export async function buildApp({
         }
       }
       broadcastVoice();
+      await refreshFriends([id, other]);
       toUsers([id, other], { t: "friends" });
       return { ok: true };
     });
     authed.delete<{ Params: { userId: string } }>("/blocks/:userId", async (req) => {
       await db.delete(blocks).where(and(eq(blocks.blocker, me(req).id), eq(blocks.blocked, req.params.userId)));
+      await refreshFriends([me(req).id, req.params.userId]);
       toUsers([me(req).id, req.params.userId], { t: "friends" });
       return { ok: true };
     });
@@ -1462,6 +1553,9 @@ export async function buildApp({
       if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
       if (channel.kind === "dm" && (await dmBlocked(channel.id))) return reply.code(403).send({ error: "não é possível enviar para essa pessoa" });
       if (!attachmentAllowed(me(req).id)) return reply.code(429).send({ error: "muitos arquivos seguidos; espere alguns minutos" });
+      const disk = await statfs(files.dir).catch(() => undefined);
+      if (disk && disk.blocks > 0 && (disk.blocks - disk.bavail) / disk.blocks >= maxDiskUsageRatio)
+        return reply.code(507).send({ error: "disco do servidor quase cheio; tente mais tarde" });
       const part = await req.file({ limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 } }).catch(() => undefined);
       if (!part) return reply.code(400).send({ error: "envie um arquivo" });
       const raw = await part.toBuffer().catch(() => undefined);
@@ -1593,12 +1687,15 @@ export async function buildApp({
       beat.unref?.();
       memberships.set(socket, await loadMemberships(connected.id));
       dmSets.set(socket, await loadDmSet(connected.id));
+      friendSets.set(socket, await loadFriendSet(connected.id));
       cleanup = () => {
         clearInterval(beat);
         socketSessions.delete(socket);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
+        friendSets.delete(socket);
+        activities.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
       };
@@ -1637,6 +1734,19 @@ export async function buildApp({
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "activity") {
+          const prev = activities.get(socket);
+          const next = evt.activity;
+          if (!next) {
+            if (prev && activities.delete(socket)) presence();
+            return;
+          }
+          // Mesmo jogo: mantém o início. Só repassa quando algo mudou.
+          if (prev && prev.game === next.game && prev.phase === next.phase && prev.detail === next.detail) return;
+          activities.set(socket, { ...next, since: prev?.game === next.game ? prev.since : new Date().toISOString() });
+          presence();
+          return;
+        }
         if (evt.t === "typing") {
           const ch = await findChannel(evt.channelId);
           const ok = !ch ? false : ch.kind === "dm" ? await isDmMember(ch.id, user.id) : ch.kind === "text" && !!ch.serverId && !!memberships.get(socket)?.has(ch.serverId);

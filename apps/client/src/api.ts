@@ -86,6 +86,7 @@ export const api = {
   react: (id: string, emoji: string, add: boolean) => req<Message>(add ? "PUT" : "DELETE", `/messages/${id}/reactions/${encodeURIComponent(emoji)}`),
   searchChannel: (channelId: string, q: string) => req<Message[]>("GET", `/channels/${channelId}/search?q=${encodeURIComponent(q)}`),
   storage: () => req<{ used: number; quota: number }>("GET", "/me/storage"),
+  searchServer: (serverId: string, q: string) => req<Message[]>("GET", `/servers/${serverId}/search?q=${encodeURIComponent(q)}`),
   editMessage: (id: string, content: string) => req<Message>("PATCH", `/messages/${id}`, { content }),
   deleteMessage: (id: string) => req<{ ok: true }>("DELETE", `/messages/${id}`),
   uploadAttachment,

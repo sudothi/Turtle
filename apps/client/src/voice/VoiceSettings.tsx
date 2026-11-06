@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { micConstraints, needsAudioProcessor, type AudioPrefs, type NoiseMode } from "./prefs";
 import { createRnnoiseGraph, type RnnoiseGraph } from "./rnnoise";
 import type { VoiceClient } from "./client";
-import { desktop, loadShortcuts, saveShortcuts, toAccelerator, type Shortcuts } from "../desktop";
+import { desktop, loadShortcuts, loadShowGame, saveShortcuts, saveShowGame, toAccelerator, type Shortcuts } from "../desktop";
 
 const noiseLabels: Record<NoiseMode, string> = {
   gtcrn: "GTCRN (recomendado · rede neural)",
@@ -47,6 +47,17 @@ const calcDb = (buf: Float32Array) => {
 const dbToPct = (db: number) => Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
 
 /** Atalhos globais de mudo e ensurdecer (só no app desktop): clique no campo e aperte a combinação. */
+/** Privacidade: mostrar aos outros o jogo aberto (só jogos da lista; desligado, o detector nem roda). */
+function ShowGameSetting() {
+  const [on, setOn] = useState(loadShowGame);
+  return (
+    <label className="check-row">
+      <input type="checkbox" checked={on} onChange={(e) => (setOn(e.target.checked), saveShowGame(e.target.checked))} />
+      Mostrar o jogo que estou jogando
+    </label>
+  );
+}
+
 function ShortcutSettings() {
   const [keys, setKeys] = useState<Shortcuts>(loadShortcuts);
   const [rec, setRec] = useState<keyof Shortcuts | null>(null);
@@ -271,6 +282,7 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
         </label>
         <MicTest prefs={prefs} />
         {desktop()?.setShortcuts && <ShortcutSettings />}
+        {desktop()?.setActivityEnabled && <ShowGameSetting />}
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>
       </div>
     </div>

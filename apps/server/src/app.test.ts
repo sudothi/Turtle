@@ -864,6 +864,61 @@ describe("chat do dia a dia", () => {
     m.close();
   });
 
+  it("presença e perfil só chegam a quem divide servidor, DM ou amizade", async () => {
+    const foraId = (await get("/me", fora)).body.id;
+    const watcher = await listen(dono);
+    const stranger = await listen(fora);
+    await settle();
+    const lastOf = (c: any) => c.events.filter((e: any) => e.t === "presence").at(-1);
+    // quem não divide nada com você não aparece na presença (nem você na dele)
+    expect(lastOf(watcher).online).toContain(donoId);
+    expect(lastOf(watcher).online).not.toContain(foraId);
+    expect(lastOf(stranger).online).not.toContain(donoId);
+    // perfil novo: userUpdate para o dono do servidor, nada para o estranho
+    const upd = await patch("/me", { displayName: "Membro Novo" }, membro);
+    expect(upd.status).toBe(200);
+    await settle();
+    const got = watcher.events.find((e: any) => e.t === "userUpdate");
+    expect(got?.user).toMatchObject({ id: membroId, displayName: "Membro Novo" });
+    expect(watcher.events.some((e: any) => e.t === "sync")).toBe(false);
+    expect(stranger.events.some((e: any) => e.t === "userUpdate" || e.t === "sync")).toBe(false);
+    // virando amigos, a presença passa a aparecer
+    await post(`/friends/${donoId}`, {}, fora);
+    await settle();
+    expect(lastOf(stranger).online).toContain(donoId);
+    expect(lastOf(watcher).online).toContain(foraId);
+    await del(`/friends/${donoId}`, fora);
+    await settle();
+    expect(lastOf(stranger).online).not.toContain(donoId);
+    watcher.close();
+    stranger.close();
+  });
+
+  it("jogo aparece na presença só para quem enxerga a pessoa e some quando a conexão cai", async () => {
+    const watcher = await listen(dono);
+    const stranger = await listen(fora);
+    const m = await listen(membro);
+    await settle();
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "lol", phase: "queue", detail: "Ranqueada Solo/Duo" } }));
+    await settle();
+    const lastOf = (c: any) => c.events.filter((e: any) => e.t === "presence").at(-1);
+    expect(lastOf(watcher).activities[membroId]).toMatchObject({ game: "lol", phase: "queue", detail: "Ranqueada Solo/Duo" });
+    expect(lastOf(stranger).activities[membroId]).toBeUndefined();
+    const since = lastOf(watcher).activities[membroId].since;
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "lol", phase: "inGame", detail: "Ahri" } }));
+    await settle();
+    expect(lastOf(watcher).activities[membroId]).toMatchObject({ phase: "inGame", since });
+    // jogo fora da lista é recusado
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "qualquer" } }));
+    await settle();
+    expect(m.events.some((e: any) => e.t === "error")).toBe(true);
+    m.close();
+    await settle();
+    expect(lastOf(watcher).activities[membroId]).toBeUndefined();
+    watcher.close();
+    stranger.close();
+  });
+
   it("não lidas: contam mensagens dos outros, menções, e somem ao ler (avisando os outros aparelhos)", async () => {
     const d = await listen(dono);
     const m2 = await listen(membro);
@@ -1315,6 +1370,84 @@ describe("cota de anexos", () => {
     expect(((await over.json()) as any).error).toMatch(/cota/);
     const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
     expect(st).toEqual({ used: 100, quota: 150 });
+    await a.close();
+    await h.close();
+  });
+
+  it("expira anexos antigos mantendo as mensagens e liberando a cota; bloqueia upload se o disco encher", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30 });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const token = (await json("/auth/register", { inviteCode: "boot-exp", username: "expira", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Expira" }, token);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    const text = chans.find((c) => c.kind === "text").id;
+    const upload = async (name: string) => {
+      const form = new FormData();
+      form.append("file", new Blob(["conteudo"], { type: "text/plain" }), name);
+      return (await (await fetch(url + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form })).json()) as any;
+    };
+    const att1 = await upload("com-texto.txt");
+    const att2 = await upload("so-arquivo.txt");
+
+    const ws = new WebSocket(`${url.replace("http", "ws")}/ws?token=${token}`);
+    await new Promise<void>((r) => ws.on("open", () => r()));
+    ws.send(JSON.stringify({ t: "send", channelId: text, content: "mensagem fica", attachments: [att1.id] }));
+    ws.send(JSON.stringify({ t: "send", channelId: text, content: "", attachments: [att2.id] }));
+    for (let i = 0; i < 30; i++) {
+      const cur = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+      if (cur.used === 0) break;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    ws.close();
+
+    // Arquivos físicos apagados e cota zerada, mas as duas mensagens continuam no canal.
+    expect((await fetch(url + `/files/${att1.key}`)).status).toBe(404);
+    expect((await fetch(url + `/files/${att2.key}`)).status).toBe(404);
+    const st = (await (await fetch(url + "/me/storage", { headers: { authorization: `Bearer ${token}` } })).json()) as any;
+    expect(st.used).toBe(0);
+    const msgs = (await (await fetch(url + `/channels/${text}/messages`, { headers: { authorization: `Bearer ${token}` } })).json()) as any[];
+    expect(msgs.map((m) => ({ content: m.content, atts: m.attachments.length })).sort((x, y) => x.content.localeCompare(y.content))).toEqual([
+      { content: "[anexo expirado: so-arquivo.txt]", atts: 0 },
+      { content: "mensagem fica", atts: 0 },
+    ]);
+    await a.close();
+
+    // Se o disco passar do limite (ex.: maxDiskUsageRatio: 0), recusa com 507.
+    const aFull = await buildApp({ db: h.db, maxDiskUsageRatio: 0 });
+    const urlFull = await aFull.listen({ port: 0, host: "127.0.0.1" });
+    const form = new FormData();
+    form.append("file", new Blob(["x"], { type: "text/plain" }), "cheio.txt");
+    const resFull = await fetch(urlFull + `/channels/${text}/attachments`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+    expect(resFull.status).toBe(507);
+    await aFull.close();
+    await h.close();
+  });
+});
+
+describe("busca no servidor", () => {
+  it("acha em todos os canais de texto e recusa quem não é membro", async () => {
+    const h = await createDb();
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-busca" });
+    const url = await a.listen({ port: 0, host: "127.0.0.1" });
+    const json = async (path: string, body: unknown, token?: string) =>
+      (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
+    const dono = (await json("/auth/register", { inviteCode: "boot-busca", username: "busca", password: "12345678" })).token;
+    const outro = (await json("/auth/register", { inviteCode: (await json("/invites", {}, dono)).code, username: "alheio", password: "12345678" })).token;
+    const server = await json("/servers", { name: "Busca" }, dono);
+    const sala = await json(`/servers/${server.id}/channels`, { name: "extra" }, dono);
+    const chans = (await (await fetch(url + `/servers/${server.id}/channels`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    const ws = new WebSocket(url.replace("http", "ws") + `/ws?token=${dono}`);
+    await new Promise((r) => ws.on("open", r));
+    for (const c of [chans.find((x) => x.kind === "text").id, sala.id])
+      ws.send(JSON.stringify({ t: "send", channelId: c, content: "tartaruga gigante" }));
+    await new Promise((r) => setTimeout(r, 400));
+    const found = (await (await fetch(url + `/servers/${server.id}/search?q=tartarugas`, { headers: { authorization: `Bearer ${dono}` } })).json()) as any[];
+    expect(found).toHaveLength(2);
+    expect((await fetch(url + `/servers/${server.id}/search?q=tartaruga`, { headers: { authorization: `Bearer ${outro}` } })).status).toBe(404);
+    ws.close();
     await a.close();
     await h.close();
   });

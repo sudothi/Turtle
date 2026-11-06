@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { dmTitle, shownName, type Dm, type Friend, type Person, type VoiceState } from "@turtle/protocol";
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
-import { dot, usePresence } from "../presence";
+import { ActivityLine, dot, usePresence } from "../presence";
 import { BackButton } from "./ChatView";
 
 const byName = (a: { user: Person }, b: { user: Person }) => shownName(a.user).localeCompare(shownName(b.user), "pt-BR");
@@ -154,6 +154,7 @@ export function FriendsPanel({
                 <span>
                   <b>{shownName(f.user)}</b>
                   <span className="t-muted"> @{f.user.username}{f.status === "incoming" ? " · quer ser seu amigo" : f.status === "outgoing" ? " · pedido enviado" : ""}</span>
+                  {on.has(f.user.id) && <ActivityLine userId={f.user.id} />}
                 </span>
               </button>
               <div className="friend-actions">

@@ -42,4 +42,13 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
     ipcRenderer.on("shortcut:fired", h);
     return () => void ipcRenderer.removeListener("shortcut:fired", h);
   },
+  /** Liga ou desliga o detector de jogos (lista fixa, a cada 30 s). Ligar reenvia o estado atual. */
+  setActivityEnabled(on: boolean) {
+    ipcRenderer.send("activity:enable", on);
+  },
+  onActivity(cb: (a: { game: string; phase: string | null; detail: string | null } | null) => void) {
+    const h = (_: unknown, a: { game: string; phase: string | null; detail: string | null } | null) => cb(a);
+    ipcRenderer.on("activity:changed", h);
+    return () => void ipcRenderer.removeListener("activity:changed", h);
+  },
 });

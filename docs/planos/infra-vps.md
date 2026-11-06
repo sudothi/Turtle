@@ -8,7 +8,7 @@ Mudanças em produção só depois do "ok" escrito do dono.
 |---|---|---|
 | `infra/docker-compose.prod.yml` | `~/turtle/docker-compose.yml` | Serviços `caddy`, `livekit`, `postgres` e `api` (com rotação de logs e healthchecks) |
 | `infra/Caddyfile` | `~/turtle/Caddyfile` | Proxy HTTPS (`{$DOMAIN_APP}` → `api:3000`, `{$DOMAIN_LK}` → `host.docker.internal:7880`), `/desktop/*` e cabeçalhos de segurança |
-| `infra/livekit.prod.yaml` | `~/turtle/livekit.yaml` | Configuração do LiveKit (`network_mode: host`, portas 7880/7881/7882 e TURN UDP 3478) |
+| `infra/livekit.prod.yaml` | `~/turtle/livekit.yaml` | Configuração do LiveKit (`network_mode: host`, portas 7880/7881/7882, TURN UDP 3478 e TURN TLS 5349 usando certificado do Caddy) |
 | `infra/.env.prod.example` | `~/turtle/.env` (`chmod 600`) | Domínios e segredos de produção (nunca versionado) |
 | `infra/backup.sh` | `~/turtle/backup.sh` (`chmod +x`) | Dump diário do Postgres (`kyo`/`turtle`) + tarball do volume `uploads`, retenção de 14 dias |
 | `infra/deploy.sh` | `~/turtle/deploy.sh` (`chmod +x`) | Recebe tarball via SSH, roda backup, faz build de `turtle-app:<sha>`, atualiza `api` e faz rollback automático se `/health` falhar |
@@ -90,17 +90,8 @@ Fluxo: **Actions > Deploy (VPS) > Run workflow**. O job confere que o CI do comm
 
 ---
 
-## #14 — trocar as chaves do LiveKit (pendente)
+## #14 — chaves do LiveKit e TURN TLS (concluído)
 
-O segredo antigo vazou no histórico inicial, então a chave nova precisa ter outro nome e outro segredo (32+ caracteres).
-
-1. Gerar localmente `LIVEKIT_API_KEY` novo e `LIVEKIT_API_SECRET` novo (`openssl rand -hex 24` para o segredo). Não colar em chat nem em issue.
-2. Na VPS, copiar `~/turtle/.env` para `~/turtle/.env.bak`; editar `LIVEKIT_API_KEY` e `LIVEKIT_API_SECRET` (`LIVEKIT_KEYS` no container `livekit` é montado automaticamente pelo `docker-compose.yml` a partir dessas duas variáveis).
-3. `cd ~/turtle && docker compose up -d api livekit`. As chamadas em andamento caem e o app reconecta; fazer num horário calmo.
-4. Conferir: `GET https://app.ogturtle.xyz/health`, entrar numa chamada de voz e numa transmissão de tela; olhar `docker compose logs livekit` sem erros de autenticação.
-5. Reversão: restaurar `.env.bak` e subir de novo (só para diagnosticar). Depois, apagar `.env.bak`.
-
-## #14 — TURN TLS e R2 (pendente)
-
-- TURN TLS na 5349 precisa de certificado para `lk.ogturtle.xyz` e configuração `tls_port: 5349` no `livekit.yaml` (a porta `5349/tcp` já está aberta no UFW).
-- Envio de cópia dos backups ao R2 precisa de credenciais criadas pelo dono (token restrito ao bucket de backup).
+- **Chaves do LiveKit**: rotacionadas na VPS e backups antigos `.env.bak*` removidos.
+- **TURN TLS na porta 5349**: ativo (`tls_port: 5349` em `livekit.yaml`), reutilizando em modo somente leitura (`caddy_data:/caddy_data:ro`) o certificado Let's Encrypt de `lk.ogturtle.xyz` emitido pelo Caddy.
+- **Backup fora da VPS**: deixado fora do escopo por decisão do dono (mantido o backup diário automático local em `~/turtle/backups/` com retenção de 14 dias).

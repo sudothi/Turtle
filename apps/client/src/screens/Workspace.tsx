@@ -402,6 +402,20 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           setKnown((k) => ({ ...k, [evt.channel.id]: evt.channel }));
           if (evt.channel.serverId === serverRef.current) setChannels((c) => (c.some((x) => x.id === evt.channel.id) ? c : [...c, evt.channel]));
         }
+        if (evt.t === "userUpdate") {
+          // Perfil de alguém (ou o meu) mudou: aplica o perfil novo no que já está na tela, sem rebuscar nada.
+          const u = evt.user;
+          const same = { displayName: u.displayName, avatar: u.avatar };
+          setUser((me) => (me.id === u.id ? { ...me, ...same, bio: u.bio, banner: u.banner } : me));
+          setMembers((l) => l.map((m) => (m.userId === u.id ? { ...m, ...same, staff: u.staff } : m)));
+          setFriends((l) => l.map((f) => (f.user.id === u.id ? { ...f, user: { ...f.user, ...same } } : f)));
+          setDms((l) => l.map((d) => (d.users.some((p) => p.id === u.id) ? { ...d, users: d.users.map((p) => (p.id === u.id ? { ...p, ...same } : p)) } : d)));
+          setMessages((l) => l.map((m) => {
+            const mine = m.userId === u.id ? { ...m, ...same, staff: u.staff } : m;
+            return mine.replyTo?.userId === u.id ? { ...mine, replyTo: { ...mine.replyTo, ...same } } : mine;
+          }));
+          setProfileVersion((n) => n + 1);
+        }
         if (evt.t === "sync") {
           void loadServers().then(() => (serverRef.current ? loadServer(serverRef.current, false) : undefined)).catch(() => {});
           // Perfil de alguém mudou: atualiza o meu e as fotos/nomes nas mensagens.

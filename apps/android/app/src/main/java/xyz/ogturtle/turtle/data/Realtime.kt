@@ -47,7 +47,7 @@ fun parseServerEvent(text: String): ServerEvent? {
             "messageUpdate" -> ServerEvent.MessageUpdate(TurtleJson.decodeFromJsonElement(Message.serializer(), o["message"]!!))
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
-            "sync", "friends", "channel" -> ServerEvent.Refresh
+            "sync", "friends", "channel", "userUpdate" -> ServerEvent.Refresh // userUpdate só chega a quem divide servidor/DM/amizade
             "presence" -> ServerEvent.Presence(ids(o["online"]), ids(o["busy"]))
             "voiceStates" -> ServerEvent.VoiceStates(
                 TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),

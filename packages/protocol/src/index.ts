@@ -356,6 +356,19 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("channel"), channel: channelSchema }),
   /** Algo mudou nos servidores, canais ou membros: buscar de novo. */
   z.object({ t: z.literal("sync") }),
+  /** Perfil de alguém mudou (só chega a quem divide servidor, DM ou amizade): atualizar nome, foto, bio e banner locais, sem rebuscar nada. */
+  z.object({
+    t: z.literal("userUpdate"),
+    user: z.object({
+      id: z.string(),
+      username: z.string(),
+      displayName: z.string().nullable().default(null),
+      bio: z.string().nullable().default(null),
+      avatar: z.string().nullable().default(null),
+      banner: z.string().nullable().default(null),
+      staff: z.boolean().default(false),
+    }),
+  }),
   /** Amigos ou conversas diretas mudaram: buscar GET /friends e GET /dms de novo. */
   z.object({ t: z.literal("friends") }),
   /** ids das pessoas conectadas. */

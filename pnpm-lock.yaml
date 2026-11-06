@@ -90,6 +90,12 @@ importers:
       '@livekit/react-native-webrtc':
         specifier: 150.1.1
         version: 150.1.1(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))
+      '@react-native-async-storage/async-storage':
+        specifier: 2.2.0
+        version: 2.2.0(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))
+      '@react-navigation/elements':
+        specifier: 2.9.45
+        version: 2.9.45(@react-navigation/native@7.5.1(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native-safe-area-context@5.11.1(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       '@react-navigation/native':
         specifier: 7.5.1
         version: 7.5.1(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
@@ -105,6 +111,9 @@ importers:
       expo-build-properties:
         specifier: ~58.0.12
         version: 58.0.12(expo@58.0.23)
+      expo-crypto:
+        specifier: ~58.0.7
+        version: 58.0.7(expo@58.0.23)
       expo-dev-client:
         specifier: ~58.0.18
         version: 58.0.18(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))
@@ -1408,6 +1417,11 @@ packages:
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
+  '@react-native-async-storage/async-storage@2.2.0':
+    resolution: {integrity: sha512-gvRvjR5JAaUZF8tv2Kcq/Gbt3JHwbKFYfmb445rhOj6NUMx3qPLixmDx5pZAyb9at1bYvJ4/eTUipU5aki45xw==}
+    peerDependencies:
+      react-native: ^0.0.0-0 || >=0.65 <1.0
+
   '@react-native/asset-utils@0.88.1':
     resolution: {integrity: sha512-BLb5FF7NgggGYiCsA7KKkK2qFhn0K+6iGXOI+4Ucd+G7Robzw9Gt4WsWwxLt+Od+G+/hyqfz8ASokyWFZ6VcLw==}
     engines: {node: ^22.13.0 || ^24.3.0 || >= 26.0.0}
@@ -2648,6 +2662,11 @@ packages:
       expo: '*'
       react-native: '*'
 
+  expo-crypto@58.0.7:
+    resolution: {integrity: sha512-g+4i4UpqQ5jNy1VPRvVVvr9aIdh8WwvxbpwL2ntiSESDRsXyVSeb8JM6tHVdC3b9J2nGxjtrhrsaWOo0jbSxlA==}
+    peerDependencies:
+      expo: '*'
+
   expo-dev-client@58.0.18:
     resolution: {integrity: sha512-1oTxhWiZAdFK1zXDWE047cjSw0S3xOATMso8fxXnjK9YvpaG1mGQpCMUVanXvXmiwmqDCHlVXW0myAKBSRzATQ==}
     peerDependencies:
@@ -3163,6 +3182,10 @@ packages:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
 
+  is-plain-obj@2.1.0:
+    resolution: {integrity: sha512-YWnfyRwxL/+SsrWYfOpUtz5b3YD+nyfkHvjbcanzk8zgyO4ASD67uVMRt8k5bM4lLMDnXfriRhOpemw+NfT1eA==}
+    engines: {node: '>=8'}
+
   is-regex@1.2.1:
     resolution: {integrity: sha512-MjYsKHO5O7mCsmRGxWcLWheFqN9DJ/2TmngvjKXihe6efViPqc274+Fx/4fYj/r03+ESvBdTXK0V6tA3rgez1g==}
     engines: {node: '>= 0.4'}
@@ -3485,6 +3508,10 @@ packages:
 
   memoize-one@5.2.1:
     resolution: {integrity: sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==}
+
+  merge-options@3.0.4:
+    resolution: {integrity: sha512-2Sug1+knBjkaMsMgf1ctR1Ujx+Ayku4EdJN4Z+C2+JzoeF7A3OZ9KM2GY0CpQS51NR61LTurMJrRKPhSs3ZRTQ==}
+    engines: {node: '>=10'}
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -6328,6 +6355,11 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
+  '@react-native-async-storage/async-storage@2.2.0(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))':
+    dependencies:
+      merge-options: 3.0.4
+      react-native: 0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0)
+
   '@react-native/asset-utils@0.88.1': {}
 
   '@react-native/babel-plugin-codegen@0.88.1(@babel/core@7.29.7)':
@@ -7690,6 +7722,10 @@ snapshots:
       - supports-color
       - typescript
 
+  expo-crypto@58.0.7(expo@58.0.23):
+    dependencies:
+      expo: 58.0.23(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(react-dom@19.3.0(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
+
   expo-dev-client@58.0.18(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0)):
     dependencies:
       expo: 58.0.23(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(react-dom@19.3.0(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
@@ -8297,6 +8333,8 @@ snapshots:
 
   is-number@7.0.0: {}
 
+  is-plain-obj@2.1.0: {}
+
   is-regex@1.2.1:
     dependencies:
       call-bound: 1.0.4
@@ -8585,6 +8623,10 @@ snapshots:
   mdn-data@2.0.14: {}
 
   memoize-one@5.2.1: {}
+
+  merge-options@3.0.4:
+    dependencies:
+      is-plain-obj: 2.1.0
 
   merge-stream@2.0.0: {}
 

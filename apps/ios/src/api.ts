@@ -1,4 +1,4 @@
-import { channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
+import { channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -68,7 +68,13 @@ export class Api {
   members = (id: string) => this.request(`/servers/${encodeURIComponent(id)}/members`, z.array(memberSchema));
   friends = () => this.request("/friends", z.array(friendSchema));
   dms = () => this.request("/dms", z.array(dmSchema));
-  messages = (id: string) => this.request(`/channels/${encodeURIComponent(id)}/messages`, z.array(messageSchema));
+  messages = (id: string, page: { before?: string; beforeId?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams({ limit: String(page.limit ?? 50) });
+    if (page.before) query.set("before", page.before);
+    if (page.beforeId) query.set("beforeId", page.beforeId);
+    return this.request(`/channels/${encodeURIComponent(id)}/messages?${query}`, z.array(messageSchema));
+  };
+  sendText = (id: string, body: z.input<typeof sendTextBody>) => this.request(`/channels/${encodeURIComponent(id)}/messages`, messageSchema, sendTextBody.parse(body));
   fileUrl = (key: string | null | undefined) => key ? `${this.origin}/files/${encodeURIComponent(key)}` : undefined;
   voiceToken = (id: string) => this.request(`/voice/${encodeURIComponent(id)}/token`, voiceTokenSchema, {});
 }

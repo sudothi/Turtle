@@ -3,11 +3,12 @@ import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "li
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
 import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { stat, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -19,6 +20,8 @@ import {
   type SessionInfo,
   changePasswordBody,
   editMessageBody,
+  sendTextBody,
+  sentMessageId,
   renameChannelBody,
   SERVER_ICON_MAX_BYTES,
   type Unread,
@@ -1371,20 +1374,53 @@ export async function buildApp({
       return { ok: true };
     });
 
-    authed.get<{ Params: { id: string }; Querystring: { before?: string; limit?: string } }>(
+    authed.post<{ Params: { id: string } }>("/channels/:id/messages", async (req, reply) => {
+      const body = sendTextBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "mensagem inválida (1 a 4000 caracteres)" });
+      const channel = await findChannel(req.params.id);
+      const user = me(req);
+      if (!channel || !(await canUseText(channel, user.id))) return reply.code(404).send({ error: "canal não existe" });
+      if (channel.kind === "dm" && await dmBlocked(channel.id)) return reply.code(403).send({ error: "não é possível enviar mensagem para essa pessoa" });
+      const { requestId, content } = body.data;
+      const id = sentMessageId(user.id, requestId);
+      const bodyHash = createHash("sha256").update(content).digest("hex");
+      const result = await db.transaction(async tx => {
+        const inserted = await tx.insert(messageReceipts).values({ userId: user.id, requestId, channelId: channel.id, bodyHash }).onConflictDoNothing().returning();
+        if (!inserted.length) {
+          const [receipt] = await tx.select().from(messageReceipts).where(and(eq(messageReceipts.userId, user.id), eq(messageReceipts.requestId, requestId)));
+          return receipt?.channelId === channel.id && receipt.bodyHash === bodyHash ? "replay" : "conflict";
+        }
+        await tx.insert(messages).values({ id, channelId: channel.id, userId: user.id, content, createdAt: new Date() });
+        return "created";
+      });
+      if (result === "conflict") return reply.code(409).send({ error: "identificador de envio já usado com outra mensagem" });
+      const message = await loadMessage(id);
+      if (!message) return reply.code(410).send({ error: "esta mensagem já foi enviada e apagada" });
+      if (result === "created") await toChannel(channel, { t: "message", message });
+      await markRead(user.id, channel.id);
+      return message;
+    });
+
+    authed.get<{ Params: { id: string }; Querystring: { before?: string; beforeId?: string; limit?: string } }>(
       "/channels/:id/messages",
       async (req, reply) => {
         const channel = await findChannel(req.params.id);
         if (!channel || !(await canUseText(channel, me(req).id))) return reply.code(404).send({ error: "canal não existe" });
-        const limit = Math.min(Number(req.query.limit ?? 50) || 50, 100);
+        const limit = Math.max(1, Math.min(Math.trunc(Number(req.query.limit ?? 50)) || 50, 100));
         const before = req.query.before ? new Date(req.query.before) : undefined;
         if (before && Number.isNaN(before.getTime())) return reply.code(400).send({ error: "data inválida" });
+        if (req.query.beforeId && !before) return reply.code(400).send({ error: "beforeId exige before" });
+        // Match the binary ID ordering used by clients, regardless of the database locale.
+        const orderedId = sql`${messages.id} COLLATE "C"`;
+        const cursor = before ? req.query.beforeId
+          ? or(lt(messages.createdAt, before), and(eq(messages.createdAt, before), lt(orderedId, req.query.beforeId)))
+          : lt(messages.createdAt, before) : undefined;
         const rows = await db
           .select(messageCols)
           .from(messages)
           .innerJoin(users, eq(users.id, messages.userId))
-          .where(and(eq(messages.channelId, req.params.id), before ? lt(messages.createdAt, before) : undefined))
-          .orderBy(desc(messages.createdAt))
+          .where(and(eq(messages.channelId, req.params.id), cursor))
+          .orderBy(desc(messages.createdAt), desc(orderedId))
           .limit(limit);
         return toMessages(rows.reverse());
       },

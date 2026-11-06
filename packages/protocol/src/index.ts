@@ -55,6 +55,10 @@ export const messageSchema = z.object({
 });
 export type Message = z.infer<typeof messageSchema>;
 
+/** Confirmed text sends. Reuse requestId only for the exact same conversation/text. */
+export const sendTextBody = z.object({ requestId: z.string().uuid(), content: z.string().trim().min(1).max(4000) });
+export const sentMessageId = (userId: string, requestId: string) => `send:${userId}:${requestId}`;
+
 export const channelKind = z.enum(["text", "voice"]);
 export type ChannelKind = z.infer<typeof channelKind>;
 export const channelSchema = z.object({ id: z.string(), serverId: z.string(), name: z.string(), kind: channelKind });

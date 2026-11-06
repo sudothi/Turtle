@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 import { createDb, type DbHandle } from "@turtle/db";
 import { TokenVerifier } from "livekit-server-sdk";
 import { buildApp, voiceRoomName } from "./app.js";
@@ -611,6 +612,13 @@ describe("amigos e mensagens diretas", () => {
     const last = (x: typeof A) => [...x.events].reverse().find((e) => e.t === "voiceStates");
     expect(last(C).states.map((v: any) => v.channelId)).toEqual([d1.channelId]);
     expect(last(B).states).toEqual([]);
+    const text = { requestId: randomUUID(), content: "DM confirmada" };
+    const confirmed = await post(`/channels/${d1.channelId}/messages`, text, c);
+    expect(confirmed.status).toBe(200);
+    expect((await post(`/channels/${d1.channelId}/messages`, text, b)).status).toBe(404);
+    await settle();
+    for (const x of [A, C]) expect(x.events.some(e => e.t === "message" && e.message.id === confirmed.body.id)).toBe(true);
+    expect(B.events.some(e => e.t === "message" && e.message.id === confirmed.body.id)).toBe(false);
     for (const x of [A, B, C]) x.ws.close();
   });
 
@@ -637,6 +645,7 @@ describe("amigos e mensagens diretas", () => {
     expect((await post(`/friends/${aId}`, {}, c)).status).toBe(403);
     expect((await post(`/dms/${aId}`, {}, c)).status).toBe(403);
     expect((await post(`/voice/${dm.channelId}/token`, {}, a)).status).toBe(404);
+    expect((await post(`/channels/${dm.channelId}/messages`, { requestId: randomUUID(), content: "bloqueada" }, a)).status).toBe(403);
     const A = await wsOpen(a);
     A.ws.send(JSON.stringify({ t: "send", channelId: dm.channelId, content: "oi?" }));
     await new Promise((r) => setTimeout(r, 200));
@@ -771,7 +780,11 @@ describe("amigos e mensagens diretas", () => {
     expect((await post(`/dms/${g.body.channelId}/members`, { userId: bId }, a)).status).toBe(409);
     const admin = (await post("/auth/login", { username: "thiago", password: "12345678" })).body;
     expect((await post(`/dms/${g.body.channelId}/members`, { userId: admin.user.id }, a)).status).toBe(403);
+    const text = { requestId: randomUUID(), content: "grupo confirmado" };
+    expect((await post(`/channels/${g.body.channelId}/messages`, text, b)).status).toBe(200);
+    expect((await post(`/channels/${g.body.channelId}/messages`, text, admin.token)).status).toBe(404);
     expect((await del(`/dms/${g.body.channelId}/members/me`, b)).status).toBe(200);
+    expect((await post(`/channels/${g.body.channelId}/messages`, text, b)).status).toBe(404);
     expect((await get(`/channels/${g.body.channelId}/messages`, b)).status).toBe(404);
     expect((await get("/dms", b)).body.some((d: any) => d.channelId === g.body.channelId)).toBe(false);
     for (const x of [A, B, C]) x.ws.close();
@@ -809,6 +822,56 @@ describe("chat do dia a dia", () => {
     const inv = await post(`/servers/${serverId}/invites`, {}, dono);
     await post(`/invites/${inv.body.code}/join`, {}, membro);
     geral = (await channelsOf(serverId, dono)).find((c: any) => c.kind === "text").id;
+  });
+
+  it("confirma envio HTTP, deduplica concorrência e mantém comprovante após exclusão", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-send" }, dono)).body.id;
+    const observer = await listen(membro);
+    const body = { requestId: randomUUID(), content: "texto confirmado" };
+    const url = `/channels/${channel}/messages`;
+    const results = await Promise.all([post(url, body, dono), post(url, body, dono)]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(results[0]!.body.id).toBe(results[1]!.body.id);
+    await settle();
+    expect(observer.events.filter(e => e.t === "message" && e.message.id === results[0]!.body.id)).toHaveLength(1);
+    expect((await get(url, dono)).body.filter((m: any) => m.id === results[0]!.body.id)).toHaveLength(1);
+    expect((await post(url, { ...body, content: "outro texto" }, dono)).status).toBe(409);
+    await fetch(base + `/messages/${encodeURIComponent(results[0]!.body.id)}`, { method: "DELETE", headers: { authorization: `Bearer ${dono}` } });
+    expect((await post(url, body, dono)).status).toBe(410);
+    expect((await get(url, dono)).body.some((m: any) => m.id === results[0]!.body.id)).toBe(false);
+    observer.ws.close();
+  });
+
+  it("envio confirmado mantém autorização e valida os limites", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-limits" }, dono)).body.id;
+    const body = { requestId: randomUUID(), content: "x".repeat(4000) };
+    expect((await post(`/channels/${channel}/messages`, body, dono)).status).toBe(200);
+    for (const content of [" ", "x".repeat(4001)]) expect((await post(`/channels/${channel}/messages`, { ...body, requestId: randomUUID(), content }, dono)).status).toBe(400);
+    expect((await post(`/channels/${channel}/messages`, { ...body, requestId: "inválido" }, dono)).status).toBe(400);
+    expect((await post(`/channels/${channel}/messages`, body, fora)).status).toBe(404);
+    const voice = (await channelsOf(serverId, dono)).find((c: any) => c.kind === "voice").id;
+    expect((await post(`/channels/${voice}/messages`, body, dono)).status).toBe(404);
+  });
+
+  it("pagina mensagens com o mesmo horário usando o desempate por id", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "cursor-history" }, dono)).body.id;
+    const { messages, eq } = await import("@turtle/db");
+    const url = `/channels/${channel}/messages`;
+    const created = await Promise.all(Array.from({ length: 5 }, (_, i) => post(url, { requestId: randomUUID(), content: "mesmo horário" }, i % 2 ? membro : dono)));
+    const at = new Date("2030-01-01T00:00:00.123Z");
+    for (const r of created) await handle.db.update(messages).set({ createdAt: at }).where(eq(messages.id, r.body.id));
+    const collected: string[] = [];
+    let query = "?limit=2";
+    const ordered = created.map(r => r.body.id as string).sort();
+    for (let i = 0; i < 3; i++) {
+      const page = (await get(url + query, dono)).body as any[];
+      expect(page.filter(m => m.content === "mesmo horário").map(m => m.id)).toEqual(ordered.slice(Math.max(0, ordered.length - (i + 1) * 2), ordered.length - i * 2));
+      collected.push(...page.filter(m => m.content === "mesmo horário").map(m => m.id));
+      query = `?limit=2&before=${encodeURIComponent(page[0]!.createdAt)}&beforeId=${encodeURIComponent(page[0]!.id)}`;
+    }
+    expect(new Set(collected).size).toBe(5);
+    expect(collected).toHaveLength(5);
+    expect((await get(url + "?beforeId=sem-data", dono)).status).toBe(400);
   });
 
   it("status Não perturbe aparece na presença e no perfil", async () => {

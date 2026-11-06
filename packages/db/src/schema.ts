@@ -98,8 +98,20 @@ export const messages = pgTable(
     /** Quando foi fixada no canal (nulo = não fixada). */
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   },
-  (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt), index("messages_reply_to_idx").on(t.replyTo)],
+  (t) => [
+    index("messages_channel_created_idx").on(t.channelId, t.createdAt),
+    index("messages_channel_cursor_idx").on(t.channelId, t.createdAt, sql`${t.id} COLLATE "C"`),
+    index("messages_reply_to_idx").on(t.replyTo),
+  ],
 );
+
+/** Idempotent sends survive message deletion; keep only a fingerprint of the original text. */
+export const messageReceipts = pgTable("message_receipts", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  requestId: text("request_id").notNull(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  bodyHash: text("body_hash").notNull(),
+}, t => [primaryKey({ columns: [t.userId, t.requestId] })]);
 
 /** Arquivos do chat. Sem `messageId` = enviado mas ainda não usado numa mensagem (some depois de 1 h). */
 export const attachments = pgTable(

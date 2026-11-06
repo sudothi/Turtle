@@ -8,6 +8,7 @@ vi.mock("./voice", () => ({ Voice: class {
 } }));
 vi.mock("./gateway", () => ({ Gateway: class {
   start = vi.fn(); stop = vi.fn(); resume = vi.fn(); update = vi.fn();
+  subscribe = vi.fn(() => () => {}); subscribeEvents = vi.fn(() => () => {});
   constructor() { fake.gateways.push(this); }
 } }));
 import { WorkspaceSession } from "./workspace-session";
@@ -15,7 +16,7 @@ import { WorkspaceSession } from "./workspace-session";
 function setup() {
   const api = { servers: vi.fn(async () => []), channels: vi.fn(async () => []) } as unknown as Api;
   const auth = { logout: vi.fn(async () => {}), rejectIfUnauthorized: vi.fn(async () => true) };
-  return { workspace: new WorkspaceSession(api, auth), auth, voice: fake.voices.at(-1)!, gateway: fake.gateways.at(-1)! };
+  return { workspace: new WorkspaceSession(api, auth, { userId: "test", id: () => "", storage: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }), auth, voice: fake.voices.at(-1)!, gateway: fake.gateways.at(-1)! };
 }
 describe("workspace lifetime", () => {
   it("starts transport only once and view subscriptions never stop the call", async () => {
@@ -49,5 +50,13 @@ describe("workspace lifetime", () => {
     const { workspace, voice, auth } = setup();
     const error = new ApiError(401, "invalid"); await workspace.reject(error);
     expect(voice.leave).toHaveBeenCalledOnce(); expect(auth.rejectIfUnauthorized).toHaveBeenCalledWith(error);
+  });
+  it("a failed logout leaves drafts editable for the still authenticated user", async () => {
+    const { workspace, auth } = setup(); await workspace.chat.ready;
+    auth.logout.mockRejectedValueOnce(new Error("Keychain indisponível"));
+    await workspace.logout();
+    workspace.chat.get("a").edit("continuar escrevendo");
+    expect(workspace.chat.get("a").getSnapshot().draft.text).toBe("continuar escrevendo");
+    await workspace.dispose();
   });
 });

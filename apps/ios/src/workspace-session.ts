@@ -5,6 +5,7 @@ import { Gateway } from "./gateway";
 import { Resource } from "./resource";
 import { errorText, type Session } from "./session";
 import { Voice } from "./voice";
+import { ChatStore, type ChatOptions } from "./chat/store";
 
 export type Directory = { server: Server; channels: Channel[] }[];
 export interface WorkspaceState { error?: string; signingOut: boolean }
@@ -14,17 +15,23 @@ export class WorkspaceSession {
   readonly directory: Resource<Directory>;
   readonly gateway: Gateway;
   readonly voice: Voice;
+  readonly chat: ChatStore;
+  private stopChatEvents: () => void;
+  private stopChatConnection: () => void;
   private state: WorkspaceState = { signingOut: false };
   private listeners = new Set<() => void>();
   private started = false;
   private disposed = false;
-  constructor(readonly api: Api, private readonly auth: Pick<Session, "logout" | "rejectIfUnauthorized">) {
+  constructor(readonly api: Api, private readonly auth: Pick<Session, "logout" | "rejectIfUnauthorized">, chat: ChatOptions) {
     this.directory = new Resource<Directory>([], async () => {
       const servers = await api.servers();
       return Promise.all(servers.map(async server => ({ server, channels: await api.channels(server.id) })));
     }, this.reject);
     this.gateway = new Gateway(api, () => { void this.reject(new ApiError(401, "Sessão inválida")).catch(error => this.set({ error: errorText(error) })); }, () => { void this.directory.refresh(); });
     this.voice = new Voice(api, this.gateway.update, () => AppState.currentState === "active");
+    this.chat = new ChatStore(api, chat, this.reject);
+    this.stopChatEvents = this.gateway.subscribeEvents(this.chat.receive);
+    this.stopChatConnection = this.gateway.subscribe(() => this.chat.setConnected(this.gateway.getSnapshot().connected));
   }
   getSnapshot = () => this.state;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
@@ -44,7 +51,9 @@ export class WorkspaceSession {
     if (this.disposed || !(error instanceof ApiError) || error.status !== 401) return false;
     await this.voice.leave();
     if (this.disposed) return false;
-    return this.auth.rejectIfUnauthorized(error);
+    const rejected = await this.auth.rejectIfUnauthorized(error);
+    if (rejected) await this.chat.dispose(true);
+    return rejected;
   };
   enter = async (channelId: string, name: string, microphone: boolean) => {
     if (this.disposed || this.state.signingOut) return;
@@ -60,7 +69,7 @@ export class WorkspaceSession {
   logout = async () => {
     if (this.disposed || this.state.signingOut) return;
     this.set({ signingOut: true, error: undefined });
-    try { await this.voice.leave(); await this.auth.logout(); }
+    try { await this.voice.leave(); await this.auth.logout(); await this.chat.dispose(true); }
     catch (error) { this.set({ error: errorText(error) }); }
     finally { this.set({ signingOut: false }); }
   };
@@ -68,8 +77,10 @@ export class WorkspaceSession {
     if (this.disposed) return;
     this.disposed = true;
     this.directory.dispose();
+    this.stopChatEvents(); this.stopChatConnection();
     this.gateway.stop();
     this.listeners.clear();
     await this.voice.leave();
+    await this.chat.dispose();
   };
 }

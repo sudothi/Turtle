@@ -10,7 +10,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "dark",
   ios: {
     bundleIdentifier: "xyz.ogturtle.mobile",
-    buildNumber: "2",
+    buildNumber: "3",
     supportsTablet: false,
     infoPlist: {
       UIBackgroundModes: ["audio"],

@@ -317,9 +317,38 @@ export type VoiceState = z.infer<typeof voiceStateSchema>;
 export const voiceTokenSchema = z.object({ url: z.string(), token: z.string() });
 export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 
+/** Jogos que o app desktop reconhece (lista fixa: o servidor não aceita outro nome). */
+export const games = {
+  lol: "League of Legends",
+  valorant: "VALORANT",
+  cs2: "Counter-Strike 2",
+  dota2: "Dota 2",
+  fortnite: "Fortnite",
+  minecraft: "Minecraft",
+  roblox: "Roblox",
+  gta5: "GTA V",
+  rocketleague: "Rocket League",
+  apex: "Apex Legends",
+} as const;
+export type GameId = keyof typeof games;
+export const gameId = z.enum(Object.keys(games) as [GameId, ...GameId[]]);
+/** Fase da partida (hoje só o LoL informa): saguão, fila, seleção de campeões, em partida. */
+export const gamePhase = z.enum(["lobby", "queue", "champSelect", "inGame"]);
+export const gamePhaseLabel: Record<z.infer<typeof gamePhase>, string> = { lobby: "No saguão", queue: "Na fila", champSelect: "Escolhendo campeão", inGame: "Em partida" };
+/** O que a pessoa está jogando. `detail`: modo/campeão no LoL, nome do jogo no Roblox. `since`: ISO, posto pelo servidor. */
+export const activitySchema = z.object({
+  game: gameId,
+  phase: gamePhase.nullable().default(null),
+  detail: z.string().trim().max(60).nullable().default(null),
+  since: z.string().optional(),
+});
+export type Activity = z.infer<typeof activitySchema>;
+
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** O que estou jogando agora (null = parei). Só o desktop manda, e só quando muda. */
+  z.object({ t: z.literal("activity"), activity: activitySchema.omit({ since: true }).nullable() }),
   /** Estou digitando neste canal (o cliente manda no máximo a cada 3 s). */
   z.object({ t: z.literal("typing"), channelId: z.string() }),
   /** Recusar a chamada que está tocando numa DM ou grupo (quem ligou fica sabendo). */
@@ -373,7 +402,11 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("friends") }),
   /** ids das pessoas conectadas. */
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
-  z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
+  z.object({
+    t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]),
+    /** Jogo de cada pessoa visível que está jogando (por id). */
+    activities: z.record(z.string(), activitySchema).default({}),
+  }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
   /** Alguém está digitando no canal (some sozinho depois de uns 6 s sem novo aviso). */
   z.object({ t: z.literal("typing"), channelId: z.string(), userId: z.string() }),

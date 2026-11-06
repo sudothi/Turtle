@@ -1,7 +1,7 @@
 import { shownName, type Member } from "@turtle/protocol";
 import { Avatar, StaffTag } from "@turtle/ui";
 import { fileUrl } from "../api";
-import { dot, usePresence } from "../presence";
+import { ActivityLine, dot, usePresence } from "../presence";
 
 const byName = (a: Member, b: Member) => shownName(a).localeCompare(shownName(b), "pt-BR");
 const badge = { owner: "Dono", admin: "Admin", member: "" } as const;
@@ -15,9 +15,14 @@ export function MemberList({ members, online, onProfile }: { members: Member[]; 
   const row = (m: Member, isOnline: boolean) => (
     <div key={m.userId} className={`member ${isOnline ? "" : "offline"}`} role="button" tabIndex={0} onClick={() => onProfile(m)} onKeyDown={(e) => e.key === "Enter" && onProfile(m)}>
       <Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={32} status={isOnline ? dot(presence(m.userId)) : undefined} statusRing="var(--bg-sidebar)" />
-      <span className="member-name">{shownName(m)}</span>
-      {m.staff && <StaffTag />}
-      {badge[m.role] && <span className="role-badge t-muted">{badge[m.role]}</span>}
+      <span className="member-text">
+        <span className="member-top">
+          <span className="member-name">{shownName(m)}</span>
+          {m.staff && <StaffTag />}
+          {badge[m.role] && <span className="role-badge t-muted">{badge[m.role]}</span>}
+        </span>
+        {isOnline && <ActivityLine userId={m.userId} />}
+      </span>
     </div>
   );
   return (

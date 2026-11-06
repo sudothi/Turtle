@@ -7,7 +7,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { and, asc, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -143,6 +143,18 @@ BEGIN
       ON CONFLICT DO NOTHING;
   END IF;
 END $$;
+
+-- Validade deslizante das sessões (30 dias sem uso), aparelho/último uso e contas desativadas (#89).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at timestamptz;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS id text DEFAULT (gen_random_uuid()::text);
+UPDATE sessions SET id = gen_random_uuid()::text WHERE id IS NULL;
+ALTER TABLE sessions ALTER COLUMN id SET DEFAULT (gen_random_uuid()::text);
+ALTER TABLE sessions ALTER COLUMN id SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_id_idx ON sessions (id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days');
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 `;
 
 export interface DbHandle {

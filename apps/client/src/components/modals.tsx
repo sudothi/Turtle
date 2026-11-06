@@ -144,7 +144,7 @@ export function AppInvitePanel() {
   );
 }
 
-/** Só para o admin: quem tem o cargo Convidador (pode gerar convites de conta). */
+/** Só para o admin: quem tem o cargo Convidador e desativar/reativar contas. */
 export function InvitersPanel({ me }: { me: string }) {
   const [people, setPeople] = useState<Account[]>();
   const [error, setError] = useState<string>();
@@ -159,23 +159,40 @@ export function InvitersPanel({ me }: { me: string }) {
       setPeople((list) => list?.map((x) => (x.id === p.id ? { ...x, canInvite: !canInvite } : x)));
     });
   };
+  const toggleDisabled = (p: Account, disabled: boolean) => {
+    setError(undefined);
+    setPeople((list) => list?.map((x) => (x.id === p.id ? { ...x, disabled } : x)));
+    api.setAccountDisabled(p.id, disabled).catch((e: Error) => {
+      setError(e.message);
+      setPeople((list) => list?.map((x) => (x.id === p.id ? { ...x, disabled: !disabled } : x)));
+    });
+  };
   return (
     <div className="t-field inviters">
-      <span className="t-field-label">Administradores</span>
-      <span className="t-field-hint">Quem estiver marcado vira administrador do Turtle: ganha o selo da tartaruga roxa ao lado do nome e pode gerar convites de conta.</span>
+      <span className="t-field-label">Contas e administradores</span>
+      <span className="t-field-hint">Quem estiver marcado ganha o selo da tartaruga roxa e pode gerar convites de conta. Desativar uma conta encerra as sessões, tira das chamadas e bloqueia o login.</span>
       {people?.map((p) => (
-        <label key={p.id} className="inviter-row">
+        <div key={p.id} className="inviter-row">
           <Avatar name={shownName(p)} src={fileUrl(p.avatar)} size={28} />
           <span className="inviter-name">
             {shownName(p)}
             {p.displayName && <span className="t-muted"> @{p.username}</span>}
+            {p.disabled && <span className="role-badge t-muted">Desativada</span>}
           </span>
           {p.isAdmin || p.id === me ? (
             <span className="role-badge t-muted">Admin</span>
           ) : (
-            <input type="checkbox" aria-label={`Administrador: ${shownName(p)}`} checked={p.canInvite} onChange={(e) => toggle(p, e.target.checked)} />
+            <div className="inviter-actions">
+              <label className="inviter-check">
+                <input type="checkbox" aria-label={`Administrador: ${shownName(p)}`} checked={p.canInvite} disabled={p.disabled} onChange={(e) => toggle(p, e.target.checked)} />
+                <span className="t-muted">Convidador</span>
+              </label>
+              <Button size="sm" variant="ghost" onClick={() => toggleDisabled(p, !p.disabled)}>
+                {p.disabled ? "Reativar" : "Desativar"}
+              </Button>
+            </div>
           )}
-        </label>
+        </div>
       ))}
       {error && <div className="err" role="alert">{error}</div>}
     </div>

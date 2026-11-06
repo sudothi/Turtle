@@ -24,15 +24,19 @@ import java.util.concurrent.TimeUnit
 class ApiException(message: String, val status: Int = 0) : Exception(message)
 
 /** Cliente HTTP do servidor do Turtle. `token` é lido a cada chamada (muda no login/logout). */
-class Api(private val baseUrl: String, private val token: () -> String?) {
+class Api(
+    private val baseUrl: String,
+    private val onUnauthorized: () -> Unit = {},
+    private val token: () -> String?,
+) {
     private val http = OkHttpClient()
     /** Envio de anexos (até 25 MB) precisa de mais tempo que as chamadas comuns. */
     private val uploadHttp = OkHttpClient.Builder().writeTimeout(60, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
     private val jsonType = "application/json".toMediaType()
 
-    private suspend fun call(method: String, path: String, body: String? = null): String = withContext(Dispatchers.IO) {
+    private suspend fun call(method: String, path: String, body: String? = null, explicitToken: String? = null): String = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(baseUrl.trimEnd('/') + path)
-        token()?.let { builder.header("authorization", "Bearer $it") }
+        (explicitToken ?: token())?.let { builder.header("authorization", "Bearer $it") }
         val payload = when {
             body != null -> body.toRequestBody(jsonType)
             method == "GET" || method == "DELETE" -> null
@@ -48,6 +52,9 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
             return client.newCall(request).execute().use { res ->
                 val text = res.body?.string().orEmpty()
                 if (!res.isSuccessful) {
+                    if (res.code == 401 && request.header("authorization") != null && !request.url.encodedPath.endsWith("/me/password")) {
+                        onUnauthorized()
+                    }
                     val msg = runCatching {
                         TurtleJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull
                     }.getOrNull()
@@ -73,6 +80,10 @@ class Api(private val baseUrl: String, private val token: () -> String?) {
             AuthResponse.serializer(),
             call("POST", "/auth/register", obj("inviteCode" to inviteCode, "username" to username, "password" to password)),
         )
+
+    suspend fun logout(explicitToken: String? = null) {
+        call("POST", "/auth/logout", "{}", explicitToken)
+    }
 
     suspend fun me(): User = get("/me", User.serializer())
     suspend fun servers(): List<Server> = get("/servers", ListSerializer(Server.serializer()))

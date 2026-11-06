@@ -61,6 +61,7 @@ class Realtime(
     private val scope: CoroutineScope,
     private val onEvent: (ServerEvent) -> Unit,
     private val onOpen: () -> Unit,
+    private val onUnauthorized: () -> Unit = {},
 ) {
     private val http = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
     private var socket: WebSocket? = null
@@ -84,7 +85,16 @@ class Realtime(
                         parseServerEvent(text)?.let(onEvent)
                     }
 
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                        webSocket.close(code, null)
+                        if (code == 4401) {
+                            closed.complete(false)
+                            onUnauthorized()
+                        }
+                    }
+
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        if (code == 4401) onUnauthorized()
                         closed.complete(code != 4401)
                     }
 

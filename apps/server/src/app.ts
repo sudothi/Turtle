@@ -7,13 +7,17 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, inArray, invites, isNull, lt, messages, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNull, lt, messages, ne, or, readStates, serverInvites, serverMembers, servers, sessions, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
   type Attachment,
   REPLY_PREVIEW_CHARS,
   type ReplyPreview,
+  SESSION_TOUCH_MS,
+  SESSION_TTL_MS,
+  type SessionInfo,
+  changePasswordBody,
   editMessageBody,
   renameChannelBody,
   SERVER_ICON_MAX_BYTES,
@@ -54,7 +58,7 @@ import {
   type VoiceToken,
 } from "@turtle/protocol";
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
-import { hashPassword, hashToken, newId, newInviteCode, newToken, verifyPassword } from "./auth.js";
+import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
 
 export interface AppOptions {
@@ -162,6 +166,16 @@ export async function buildApp({
     : undefined;
 
   const online = new Map<Socket, User>();
+  /** Sessão de cada conexão WebSocket: permite encerrar os sockets de uma sessão ou conta com 4401. */
+  const socketSessions = new Map<Socket, { userId: string; tokenHash: string; sessionId: string }>();
+  const closeSessions = (pred: (s: { userId: string; tokenHash: string; sessionId: string }) => boolean) => {
+    for (const [sock, info] of socketSessions) {
+      if (pred(info)) {
+        socketSessions.delete(sock);
+        sock.close(4401, "unauthorized");
+      }
+    }
+  };
   /** Servidores de que cada conexão faz parte: define o que ela pode receber. */
   const memberships = new Map<Socket, Set<string>>();
 
@@ -219,6 +233,14 @@ export async function buildApp({
   const dropFromCalls = async (serverId: string, userId?: string) => {
     const gone: VoiceState[] = [];
     for (const [s, v] of voice) if (v.serverId === serverId && (!userId || v.userId === userId)) { gone.push(v); voice.delete(s); }
+    if (!gone.length) return;
+    broadcastVoice();
+    if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {})));
+  };
+  /** Tira uma conta de qualquer chamada (de servidor ou conversa direta). */
+  const dropUserFromCalls = async (userId: string) => {
+    const gone: VoiceState[] = [];
+    for (const [s, v] of voice) if (v.userId === userId) { gone.push(v); voice.delete(s); }
     if (!gone.length) return;
     broadcastVoice();
     if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {})));
@@ -358,21 +380,45 @@ export async function buildApp({
     return r ? toUser(r) : undefined;
   };
 
-  async function userFromToken(token: string | undefined): Promise<User | null> {
+  async function sessionFromToken(token: string | undefined): Promise<{ user: User; tokenHash: string; sessionId: string } | null> {
     if (!token) return null;
-    const rows = await db
-      .select(userCols)
-      .from(sessions)
-      .innerJoin(users, eq(users.id, sessions.userId))
-      .where(eq(sessions.tokenHash, hashToken(token)))
-      .limit(1);
-    return rows[0] ? toUser(rows[0]) : null;
+    const th = hashToken(token);
+    const row = (
+      await db
+        .select({ ...userCols, disabledAt: users.disabledAt, sessionId: sessions.id, lastUsedAt: sessions.lastUsedAt, expiresAt: sessions.expiresAt })
+        .from(sessions)
+        .innerJoin(users, eq(users.id, sessions.userId))
+        .where(eq(sessions.tokenHash, th))
+        .limit(1)
+    )[0];
+    if (!row) return null;
+    const now = Date.now();
+    if (row.disabledAt || row.expiresAt.getTime() <= now) {
+      if (row.expiresAt.getTime() <= now) await db.delete(sessions).where(eq(sessions.tokenHash, th));
+      return null;
+    }
+    // Validade deslizante (30 dias sem uso expira); escreve no banco no máximo uma vez por hora.
+    if (now - row.lastUsedAt.getTime() >= SESSION_TOUCH_MS) {
+      const at = new Date(now);
+      await db.update(sessions).set({ lastUsedAt: at, expiresAt: new Date(now + SESSION_TTL_MS) }).where(eq(sessions.tokenHash, th));
+    }
+    return { user: toUser(row), tokenHash: th, sessionId: row.sessionId };
   }
   const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer /, "");
 
-  async function startSession(userId: string) {
+  async function startSession(userId: string, req: FastifyRequest) {
     const token = newToken();
-    await db.insert(sessions).values({ tokenHash: hashToken(token), userId });
+    const now = new Date();
+    const ua = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"].trim().slice(0, 240) || null : null;
+    await db.insert(sessions).values({
+      tokenHash: hashToken(token),
+      id: newSessionId(),
+      userId,
+      userAgent: ua,
+      createdAt: now,
+      lastUsedAt: now,
+      expiresAt: new Date(now.getTime() + SESSION_TTL_MS),
+    });
     return token;
   }
 
@@ -433,7 +479,7 @@ export async function buildApp({
     }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     await db.update(invites).set({ usedBy: id }).where(eq(invites.code, inviteCode));
-    return { token: await startSession(id), user };
+    return { token: await startSession(id, req), user };
   });
 
   app.post("/auth/login", async (req, reply) => {
@@ -452,8 +498,9 @@ export async function buildApp({
       byName.hit(name);
       return reply.code(401).send({ error: "usuário ou senha incorretos" });
     }
+    if (row.disabledAt) return reply.code(403).send({ error: "conta desativada" });
     byName.reset(name);
-    return { token: await startSession(row.id), user: toUser(row) };
+    return { token: await startSession(row.id, req), user: toUser(row) };
   });
 
   // Prévia pública de um convite de servidor (para a tela "entrar com convite").
@@ -491,13 +538,85 @@ export async function buildApp({
   app.register(async (authed) => {
     authed.decorateRequest("user", null);
     authed.addHook("preHandler", async (req, reply) => {
-      const user = await userFromToken(bearer(req));
-      if (!user) return reply.code(401).send({ error: "não autenticado" });
-      (req as any).user = user;
+      const sess = await sessionFromToken(bearer(req));
+      if (!sess) return reply.code(401).send({ error: "não autenticado" });
+      (req as any).user = sess.user;
+      (req as any).tokenHash = sess.tokenHash;
+      (req as any).sessionId = sess.sessionId;
     });
     const me = (req: FastifyRequest) => (req as any).user as User;
+    const myTokenHash = (req: FastifyRequest) => (req as any).tokenHash as string;
+    const mySessionId = (req: FastifyRequest) => (req as any).sessionId as string;
 
     authed.get("/me", async (req) => (await loadUser(me(req).id)) ?? me(req));
+
+    /** Sair de verdade: apaga a sessão atual no banco e fecha os WebSockets dela com 4401. */
+    authed.post("/auth/logout", async (req) => {
+      const th = myTokenHash(req);
+      await db.delete(sessions).where(eq(sessions.tokenHash, th));
+      closeSessions((s) => s.tokenHash === th);
+      return { ok: true };
+    });
+
+    /** Lista as sessões ativas da conta (aparelho, último uso e qual é a atual). */
+    authed.get("/me/sessions", async (req) => {
+      const myId = me(req).id;
+      const curId = mySessionId(req);
+      const rows = await db
+        .select({ id: sessions.id, userAgent: sessions.userAgent, createdAt: sessions.createdAt, lastUsedAt: sessions.lastUsedAt })
+        .from(sessions)
+        .where(and(eq(sessions.userId, myId), gt(sessions.expiresAt, new Date())))
+        .orderBy(desc(sessions.lastUsedAt));
+      return rows.map((r): SessionInfo => ({
+        id: r.id,
+        userAgent: r.userAgent,
+        createdAt: r.createdAt.toISOString(),
+        lastUsedAt: r.lastUsedAt.toISOString(),
+        current: r.id === curId,
+      }));
+    });
+
+    /** Encerra uma sessão específica da conta ("sair deste") e fecha o WebSocket dela com 4401. */
+    authed.delete<{ Params: { id: string } }>("/me/sessions/:id", async (req, reply) => {
+      const myId = me(req).id;
+      const done = await db
+        .delete(sessions)
+        .where(and(eq(sessions.userId, myId), eq(sessions.id, req.params.id)))
+        .returning({ id: sessions.id });
+      if (!done.length) return reply.code(404).send({ error: "sessão não encontrada" });
+      closeSessions((s) => s.userId === myId && s.sessionId === req.params.id);
+      return { ok: true };
+    });
+
+    /** Encerra todas as sessões da conta ("sair de todos") e fecha os WebSockets com 4401. */
+    authed.delete("/me/sessions", async (req) => {
+      const myId = me(req).id;
+      await db.delete(sessions).where(eq(sessions.userId, myId));
+      closeSessions((s) => s.userId === myId);
+      return { ok: true };
+    });
+
+    /** Troca a senha, mantém a sessão atual e derruba todas as outras sessões da conta. */
+    authed.post("/me/password", async (req, reply) => {
+      const user = me(req);
+      const name = nameKey(user.username);
+      const wait = Math.max(byIp.blockedFor(req.ip), byName.blockedFor(name));
+      if (wait) return tooMany(reply, wait);
+      byIp.hit(req.ip);
+      const body = changePasswordBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "a nova senha precisa ter pelo menos 8 caracteres" });
+      const row = (await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, user.id)).limit(1))[0];
+      if (!row || !(await verifyPassword(body.data.currentPassword, row.passwordHash))) {
+        byName.hit(name);
+        return reply.code(401).send({ error: "senha atual incorreta" });
+      }
+      byName.reset(name);
+      const curHash = myTokenHash(req);
+      await db.update(users).set({ passwordHash: await hashPassword(body.data.newPassword) }).where(eq(users.id, user.id));
+      await db.delete(sessions).where(and(eq(sessions.userId, user.id), ne(sessions.tokenHash, curHash)));
+      closeSessions((s) => s.userId === user.id && s.tokenHash !== curHash);
+      return { ok: true };
+    });
 
     // ---- Perfil ----
     /** Propaga o perfil novo: conexões abertas, estado de voz e todo mundo rebusca membros/mensagens. */
@@ -1052,16 +1171,35 @@ export async function buildApp({
     // ---- Administração do app (só admin) ----
     authed.get("/admin/users", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
-      const rows = await db.select(userCols).from(users).orderBy(asc(users.createdAt));
-      return rows.map((r): Account => ({ id: r.id, username: r.username, displayName: r.displayName, avatar: r.avatarKey, isAdmin: r.isAdmin, canInvite: r.canInvite }));
+      const rows = await db.select({ ...userCols, disabledAt: users.disabledAt }).from(users).orderBy(asc(users.createdAt));
+      return rows.map((r): Account => ({
+        id: r.id,
+        username: r.username,
+        displayName: r.displayName,
+        avatar: r.avatarKey,
+        isAdmin: r.isAdmin,
+        canInvite: r.canInvite,
+        disabled: r.disabledAt !== null,
+      }));
     });
-    /** Dá ou tira o cargo Convidador. */
+    /** Dá ou tira o cargo Convidador e desativa ou reativa uma conta. */
     authed.patch<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
       if (!me(req).isAdmin) return reply.code(403).send({ error: "só admin" });
       const body = setInviterBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
-      const done = await db.update(users).set({ canInvite: body.data.canInvite }).where(eq(users.id, req.params.id)).returning({ id: users.id });
-      if (!done.length) return reply.code(404).send({ error: "pessoa não encontrada" });
+      const target = (await db.select({ id: users.id, isAdmin: users.isAdmin }).from(users).where(eq(users.id, req.params.id)).limit(1))[0];
+      if (!target) return reply.code(404).send({ error: "pessoa não encontrada" });
+      if (body.data.disabled && (target.id === me(req).id || target.isAdmin))
+        return reply.code(403).send({ error: "não é possível desativar um administrador" });
+      const set: { canInvite?: boolean; disabledAt?: Date | null } = {};
+      if (body.data.canInvite !== undefined) set.canInvite = body.data.canInvite;
+      if (body.data.disabled !== undefined) set.disabledAt = body.data.disabled ? new Date() : null;
+      await db.update(users).set(set).where(eq(users.id, target.id));
+      if (body.data.disabled) {
+        await db.delete(sessions).where(eq(sessions.userId, target.id));
+        await dropUserFromCalls(target.id);
+        closeSessions((s) => s.userId === target.id);
+      }
       await profileChanged(req.params.id); // a tag TURTLE aparece/some para todo mundo
       return { ok: true };
     });
@@ -1273,10 +1411,12 @@ export async function buildApp({
           // primeira mensagem inválida: fica sem token
         }
       }
-      const connected = await userFromToken(token);
-      if (!connected) return socket.close(4401, "unauthorized");
+      const sess = await sessionFromToken(token);
+      if (!sess) return socket.close(4401, "unauthorized");
+      const connected = sess.user;
       if (gone) return;
       online.set(socket, connected);
+      socketSessions.set(socket, { userId: connected.id, tokenHash: sess.tokenHash, sessionId: sess.sessionId });
       // Ping a cada heartbeatMs: quem não responde (notebook dormiu, Wi-Fi caiu sem fechar) é derrubado,
       // e o close tira a pessoa da presença e da chamada. Qualquer mensagem também conta como sinal de vida.
       let alive = true;
@@ -1291,6 +1431,7 @@ export async function buildApp({
       dmSets.set(socket, await loadDmSet(connected.id));
       cleanup = () => {
         clearInterval(beat);
+        socketSessions.delete(socket);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);

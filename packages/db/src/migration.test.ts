@@ -89,4 +89,18 @@ describe("migração para servidores", () => {
     await db.exec(MIGRATION);
     expect((await db.query("SELECT server_id FROM channels WHERE id = 'd1'")).rows).toEqual([{ server_id: null }]);
   });
+
+  it("sessões antigas ganham id UUID aleatório e validade de 30 dias sem vazar o token_hash", async () => {
+    const db = new PGlite();
+    await db.exec(LEGACY);
+    await db.exec(`
+      INSERT INTO users (id, username, password_hash, is_admin) VALUES ('u1', 'thiago', 'x', true);
+      INSERT INTO sessions (token_hash, user_id) VALUES ('abcdef0123456789abcdef0123456789', 'u1');`);
+    await db.exec(MIGRATION);
+    const rows = (await db.query<{ id: string; token_hash: string; expires_at: Date }>("SELECT id, token_hash, expires_at FROM sessions")).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(rows[0]!.token_hash.startsWith(rows[0]!.id.slice(0, 8))).toBe(false);
+    expect(new Date(rows[0]!.expires_at).getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+  });
 });

@@ -72,7 +72,7 @@ internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
-    val api = Api(BuildConfig.SERVER_URL) { session.token }
+    val api = Api(BuildConfig.SERVER_URL, onUnauthorized = ::clearSession) { session.token }
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -89,6 +89,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
         },
+        onUnauthorized = ::clearSession,
     )
 
     val voice = VoiceController(app, viewModelScope)
@@ -189,11 +190,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CallService.stop(getApplication())
     }
 
-    fun logout() {
+    private fun clearSession() {
         leaveCall()
         realtime.stop()
         session.token = null
         _state.value = UiState(booting = false)
+    }
+
+    fun logout() {
+        val tok = session.token
+        clearSession()
+        if (tok != null) viewModelScope.launch { runCatching { api.logout(tok) } }
     }
 
     /** Busca servidores, canais, conversas diretas, amigos e não lidas. */
@@ -327,7 +334,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 block()
             } catch (e: ApiException) {
-                _state.update { it.copy(error = e.message) }
+                if (e.status != 401) _state.update { it.copy(error = e.message) }
             }
         }
     }

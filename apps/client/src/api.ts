@@ -1,9 +1,15 @@
-import type { Attachment, Unread, UserStatus } from "@turtle/protocol";
+import type { Attachment, SessionInfo, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
 export const getToken = () => localStorage.getItem(KEY);
 export const setToken = (t: string | null) => (t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY));
+
+let onUnauthorized: (() => void) | undefined;
+/** Chamado quando o servidor recusa o token (sessão expirada, encerrada ou conta desativada). */
+export const setOnUnauthorized = (fn: (() => void) | undefined) => {
+  onUnauthorized = fn;
+};
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const token = getToken();
@@ -13,7 +19,10 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401 && token && url !== "/auth/login" && url !== "/me/password") onUnauthorized?.();
+    throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
+  }
   return data as T;
 }
 
@@ -88,6 +97,12 @@ export const api = {
   login: (username: string, password: string) => req<{ token: string; user: User }>("POST", "/auth/login", { username, password }),
   register: (inviteCode: string, username: string, password: string) =>
     req<{ token: string; user: User }>("POST", "/auth/register", { inviteCode, username, password }),
+  logout: () => req<{ ok: true }>("POST", "/auth/logout", {}),
+  sessions: () => req<SessionInfo[]>("GET", "/me/sessions"),
+  revokeSession: (id: string) => req<{ ok: true }>("DELETE", `/me/sessions/${encodeURIComponent(id)}`),
+  revokeAllSessions: () => req<{ ok: true }>("DELETE", "/me/sessions"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<{ ok: true }>("POST", "/me/password", { currentPassword, newPassword }),
   me: () => req<User>("GET", "/me"),
   servers: () => req<Server[]>("GET", "/servers"),
   createServer: (name: string) => req<Server>("POST", "/servers", { name }),
@@ -101,6 +116,7 @@ export const api = {
   removeMember: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/members/${userId}`),
   accounts: () => req<Account[]>("GET", "/admin/users"),
   setInviter: (userId: string, canInvite: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { canInvite }),
+  setAccountDisabled: (userId: string, disabled: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { disabled }),
   createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),

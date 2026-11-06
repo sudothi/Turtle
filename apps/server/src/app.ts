@@ -52,6 +52,7 @@ import {
   type Message,
   type Server,
   type ServerEvent,
+  type Activity,
   type ServerRole,
   type User,
   type VoiceState,
@@ -244,14 +245,22 @@ export async function buildApp({
     intersects(dmSets.get(viewer), dmSets.get(other)) ||
     (friendSets.get(viewer)?.has(online.get(other)!.id) ?? false);
   /** Cada conexão recebe só a presença de quem ela enxerga (não a lista de todas as contas conectadas). */
+  /** Jogo informado por cada conexão (só memória: some quando ela cai). */
+  const activities = new Map<Socket, Activity>();
   const presence = () => {
     const sockets = [...online.keys()];
     for (const viewer of sockets) {
       const seen = sockets.filter((o) => sees(viewer, o));
       const people = seen.map((o) => online.get(o)!);
-      viewer.send(JSON.stringify({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))] } satisfies ServerEvent));
+      const acts: Record<string, Activity> = {};
+      for (const o of seen) {
+        const a = activities.get(o);
+        if (a) acts[online.get(o)!.id] = a;
+      }
+      viewer.send(JSON.stringify({ t: "presence", online: [...new Set(people.map((u) => u.id))], busy: [...new Set(people.filter((u) => u.status === "busy").map((u) => u.id))], activities: acts } satisfies ServerEvent));
     }
   };
+
   /** Quem deve receber a mudança de perfil de `userId`: ele mesmo e quem divide servidor, DM ou amizade com ele. */
   const profileAudience = async (userId: string) => {
     const ids = new Set<string>([userId]);
@@ -1650,6 +1659,7 @@ export async function buildApp({
         memberships.delete(socket);
         dmSets.delete(socket);
         friendSets.delete(socket);
+        activities.delete(socket);
         presence();
         if (voice.delete(socket)) broadcastVoice();
       };
@@ -1688,6 +1698,19 @@ export async function buildApp({
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "activity") {
+          const prev = activities.get(socket);
+          const next = evt.activity;
+          if (!next) {
+            if (prev && activities.delete(socket)) presence();
+            return;
+          }
+          // Mesmo jogo: mantém o início. Só repassa quando algo mudou.
+          if (prev && prev.game === next.game && prev.phase === next.phase && prev.detail === next.detail) return;
+          activities.set(socket, { ...next, since: prev?.game === next.game ? prev.since : new Date().toISOString() });
+          presence();
+          return;
+        }
         if (evt.t === "typing") {
           const ch = await findChannel(evt.channelId);
           const ok = !ch ? false : ch.kind === "dm" ? await isDmMember(ch.id, user.id) : ch.kind === "text" && !!ch.serverId && !!memberships.get(socket)?.has(ch.serverId);

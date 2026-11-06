@@ -22,7 +22,20 @@ export interface TurtleDesktop {
   /** Atalhos globais de mudo/ensurdecer (versões novas do app). */
   setShortcuts?(s: { mute: string; deafen: string }): void;
   onShortcut?(cb: (which: "mute" | "deafen") => void): () => void;
+  /** Detector de jogos (versões novas do app): ligar reenvia o estado atual. */
+  setActivityEnabled?(on: boolean): void;
+  onActivity?(cb: (a: { game: string; phase: string | null; detail: string | null } | null) => void): () => void;
 }
+
+/** Mostrar o jogo que estou jogando (só o desktop detecta). Começa ligado. */
+const ACTIVITY_KEY = "turtle.showGame";
+export const loadShowGame = () => {
+  try { return localStorage.getItem(ACTIVITY_KEY) !== "0"; } catch { return true; }
+};
+export const saveShowGame = (on: boolean) => {
+  try { localStorage.setItem(ACTIVITY_KEY, on ? "1" : "0"); } catch { /* sem armazenamento */ }
+  window.turtleDesktop?.setActivityEnabled?.(on);
+};
 
 export interface Shortcuts { mute: string; deafen: string }
 const SHORTCUT_KEY = "turtle.shortcuts";

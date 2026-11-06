@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { shownName, type Person, type ProfileView, type ServerRole } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { api, fileUrl } from "../api";
-import { usePresence } from "../presence";
+import { ActivityLine, usePresence } from "../presence";
 
 /*
  * Perfil no jeito do Discord, em três tamanhos:
@@ -84,6 +84,7 @@ function Names({ profile, role, onOpen }: { profile: ProfileView; role?: ServerR
         {profile.staff && <StaffTag />}
         {role && roleLabel[role] && <span className="up-role">{roleLabel[role]}</span>}
       </div>
+      <ActivityLine userId={profile.id} className="up-activity" />
     </div>
   );
 }

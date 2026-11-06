@@ -831,6 +831,31 @@ describe("chat do dia a dia", () => {
     stranger.close();
   });
 
+  it("jogo aparece na presença só para quem enxerga a pessoa e some quando a conexão cai", async () => {
+    const watcher = await listen(dono);
+    const stranger = await listen(fora);
+    const m = await listen(membro);
+    await settle();
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "lol", phase: "queue", detail: "Ranqueada Solo/Duo" } }));
+    await settle();
+    const lastOf = (c: any) => c.events.filter((e: any) => e.t === "presence").at(-1);
+    expect(lastOf(watcher).activities[membroId]).toMatchObject({ game: "lol", phase: "queue", detail: "Ranqueada Solo/Duo" });
+    expect(lastOf(stranger).activities[membroId]).toBeUndefined();
+    const since = lastOf(watcher).activities[membroId].since;
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "lol", phase: "inGame", detail: "Ahri" } }));
+    await settle();
+    expect(lastOf(watcher).activities[membroId]).toMatchObject({ phase: "inGame", since });
+    // jogo fora da lista é recusado
+    m.ws.send(JSON.stringify({ t: "activity", activity: { game: "qualquer" } }));
+    await settle();
+    expect(m.events.some((e: any) => e.t === "error")).toBe(true);
+    m.close();
+    await settle();
+    expect(lastOf(watcher).activities[membroId]).toBeUndefined();
+    watcher.close();
+    stranger.close();
+  });
+
   it("não lidas: contam mensagens dos outros, menções, e somem ao ler (avisando os outros aparelhos)", async () => {
     const d = await listen(dono);
     const m2 = await listen(membro);

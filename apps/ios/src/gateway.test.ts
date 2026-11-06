@@ -32,7 +32,9 @@ it("forwards validated chat events, detaches screens and ignores replaced socket
 it("reconnection preserves the voice report independently of chat subscribers", () => {
   gateway.start(); Socket.all[0]!.open();
   const voice = { t: "voice" as const, channelId: "call", muted: true, deafened: true, camera: false, screen: false };
-  gateway.update(voice); gateway.resume(); const next = Socket.all[1]!; next.open();
+  gateway.update(voice); gateway.resume();
+  expect(gateway.getSnapshot().connected).toBe(false);
+  const next = Socket.all[1]!; next.open();
   expect(next.send).toHaveBeenCalledWith(JSON.stringify(voice));
   expect(gateway.getSnapshot().connected).toBe(true);
 });

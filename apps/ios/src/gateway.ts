@@ -29,6 +29,7 @@ export class Gateway {
     // Replace a socket that can look OPEN after iOS suspended its transport.
     clearTimeout(this.retry);
     this.release();
+    this.set({ connected: false, states: [], online: [], busy: [] });
     this.connect();
   }
 

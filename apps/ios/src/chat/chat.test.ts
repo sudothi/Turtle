@@ -69,7 +69,7 @@ describe("conversation state", () => {
     const id = c.getSnapshot().outbox[0]!.id;
     const first = c.retry(id); await c.retry(id);
     await vi.waitFor(() => expect(api.sendText).toHaveBeenCalledOnce());
-    wait.resolve(message(100, { id })); await first;
+    wait.resolve(message(100, { id, userId: "self" })); await first;
   });
   it("restores a recorded in-flight send as uncertain without auto retry", async () => {
     const { store, disk } = setup(); await store.ready; store.setConnected(true);
@@ -78,6 +78,14 @@ describe("conversation state", () => {
     await store.flush(); const next = setup(disk); await next.store.ready; next.store.setConnected(true);
     expect(next.store.get("a").getSnapshot().outbox[0]?.status).toBe("uncertain");
     expect(next.api.sendText).not.toHaveBeenCalled();
+  });
+  it("only confirms the exact sender, conversation and send identity", async () => {
+    const { store, api } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("não confirmar outro envio");
+    api.sendText.mockResolvedValueOnce(message(100));
+    await c.send();
+    expect(c.getSnapshot().outbox[0]?.status).toBe("uncertain");
+    expect(c.getSnapshot().messages).toEqual([]);
   });
   it("catches up more than a page, keeps old history and counts new messages", async () => {
     const { store, api } = setup(); await store.ready;
@@ -124,6 +132,18 @@ describe("conversation state", () => {
     c.edit("texto guardado"); api.sendText.mockRejectedValueOnce(new ApiError(403, "bloqueado")); await c.send();
     c.restoreDraft(c.getSnapshot().outbox[0]!.id);
     expect(c.getSnapshot().draft.text).toBe("texto guardado");
+  });
+  it("never restores revoked history from an older page or a delayed socket event", async () => {
+    const { store, api } = setup(); await store.ready;
+    const c = store.get("a"); api.messages.mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => message(i + 10))); await c.refresh();
+    const old = deferred<Message[]>(); api.messages.mockReturnValueOnce(old.promise);
+    const loading = c.loadOlder();
+    api.messages.mockRejectedValueOnce(new ApiError(403, "sem acesso")); await c.refresh();
+    old.resolve([message(1)]); await loading;
+    store.receive({ t: "message", message: message(60) });
+    expect(c.getSnapshot().messages).toEqual([]);
+    api.messages.mockResolvedValueOnce([message(61)]); await c.refresh();
+    expect(c.getSnapshot().messages).toEqual([message(61)]);
   });
   it("limits encoded text and clears storage on logout", async () => {
     const { store, api, disk } = setup(); await store.ready; store.setConnected(true);

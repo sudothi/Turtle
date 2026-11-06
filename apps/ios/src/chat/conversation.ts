@@ -19,6 +19,8 @@ export class Conversation {
   private listeners = new Set<() => void>();
   private stopped = false;
   private atLatest = true;
+  private accessEpoch = 0;
+  private denied = false;
   private revision = 0;
   private versions = new Map<string, number>();
   private deleted = new Set<string>();
@@ -41,7 +43,7 @@ export class Conversation {
     let added = 0;
     for (const item of items) {
       if (item.channelId !== this.channelId || this.deleted.has(item.id) || (this.versions.get(item.id) ?? 0) > started) continue;
-      if (!all.has(item.id) && (!this.state.messages.length || compareMessages(item, this.state.messages.at(-1)!) > 0)) added++;
+      if (!all.has(item.id) && !this.state.outbox.some(m => m.id === item.id) && (!this.state.messages.length || compareMessages(item, this.state.messages.at(-1)!) > 0)) added++;
       all.set(item.id, item);
     }
     const outbox = this.state.outbox.filter(item => !all.has(item.id) && !this.deleted.has(item.id));
@@ -50,7 +52,7 @@ export class Conversation {
     if (settled) this.changed();
   }
   receive(event: ServerEvent) {
-    if (this.stopped) return;
+    if (this.stopped || this.denied) return;
     if ((event.t === "message" || event.t === "messageUpdate") && event.message.channelId === this.channelId) {
       if (event.t === "messageUpdate" && !this.state.messages.some(m => m.id === event.message.id)) return;
       this.versions.set(event.message.id, ++this.revision);
@@ -64,7 +66,7 @@ export class Conversation {
   }
   private failure = async (error: unknown) => {
     if (this.stopped) return;
-    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) this.set({ messages: [] });
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) { this.denied = true; this.accessEpoch++; this.set({ messages: [], hasMore: false }); }
     try { if (!await this.reject(error)) this.set({ error: errorText(error) }); }
     catch (error) { this.set({ error: errorText(error) }); }
   };
@@ -72,24 +74,25 @@ export class Conversation {
     if (this.stopped) return Promise.resolve();
     if (this.refreshing) { if (afterCurrent) this.refreshQueued = true; return this.refreshing; }
     this.set({ loading: true, error: undefined });
-    const started = this.revision, oldestKnown = this.state.messages[0];
+    const started = this.revision, epoch = this.accessEpoch, oldestKnown = this.state.messages[0];
     this.refreshing = (async () => {
       try {
         let page = await this.api.messages(this.channelId, { limit: PAGE });
         const collected = [...page];
-        while (!this.stopped && oldestKnown && page.length === PAGE && compareMessages(page[0]!, oldestKnown) > 0) {
+        while (!this.stopped && epoch === this.accessEpoch && oldestKnown && page.length === PAGE && compareMessages(page[0]!, oldestKnown) > 0) {
           const cursor = page[0]!;
           page = await this.api.messages(this.channelId, { limit: PAGE, before: cursor.createdAt, beforeId: cursor.id });
           if (page[0] && compareMessages(page[0], cursor) >= 0) throw new Error("Não foi possível avançar no histórico. Atualize o servidor.");
           collected.push(...page);
         }
-        if (this.stopped) return;
+        if (this.stopped || epoch !== this.accessEpoch) return;
+        this.denied = false;
         const cutoff = collected.sort(compareMessages)[0], present = new Set(collected.map(m => m.id));
         // The fetched window is authoritative, except events received after the request began.
         this.set({ messages: this.state.messages.filter(m => (this.versions.get(m.id) ?? 0) > started || present.has(m.id) || (page.length === PAGE && cutoff && compareMessages(m, cutoff) < 0)) });
         this.merge(collected, started);
         this.set({ hasMore: page.length === PAGE });
-      } catch (error) { await this.failure(error); }
+      } catch (error) { if (epoch === this.accessEpoch) await this.failure(error); }
       finally {
         this.set({ loading: false }); this.refreshing = undefined;
         if (this.refreshQueued && !this.stopped) { this.refreshQueued = false; void this.refresh(); }
@@ -102,12 +105,12 @@ export class Conversation {
     const oldest = this.state.messages[0];
     if (!oldest) return this.refresh();
     this.set({ loadingOlder: true, error: undefined });
-    const started = this.revision;
+    const started = this.revision, epoch = this.accessEpoch;
     this.older = (async () => {
       try {
         const page = await this.api.messages(this.channelId, { limit: PAGE, before: oldest.createdAt, beforeId: oldest.id });
-        if (!this.stopped) { this.merge(page, started); this.set({ hasMore: page.length === PAGE }); }
-      } catch (error) { await this.failure(error); }
+        if (!this.stopped && epoch === this.accessEpoch) { this.merge(page, started); this.set({ hasMore: page.length === PAGE }); }
+      } catch (error) { if (epoch === this.accessEpoch) await this.failure(error); }
       finally { this.set({ loadingOlder: false }); this.older = undefined; }
     })();
     return this.older;
@@ -140,11 +143,14 @@ export class Conversation {
       if (this.stopped) return;
       const message = await this.api.sendText(this.channelId, { requestId: item.requestId, content: item.content });
       if (this.stopped) return;
-      this.merge([message], started); this.changed();
+      if (message.id !== item.id || message.channelId !== this.channelId || message.userId !== this.userId) throw new Error("A resposta não confirmou este envio. Atualize a conversa antes de tentar novamente.");
+      if (this.denied) this.set({ outbox: this.state.outbox.filter(m => m.id !== message.id) });
+      else this.merge([message], started);
+      this.changed();
     } catch (error) {
       if (this.stopped) return;
       const definitive = !recorded || (error instanceof ApiError && error.status < 500);
-      this.set({ outbox: this.state.outbox.map(m => m.id === item.id ? { ...m, status: definitive ? "failed" : "uncertain", error: errorText(error) } : m) });
+      this.set({ outbox: this.state.outbox.map(m => m.id === item.id ? { ...m, status: definitive ? "failed" : "uncertain", error: recorded ? errorText(error) : "Não foi possível salvar o envio neste iPhone. Tente novamente." } : m) });
       try { await this.reject(error); } catch (error) { this.set({ error: errorText(error) }); }
       this.changed();
     }

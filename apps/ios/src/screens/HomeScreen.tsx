@@ -31,7 +31,7 @@ export default function FriendsScreen() {
       {([['online', 'Online'], ['all', 'Todos'], ['pending', 'Pendentes']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => setTab(value)} style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 4, backgroundColor: tab === value || pressed ? colors.hover : "transparent" })}><Text style={[text.label, { color: tab === value ? colors.paper : colors.muted, fontSize: 14 }]}>{label}</Text></Pressable>)}
     </View>
     <Content refreshControl={<RefreshControl refreshing={friends.loading} onRefresh={friends.refresh} tintColor={colors.paper} />}>
-      <Field label="Adicionar por nome de usuário" value={username} onChangeText={setUsername} maxLength={24} />
+      <Field label="Adicionar por nome de usuário" value={username} onChangeText={setUsername} maxLength={32} />
       <Notice>{operation.error || feedback}</Notice>
       <Button secondary disabled={operation.busy || !username.trim()} onPress={() => { void operation.run(async () => { const result = await workspace.api.addFriendByName(username); setFeedback(result.status === "friend" ? "Pedido aceito. Vocês são amigos." : "Pedido enviado."); setUsername(""); await friends.refresh(); }); }}>Adicionar amigo</Button>
       <Button secondary onPress={() => navigation.navigate("Group")}>Criar grupo</Button>

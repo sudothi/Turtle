@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
 import { AccessToken, RoomServiceClient, TrackSource, WebhookReceiver } from "livekit-server-sdk";
 import fastifyStatic from "@fastify/static";
 import multipart from "@fastify/multipart";
@@ -78,6 +78,28 @@ export interface AppOptions {
   voiceGraceMs?: number;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
   roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
+  /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
+  logger?: FastifyServerOptions["logger"];
+}
+
+/** Esconde o token da sessão que o WebSocket leva na URL (`/ws?token=...`). */
+export const hideToken = (url: string) => url.replace(/([?&]token=)[^&]*/g, "$1***");
+
+/** Configuração dos logs de produção: JSON numa linha, sem o cabeçalho Authorization nem o token do WebSocket. */
+export function serverLogger(level = "info", stream?: { write(line: string): void }) {
+  return {
+    level,
+    ...(stream ? { stream } : {}),
+    redact: ["req.headers.authorization", "req.headers.cookie"],
+    serializers: {
+      req: (req: { method: string; url: string; ip?: string; headers?: Record<string, unknown> }) => ({
+        method: req.method,
+        url: hideToken(req.url),
+        ip: req.ip,
+        ua: req.headers?.["user-agent"],
+      }),
+    },
+  };
 }
 
 /** Hash de uma senha aleatória, para o login de um nome que não existe levar o mesmo tempo. */
@@ -108,11 +130,11 @@ interface Socket {
 const canManage = (role: ServerRole | undefined) => role === "owner" || role === "admin";
 
 export async function buildApp({
-  db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads",
+  db, bootstrapInvite, livekit, clientDir, uploadDir = "data/uploads", logger = false,
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, voiceGraceMs = 30_000, roomService,
 }: AppOptions) {
-  const app = Fastify({ logger: false, trustProxy });
+  const app = Fastify({ logger, trustProxy });
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);
@@ -336,7 +358,17 @@ export async function buildApp({
     return inv;
   }
 
-  app.get("/health", async () => ({ ok: true }));
+  // Saúde de verdade: responde 503 se o banco não responde (o healthcheck do Docker e o monitor externo usam isto).
+  // logLevel warn: o healthcheck do Docker (a cada 30 s) não enche o log.
+  app.get("/health", { logLevel: "warn" }, async (req, reply) => {
+    try {
+      await db.execute(sql`select 1`);
+      return { ok: true };
+    } catch (err) {
+      req.log.error({ err }, "health: banco não responde");
+      return reply.code(503).send({ ok: false, error: "banco não responde" });
+    }
+  });
 
   // Limite de tentativas: por IP (login e cadastro juntos) e por nome de usuário (só erros de senha).
   // Login certo zera o contador do nome. Sem isso, qualquer um na internet testaria senhas sem parar.
@@ -1196,8 +1228,19 @@ export async function buildApp({
         presence();
         if (voice.delete(socket)) broadcastVoice();
       });
-      socket.on("message", async (raw: Buffer) => {
+      socket.on("message", (raw: Buffer) => {
         alive = true;
+        // Um erro aqui (banco fora, por exemplo) não pode virar promessa rejeitada solta: isso derruba o processo.
+        handle(raw).catch((err) => {
+          req.log.error({ err, userId: connected.id }, "ws: erro ao tratar evento");
+          try {
+            socket.send(JSON.stringify({ t: "error", error: "erro no servidor; tente de novo" } satisfies ServerEvent));
+          } catch {
+            // conexão já fechada
+          }
+        });
+      });
+      const handle = async (raw: Buffer) => {
         let evt;
         try {
           evt = clientEvent.parse(JSON.parse(raw.toString()));
@@ -1256,7 +1299,7 @@ export async function buildApp({
         await markRead(user.id, channel.id);
         if (isDm) toUsers(await dmPeers(channel.id), { t: "message", message });
         else toServer(channel.serverId!, { t: "message", message });
-      });
+      };
     });
   });
 

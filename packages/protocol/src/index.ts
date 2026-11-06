@@ -370,3 +370,4 @@ export const serverEvent = z.discriminatedUnion("t", [
 
 export type ClientEvent = z.infer<typeof clientEvent>;
 export type ServerEvent = z.infer<typeof serverEvent>;
+export * from "./richtext.js";

@@ -125,3 +125,9 @@
 .server-icon-actions { display: flex; flex-direction: column; gap: 4px; }
 .server-icon-actions > div { display: flex; gap: 6px; margin-top: 4px; }
 .msg.head > .plain-btn { align-self: start; }
+.msg-text a { color: var(--paper); text-decoration: underline; }
+.msg-code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 1px 5px; border-radius: 3px; }
+.msg-codeblock { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ink-3, #222); padding: 8px 10px; border-radius: 4px; margin: 4px 0; overflow-x: auto; white-space: pre; }
+.msg-codeblock code { font: inherit; }
+.msg-spoiler { cursor: pointer; background: var(--paper-dim); color: transparent; border-radius: 3px; user-select: none; }
+.msg-spoiler.shown { background: var(--ink-3, #222); color: inherit; cursor: auto; user-select: auto; }

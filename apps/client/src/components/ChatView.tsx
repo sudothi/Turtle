@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import {
-  ATTACHMENT_MAX_BYTES, MAX_ATTACHMENTS, MENTION_RE, encodeMentions, isInlineImage, mentionedIds, shownName, splitMentions,
+  ATTACHMENT_MAX_BYTES, MAX_ATTACHMENTS, MENTION_RE, encodeMentions, isInlineImage, mentionedIds, shownName, splitMentions, parseRichText, type RichNode,
   type Attachment, type Channel, type Member, type Message,
 } from "@turtle/protocol";
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
@@ -43,6 +43,42 @@ export function ChannelHeader({ icon, name, children }: { icon: "hash" | "speake
   );
 }
 
+/** Desenha a formatação básica (negrito, itálico, código, spoiler, links) sem injetar HTML. */
+function Rich({ nodes }: { nodes: RichNode[] }) {
+  return (
+    <>
+      {nodes.map((n, i) => {
+        switch (n.type) {
+          case "text": return n.text;
+          case "bold": return <strong key={i}><Rich nodes={n.children} /></strong>;
+          case "italic": return <em key={i}><Rich nodes={n.children} /></em>;
+          case "code": return <code key={i} className="msg-code">{n.text}</code>;
+          case "codeblock": return <pre key={i} className="msg-codeblock"><code>{n.text}</code></pre>;
+          case "spoiler": return <Spoiler key={i}><Rich nodes={n.children} /></Spoiler>;
+          case "link": return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer">{n.text}</a>;
+        }
+      })}
+    </>
+  );
+}
+
+/** Spoiler: borrado até clicar (ou apertar Enter) para revelar. */
+function Spoiler({ children }: { children: React.ReactNode }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span
+      className={`msg-spoiler${shown ? " shown" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label={shown ? undefined : "Spoiler, clique para mostrar"}
+      onClick={() => setShown(true)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setShown(true)}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** Texto da mensagem com as menções `<@id>` trocadas pelo nome de exibição atual. */
 function MessageText({ content, names, onProfile, edited }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null }) {
   if (!content && !edited) return null;
@@ -50,7 +86,7 @@ function MessageText({ content, names, onProfile, edited }: { content: string; n
     <div className="msg-text">
       {splitMentions(content).map((p, i) =>
         "text" in p ? (
-          p.text
+          <Rich key={i} nodes={parseRichText(p.text)} />
         ) : (
           <button key={i} type="button" className="plain-btn mention" onClick={() => onProfile(p.userId)}>
             @{names.get(p.userId) ?? "alguém"}

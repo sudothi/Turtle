@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import xyz.ogturtle.turtle.data.Activity
+import xyz.ogturtle.turtle.data.text
 import xyz.ogturtle.turtle.data.Api
 import xyz.ogturtle.turtle.data.ApiException
 import xyz.ogturtle.turtle.data.Channel
@@ -76,7 +78,7 @@ internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it
 
 /** Linha de atividade: jogo, ou "Em chamada em #sala · Servidor" (só chamadas que o servidor já me mostra). */
 fun UiState.activityOf(userId: String): String? {
-    activities[userId]?.let { return it.text() }
+    activities[userId]?.let { a -> return a.text() }
     val v = voiceStates.firstOrNull { it.userId == userId } ?: return null
     val sid = v.serverId ?: return "Em chamada em uma conversa"
     val ch = channels[sid]?.firstOrNull { it.id == v.channelId }?.name ?: "voz"

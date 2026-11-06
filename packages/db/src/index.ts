@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS messages (
   user_id text NOT NULL REFERENCES users(id), content text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS messages_channel_created_idx ON messages (channel_id, created_at);
+CREATE INDEX IF NOT EXISTS messages_channel_cursor_idx ON messages (channel_id, created_at, id);
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'text';
 
 -- Perfil (nome de exibição, bio, foto e banner).
@@ -106,6 +107,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS channels_server_name_idx ON channels (server_i
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'online';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS icon_key text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+CREATE TABLE IF NOT EXISTS message_receipts (
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  request_id text NOT NULL, channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  body_hash text NOT NULL, PRIMARY KEY (user_id, request_id));
 -- Anexos do chat (os arquivos ficam na pasta de uploads).
 CREATE TABLE IF NOT EXISTS attachments (
   id text PRIMARY KEY,

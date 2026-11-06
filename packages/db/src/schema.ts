@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -13,14 +14,25 @@ export const users = pgTable("users", {
   bannerKey: text("banner_key"),
   /** "online" ou "busy" (Não perturbe). */
   status: text("status", { enum: ["online", "busy"] }).notNull().default("online"),
+  /** Conta desativada pelo admin (bloqueia login e apaga as sessões). */
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const sessions = pgTable("sessions", {
-  tokenHash: text("token_hash").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    /** Id público da sessão (UUID aleatório, nunca derivado do token). */
+    id: text("id").notNull().default(sql`(gen_random_uuid()::text)`),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`(now() + interval '30 days')`),
+  },
+  (t) => [uniqueIndex("sessions_id_idx").on(t.id), index("sessions_user_idx").on(t.userId)],
+);
 
 export const invites = pgTable("invites", {
   code: text("code").primaryKey(),

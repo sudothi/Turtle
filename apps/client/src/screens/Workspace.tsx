@@ -395,7 +395,11 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         if (evt.t === "voiceStates") setVoiceStates(evt.states);
       };
       s.onclose = (ev) => {
-        if (ev.code === 4401) return onLogout();
+        if (ev.code === 4401) {
+          closed = true;
+          clearTimeout(retry);
+          return onLogout();
+        }
         // Espera crescente (1, 2, 4… até 10 s) com um pouco de sorteio, para todos não voltarem juntos.
         const wait = Math.min(10_000, 1000 * 2 ** attempts++) * (0.75 + Math.random() * 0.5);
         if (!closed) retry = setTimeout(connect, wait);
@@ -788,7 +792,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         />
       )}
       {fullProfile && <ProfileModal userId={fullProfile} role={home ? undefined : members.find((m) => m.userId === fullProfile)?.role} h={profileHandlers} onOpenUser={setFullProfile} onClose={closeFull} />}
-      {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onClose={() => setSettings(null)} />}
+      {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onLogout={() => { void voice.leave(); onLogout(); }} onClose={() => setSettings(null)} />}
       {editingChannel && <EditChannelModal channel={editingChannel} onClose={() => setEditingChannel(undefined)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}

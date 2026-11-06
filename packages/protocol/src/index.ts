@@ -16,6 +16,21 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 /** Imagem que o app mostra direto no chat (o resto vira um cartão de download). */
 export const isInlineImage = (a: Pick<Attachment, "mime">) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime);
 
+/** Prévia da mensagem respondida (texto cortado, para desenhar a linha acima da resposta). */
+export const replyPreviewSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().default(null),
+  avatar: z.string().nullable().default(null),
+  content: z.string(),
+  /** Quantos arquivos a mensagem respondida tem (mostra "clique para ver o anexo" quando não há texto). */
+  attachments: z.number().int().default(0),
+});
+export type ReplyPreview = z.infer<typeof replyPreviewSchema>;
+/** Tamanho máximo do texto da prévia da resposta. */
+export const REPLY_PREVIEW_CHARS = 200;
+
 export const messageSchema = z.object({
   id: z.string(),
   channelId: z.string(),
@@ -30,6 +45,9 @@ export const messageSchema = z.object({
   /** Quando foi editada pela última vez (mostra "(editado)"). */
   editedAt: z.string().nullable().default(null),
   attachments: z.array(attachmentSchema).default([]),
+  /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
+  replyToId: z.string().nullable().default(null),
+  replyTo: replyPreviewSchema.nullable().default(null),
 });
 export type Message = z.infer<typeof messageSchema>;
 
@@ -254,10 +272,19 @@ export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 /** Eventos do gateway WebSocket (cliente <-> servidor). */
 export const clientEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ping") }),
+  /** Primeira mensagem da conexão: o token da sessão (em vez de ir na URL do WebSocket). */
+  z.object({ t: z.literal("auth"), token: z.string().max(200) }),
   /** Texto e/ou anexos já enviados por POST /channels/:id/attachments. */
   z.object({
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
+    /** Responder a uma mensagem do mesmo canal. */
+    replyTo: z.string().max(64).optional(),
+    /**
+     * Id gerado pelo cliente: volta no evento `message` (ou `error`) para confirmar o envio, e o servidor
+     * ignora o reenvio do mesmo nonce (quando a conexão caiu antes da confirmação).
+     */
+    nonce: z.string().max(64).optional(),
   }),
   /** channelId null = saiu da voz. */
   z.object({
@@ -269,7 +296,7 @@ export const clientEvent = z.discriminatedUnion("t", [
 });
 export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong") }),
-  z.object({ t: z.literal("message"), message: messageSchema }),
+  z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
   z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
   /** Você leu a conversa em outro aparelho: tira a marca de não lida. */
@@ -283,7 +310,8 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
   z.object({ t: z.literal("presence"), online: z.array(z.string()), busy: z.array(z.string()).default([]) }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
-  z.object({ t: z.literal("error"), error: z.string() }),
+  /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
+  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
 ]);
 
 export type ClientEvent = z.infer<typeof clientEvent>;

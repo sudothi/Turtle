@@ -24,7 +24,7 @@ export type Row =
   | { kind: "day"; key: string; label: string }
   | { kind: "msg"; key: string; message: Message; head: boolean };
 
-/** Agrupa mensagens seguidas do mesmo autor (até 7 min) e insere divisores de dia. */
+/** Agrupa mensagens seguidas do mesmo autor (até 7 min, sem ser resposta) e insere divisores de dia. */
 export function toRows(messages: Message[]): Row[] {
   const rows: Row[] = [];
   let prev: Message | undefined;
@@ -33,7 +33,8 @@ export function toRows(messages: Message[]): Row[] {
     const pd = prev && new Date(prev.createdAt);
     const newDay = !pd || !sameDay(pd, d);
     if (newDay) rows.push({ kind: "day", key: `day-${m.id}`, label: dayLabel(m.createdAt) });
-    const head = newDay || !prev || prev.userId !== m.userId || d.getTime() - pd!.getTime() > 7 * 60_000;
+    // Resposta sempre abre um bloco novo (a linha da mensagem citada fica em cima do nome).
+    const head = newDay || !prev || !!m.replyToId || prev.userId !== m.userId || d.getTime() - pd!.getTime() > 7 * 60_000;
     rows.push({ kind: "msg", key: m.id, message: m, head });
     prev = m;
   }

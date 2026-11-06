@@ -11,7 +11,9 @@ import { errorText } from "../session";
 export type CropImage = { uri: string; width: number; height: number; kind: "avatar" | "banner" };
 export default function ImageCropper({ image, onCancel, onSave }: { image: CropImage; onCancel: () => void; onSave: (uri: string) => Promise<void> }) {
   const { width } = useWindowDimensions();
-  const frame = { width: Math.min(600, width - 32), height: Math.min(600, width - 32) / (image.kind === "banner" ? 3 : 1) };
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const frameWidth = Math.max(1, Math.min(600, availableWidth || width - 32));
+  const frame = { width: frameWidth, height: frameWidth / (image.kind === "banner" ? 3 : 1) };
   const [position, setPosition] = useState(() => centerCrop(image, frame));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -54,7 +56,7 @@ export default function ImageCropper({ image, onCancel, onSave }: { image: CropI
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
-  return <View style={{ gap: 12 }}>
+  return <View onLayout={({ nativeEvent }) => setAvailableWidth(nativeEvent.layout.width)} style={{ gap: 12 }}>
     <Text style={text.subtitle}>Recortar {image.kind === "avatar" ? "avatar" : "banner"}</Text>
     <Text style={text.caption}>Arraste para posicionar. Use dois dedos ou os botões para ajustar o zoom.</Text>
     <View {...responder.panHandlers} style={{ width: frame.width, height: frame.height, overflow: "hidden", backgroundColor: colors.rail, borderRadius: image.kind === "avatar" ? frame.width / 2 : 4 }}>

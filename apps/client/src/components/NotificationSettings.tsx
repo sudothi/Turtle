@@ -9,6 +9,10 @@ const samples: { name: SoundName; label: string }[] = [
   { name: "deafen", label: "Ensurdecer" },
   { name: "screenOn", label: "Transmitir tela" },
   { name: "screenOff", label: "Parar transmissão" },
+  { name: "callJoin", label: "Entrar na chamada" },
+  { name: "callLeave", label: "Sair da chamada" },
+  { name: "userJoin", label: "Alguém entrou" },
+  { name: "userLeave", label: "Alguém saiu" },
 ];
 
 const permissionText = () => {
@@ -33,7 +37,7 @@ export function NotificationSettings() {
         <input type="checkbox" checked={prefs.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
         <span>
           <b>Sons do app</b>
-          <span className="t-muted">Bolhas e ondas ao mutar, transmitir e receber mensagem.</span>
+          <span className="t-muted">Bolhas e ondas ao mutar, transmitir, entrar na chamada e receber mensagem.</span>
         </span>
       </label>
       <label className="t-field-label" htmlFor="sound-volume">Volume dos sons — {Math.round(prefs.volume * 100)}%</label>
@@ -45,6 +49,14 @@ export function NotificationSettings() {
           </Button>
         ))}
       </div>
+
+      <label className="toggle-row">
+        <input type="checkbox" checked={prefs.callPresence} disabled={!prefs.enabled} onChange={(e) => set({ callPresence: e.target.checked })} />
+        <span>
+          <b>Entrada e saída da chamada</b>
+          <span className="t-muted">Som quando você entra ou sai, e quando alguém entra ou sai da chamada em que você está.</span>
+        </span>
+      </label>
 
       <hr className="t-divider" />
       <label className="toggle-row">

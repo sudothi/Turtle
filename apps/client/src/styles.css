@@ -953,3 +953,13 @@ a.auth-brand { text-decoration: none; }
 .ring-card > span { flex: 1; min-width: 0; }
 .watch-quality { font-size: 12px; background: var(--ink-2); color: var(--paper); border: 1px solid var(--text-muted); border-radius: 4px; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 12px 0; cursor: pointer; }
+
+/* Menu do clique direito numa pessoa (call, lista de voz, membros). */
+.menu.person-menu { position: fixed; right: auto; width: 230px; max-height: calc(100vh - 16px); overflow-y: auto; z-index: 60; }
+.person-menu-title { margin: 2px 8px 4px; }
+.person-menu-volume { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; color: var(--paper-dim); font-size: var(--fs-sm); font-weight: 600; }
+.person-menu-volume span { display: flex; justify-content: space-between; }
+.person-menu-volume input { width: 100%; accent-color: var(--paper); }
+.person-menu-check { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 2px solid currentColor; border-radius: 3px; }
+.person-menu-check.on { background: var(--paper); color: var(--ink-0); border-color: var(--paper); }
+.menu-item:hover .person-menu-check.on { background: var(--ink-0); color: var(--paper); border-color: var(--ink-0); }

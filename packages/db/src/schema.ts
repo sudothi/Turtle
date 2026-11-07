@@ -55,6 +55,8 @@ export const serverMembers = pgTable(
     serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["owner", "admin", "member"] }).notNull().default("member"),
+    /** Apelido só neste servidor (null = usa o nome da conta). */
+    nickname: text("nickname"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.serverId, t.userId] }), index("server_members_user_idx").on(t.userId)],

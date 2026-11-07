@@ -47,6 +47,9 @@ import {
   loginBody,
   registerBody,
   renameServerBody,
+  NICKNAME_MAX,
+  nicknameBody,
+  moveVoiceBody,
   roleBody,
   transferBody,
   updateProfileBody,
@@ -1011,7 +1014,7 @@ export async function buildApp({
     authed.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const rows = await db
-        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, role: serverMembers.role })
+        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, role: serverMembers.role, nickname: serverMembers.nickname })
         .from(serverMembers)
         .innerJoin(users, eq(users.id, serverMembers.userId))
         .where(eq(serverMembers.serverId, req.params.id));
@@ -1077,6 +1080,56 @@ export async function buildApp({
     authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/bans/:user", async (req, reply) => {
       if (!(await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin"))) return;
       await db.delete(serverBans).where(and(eq(serverBans.serverId, req.params.id), eq(serverBans.userId, req.params.user)));
+      return { ok: true };
+    });
+
+    // Apelido no servidor: cada um muda o seu; dono e admin mudam o de quem podem moderar.
+    authed.patch<{ Params: { id: string; user: string } }>("/servers/:id/members/:user/nickname", async (req, reply) => {
+      const role = await member(req, reply, req.params.id);
+      if (!role) return;
+      const body = nicknameBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: `o apelido pode ter até ${NICKNAME_MAX} letras` });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (!target) return reply.code(404).send({ error: "essa pessoa não está no servidor" });
+      if (req.params.user !== me(req).id && (target === "owner" || !canModerate(role, target))) return reply.code(403).send({ error: "sem permissão" });
+      const nickname = body.data.nickname || null;
+      await db.update(serverMembers).set({ nickname }).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, req.params.user)));
+      toServer(req.params.id, { t: "sync" });
+      return { nickname };
+    });
+
+    // Mover ou desconectar alguém de uma chamada do servidor (mesmas regras de expulsar).
+    const callOf = (serverId: string, userId: string) => [...voice.entries()].find(([, v]) => v.serverId === serverId && v.userId === userId);
+    const voiceModerator = async (req: FastifyRequest<{ Params: { id: string; user: string } }>, reply: FastifyReply) => {
+      const role = await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin");
+      if (!role) return;
+      if (req.params.user === me(req).id) return void reply.code(400).send({ error: "use os controles da chamada" });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (!canModerate(role, target)) return void reply.code(403).send({ error: "sem permissão" });
+      const call = callOf(req.params.id, req.params.user);
+      if (!call) return void reply.code(404).send({ error: "essa pessoa não está numa chamada deste servidor" });
+      return call;
+    };
+    authed.post<{ Params: { id: string; user: string } }>("/servers/:id/voice/:user/move", async (req, reply) => {
+      const body = moveVoiceBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const call = await voiceModerator(req, reply);
+      if (!call) return;
+      const channel = await findChannel(body.data.channelId);
+      if (!channel || channel.kind !== "voice" || channel.serverId !== req.params.id) return reply.code(404).send({ error: "canal de voz não existe" });
+      if (call[1].channelId === channel.id) return { ok: true };
+      // Quem se move é o próprio aplicativo da pessoa: ele sai da sala atual e entra na nova.
+      call[0].send(JSON.stringify({ t: "voiceMoved", channelId: channel.id, by: me(req).id } satisfies ServerEvent));
+      return { ok: true };
+    });
+    authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/voice/:user", async (req, reply) => {
+      const call = await voiceModerator(req, reply);
+      if (!call) return;
+      const [sock, v] = call;
+      sock.send(JSON.stringify({ t: "voiceMoved", channelId: null, by: me(req).id } satisfies ServerEvent));
+      voice.delete(sock);
+      broadcastVoice();
+      if (room) await room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {});
       return { ok: true };
     });
 

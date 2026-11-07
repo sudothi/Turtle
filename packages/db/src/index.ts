@@ -176,6 +176,9 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent text;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at timestamptz NOT NULL DEFAULT now();
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days');
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
+
+-- Apelido por servidor (menu de clique direito na pessoa).
+ALTER TABLE server_members ADD COLUMN IF NOT EXISTS nickname text;
 `;
 
 export interface DbHandle {

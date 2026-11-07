@@ -229,6 +229,8 @@ export const memberSchema = z.object({
   avatar: z.string().nullable().default(null),
   staff: z.boolean().default(false),
   role: serverRole,
+  /** Apelido neste servidor (null = usa o nome da conta). */
+  nickname: z.string().nullable().default(null),
 });
 export type Member = z.infer<typeof memberSchema>;
 
@@ -237,6 +239,13 @@ export const createServerBody = z.object({ name: serverNameSchema });
 export const renameServerBody = z.object({ name: serverNameSchema });
 export const deleteServerBody = z.object({ name: z.string() });
 export const transferBody = z.object({ userId: z.string() });
+export const NICKNAME_MAX = 32;
+/** null ou "" tira o apelido. */
+export const nicknameBody = z.object({ nickname: z.string().trim().max(NICKNAME_MAX).nullable() });
+/** Nome de alguém dentro de um servidor: apelido, senão o nome de exibição, senão o usuário. */
+export const memberName = (m: { username: string; displayName?: string | null; nickname?: string | null }) => m.nickname || m.displayName || m.username;
+/** Mover alguém para outro canal de voz do mesmo servidor. */
+export const moveVoiceBody = z.object({ channelId: z.string() });
 export const roleBody = z.object({ role: z.enum(["admin", "member"]) });
 /** days: validade em dias (padrão 7; 0 = não expira). */
 export const createInviteBody = z.object({
@@ -414,6 +423,8 @@ export const serverEvent = z.discriminatedUnion("t", [
     activities: z.record(z.string(), activitySchema).default({}),
   }),
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
+  /** Um admin te moveu para outro canal de voz (`channelId`) ou te desconectou da chamada (null). */
+  z.object({ t: z.literal("voiceMoved"), channelId: z.string().nullable(), by: z.string() }),
   /** Alguém está digitando no canal (some sozinho depois de uns 6 s sem novo aviso). */
   z.object({ t: z.literal("typing"), channelId: z.string(), userId: z.string() }),
   /** Alguém está te ligando numa DM ou grupo. `silent`: você está em Não perturbe (só notificar, sem tocar). */

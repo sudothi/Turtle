@@ -53,6 +53,11 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     private var room: Room? = null
     private var events: Job? = null
     private var mutedBeforeDeafen = false
+    /** Entrou de fato na sala (para tocar o som de saída só de quem estava dentro). */
+    private var joined = false
+    /** Até quando ignorar entradas e saídas dos outros (ao reconectar o LiveKit reanuncia todo mundo). */
+    private var presenceQuietUntil = 0L
+    private var lastPresenceSound = 0L
 
     /** Liga um renderizador de vídeo à sala atual (necessário antes de mostrar vídeo). */
     fun initRenderer(renderer: TextureViewRenderer) {
@@ -70,6 +75,9 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
             r.connect(url, token, ConnectOptions(autoSubscribe = false))
             r.localParticipant.setMicrophoneEnabled(true)
             r.remoteParticipants.values.forEach(::subscribeDefaults)
+            joined = true
+            presenceQuietUntil = System.currentTimeMillis() + 1500
+            CallSounds.play(CallSound.Join)
             refresh()
         } catch (e: Exception) {
             leave()
@@ -86,16 +94,29 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
         }
         room = null
         _call.value = null
+        if (joined) CallSounds.play(CallSound.Leave)
+        joined = false
     }
 
     private fun onEvent(r: Room, e: RoomEvent) {
         if (room !== r) return
         when (e) {
             is RoomEvent.Disconnected -> leave()
-            is RoomEvent.ParticipantConnected -> { subscribeDefaults(e.participant); refresh() }
+            is RoomEvent.ParticipantConnected -> { subscribeDefaults(e.participant); presenceSound(r, CallSound.UserJoin); refresh() }
+            is RoomEvent.ParticipantDisconnected -> { presenceSound(r, CallSound.UserLeave); refresh() }
+            is RoomEvent.Reconnected -> { presenceQuietUntil = System.currentTimeMillis() + 2000; refresh() }
             is RoomEvent.TrackPublished -> { (e.participant as? io.livekit.android.room.participant.RemoteParticipant)?.let(::subscribeDefaults); refresh() }
             else -> refresh()
         }
+    }
+
+    /** Alguém entrou ou saiu: só com a chamada estável, sem ensurdecer, e um som por rajada. */
+    private fun presenceSound(r: Room, sound: CallSound) {
+        val now = System.currentTimeMillis()
+        if (!joined || r.state != Room.State.CONNECTED || _call.value?.deafened == true) return
+        if (now < presenceQuietUntil || now - lastPresenceSound < 300) return
+        lastPresenceSound = now
+        CallSounds.play(sound)
     }
 
     /** Assina áudio e câmera de quem entrou; tela compartilhada fica para o "Assistir". */

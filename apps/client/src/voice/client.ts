@@ -19,6 +19,7 @@ import { api } from "../api";
 import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfiles, usesWasmNoise, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
 import { preferHardwareH264 } from "./codec";
 import { preloadNoiseWasm, RnnoiseProcessor } from "./rnnoise";
+import { loadSoundPrefs, playSound, type SoundName } from "../sounds";
 
 export interface CallParticipant {
   id: string;
@@ -143,6 +144,9 @@ export class VoiceClient {
   private lastDims = { width: 0, height: 0 };
   /** Voltando sozinho para a chamada depois de uma queda. */
   private rejoin?: { channelId: string; attempt: number; timer?: ReturnType<typeof setTimeout> };
+  /** Até quando ignorar entradas e saídas dos outros (logo depois de reconectar o LiveKit reanuncia todo mundo). */
+  private presenceQuietUntil = 0;
+  private lastPresenceSound = 0;
 
   constructor(private report: VoiceReporter) {
     // A rede voltou: tenta já, sem esperar a vez.
@@ -167,6 +171,19 @@ export class VoiceClient {
   private reportState(channelId: string | null = this.snap.channelId ?? null) {
     const { muted, deafened, camera, screen } = this.snap;
     this.report({ channelId, muted, deafened, camera, screen });
+  }
+
+  /** Sons de entrar e sair da chamada, se a pessoa não desligou nas configurações. */
+  private callSound(name: SoundName) {
+    if (loadSoundPrefs().callPresence) playSound(name);
+  }
+
+  /** Alguém entrou ou saiu da sua chamada: só com a chamada estável, sem ensurdecer, e um som por rajada. */
+  private presenceSound(name: "userJoin" | "userLeave") {
+    const now = Date.now();
+    if (this.snap.status !== "connected" || this.snap.deafened || now < this.presenceQuietUntil || now - this.lastPresenceSound < 300) return;
+    this.lastPresenceSound = now;
+    this.callSound(name);
   }
 
   /** Reenvia o estado ao gateway (ex.: depois que o WebSocket reconecta). */
@@ -213,6 +230,8 @@ export class VoiceClient {
       }
       this.rejoin = undefined;
       this.set({ status: "connected" });
+      this.presenceQuietUntil = Date.now() + 1500;
+      this.callSound("callJoin");
       this.reportState(channelId);
 
       if (mic instanceof Error) {
@@ -268,9 +287,11 @@ export class VoiceClient {
     this.stopRejoin();
     this.joinSeq++;
     const room = this.room;
+    const wasIn = this.snap.status !== "idle";
     this.room = undefined;
     this.mic?.stop();
     this.mic = undefined;
+    if (wasIn) this.callSound("callLeave");
     this.resetCall({});
     this.reportState(null);
     await room?.disconnect();
@@ -619,10 +640,12 @@ export class VoiceClient {
       .on(RoomEvent.ParticipantConnected, (p) => {
         this.applyVolume(p);
         this.syncSubscriptions(p);
+        if (this.room === room) this.presenceSound("userJoin");
         refresh();
       })
       .on(RoomEvent.ParticipantDisconnected, (p) => {
         this.watching.delete(p.identity);
+        if (this.room === room) this.presenceSound("userLeave");
         refresh();
       })
       .on(RoomEvent.ActiveSpeakersChanged, refresh)
@@ -678,6 +701,7 @@ export class VoiceClient {
       .on(RoomEvent.Reconnected, () => {
         if (this.room !== room) return;
         this.set({ status: "connected" });
+        this.presenceQuietUntil = Date.now() + 2000;
         // Depois de reconectar, as assinaturas podem ter sido perdidas: pede de novo.
         this.asked.clear();
         this.syncAll();
@@ -691,6 +715,7 @@ export class VoiceClient {
         this.mic = undefined;
         const channelId = this.snap.channelId;
         if (channelId && !NO_RETRY.has(reason)) return this.scheduleRejoin(channelId, 0);
+        this.callSound("callLeave");
         this.resetCall({ error: disconnectMessage(reason) });
         this.reportState(null);
       });

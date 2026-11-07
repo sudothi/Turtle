@@ -24,6 +24,22 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
   pickScreen(id: string | null) {
     ipcRenderer.send("screen:picked", id);
   },
+  /** Áudio da transmissão por processo (Windows): sem o som do Turtle; numa janela, só o daquele programa. */
+  shareAudio: {
+    supported: (): Promise<boolean> => ipcRenderer.invoke("screen:audio-supported"),
+    /** Avisa antes do getDisplayMedia que o áudio virá por aqui (o seletor mostra a dica de áudio). */
+    want: (on: boolean): Promise<boolean> => ipcRenderer.invoke("screen:audio-want", on),
+    start: (): Promise<{ ok: boolean; mode?: "screen" | "window"; reason?: string }> => ipcRenderer.invoke("screen:audio-start"),
+    stop() {
+      ipcRenderer.send("screen:audio-stop");
+    },
+    /** PCM 16 bits, estéreo intercalado, 48 kHz. */
+    onData(cb: (chunk: Uint8Array) => void) {
+      const h = (_: unknown, chunk: Uint8Array) => cb(chunk);
+      ipcRenderer.on("screen:audio", h);
+      return () => void ipcRenderer.removeListener("screen:audio", h);
+    },
+  },
   openWebrtcInternals() {
     ipcRenderer.send("debug:webrtc");
   },

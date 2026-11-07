@@ -45,7 +45,11 @@ export function ScreenPicker() {
   return (
     <Modal
       title="O que transmitir?"
-      subtitle={req.audio ? "O áudio do computador será incluído. Use fone para não gerar eco." : "Escolha uma tela ou uma janela."}
+      subtitle={
+        req.audio
+          ? "Com áudio: na tela inteira vai o som do PC todo, menos o Turtle; numa janela, só o som daquele programa."
+          : "Escolha uma tela ou uma janela."
+      }
       onClose={() => answer(null)}
       footer={
         <>

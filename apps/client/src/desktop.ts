@@ -15,6 +15,14 @@ export interface TurtleDesktop {
   onPickScreen(cb: (req: PickRequest) => void): () => void;
   pickScreen(id: string | null): void;
   openWebrtcInternals(): void;
+  /** Áudio da transmissão por processo (versões novas do app, Windows). */
+  shareAudio?: {
+    supported(): Promise<boolean>;
+    want(on: boolean): Promise<boolean>;
+    start(): Promise<{ ok: boolean; mode?: "screen" | "window"; reason?: string }>;
+    stop(): void;
+    onData(cb: (chunk: Uint8Array) => void): () => void;
+  };
   /** Pisca o ícone na barra de tarefas até a janela ganhar foco (versões novas do app). */
   attention?(): void;
   /** Mostra e foca a janela (sai da bandeja). */

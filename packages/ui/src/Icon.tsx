@@ -23,6 +23,12 @@ const icons = {
       <path d="M15.5 8.6a4.8 4.8 0 0 1 0 6.8M18.2 5.8a8.7 8.7 0 0 1 0 12.4" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
     </>
   ),
+  "speaker-off": (
+    <>
+      <path d="M3 9.2h4.2L12.5 4.5v15l-5.3-4.7H3z" fill="currentColor" />
+      <path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    </>
+  ),
   mic: (
     <>
       <rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="currentColor" />

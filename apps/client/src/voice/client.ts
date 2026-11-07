@@ -18,7 +18,7 @@ import {
 import { api } from "../api";
 import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfiles, usesWasmNoise, type AudioPrefs, type NoiseMode, type ScreenProfileId } from "./prefs";
 import { preferHardwareH264 } from "./codec";
-import { preloadNoiseWasm, RnnoiseProcessor } from "./rnnoise";
+import { preloadNoiseWasm, publishAsMono, RnnoiseProcessor } from "./rnnoise";
 import { loadSoundPrefs, playSound, type SoundName } from "../sounds";
 
 export interface CallParticipant {
@@ -239,6 +239,7 @@ export class VoiceClient {
         this.reportState(channelId);
       } else {
         this.mic = mic;
+        publishAsMono(mic);
         await room.localParticipant.publishTrack(mic, { source: Track.Source.Microphone });
         if (this.snap.muted) await mic.mute();
         await this.applyNoise();
@@ -318,6 +319,7 @@ export class VoiceClient {
       try {
         const mic = await createLocalAudioTrack(micConstraints(this.snap.prefs));
         this.mic = mic;
+        publishAsMono(mic);
         await this.room.localParticipant.publishTrack(mic, { source: Track.Source.Microphone });
         await this.applyNoise();
         this.set({ error: undefined });

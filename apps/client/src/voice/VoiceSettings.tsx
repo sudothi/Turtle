@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { micConstraints, needsAudioProcessor, type AudioPrefs, type NoiseMode } from "./prefs";
-import { createRnnoiseGraph, type RnnoiseGraph } from "./rnnoise";
+import { createRnnoiseGraph, type RnnoiseGraph, monoMixer } from "./rnnoise";
 import type { VoiceClient } from "./client";
 import { desktop, loadShortcuts, loadShowGame, saveShortcuts, saveShowGame, toAccelerator, type Shortcuts } from "../desktop";
 
@@ -138,7 +138,8 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
         } else {
           ctx = new AudioContext({ sampleRate: 48000 });
           rawNode = ctx.createMediaStreamSource(stream);
-          output = rawNode;
+          output = monoMixer(ctx);
+          rawNode.connect(output);
         }
         if (stopped) return;
         const rawAnalyser = ctx.createAnalyser();

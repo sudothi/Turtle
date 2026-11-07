@@ -1,4 +1,4 @@
-import type { AudioProcessorOptions, Track, TrackProcessor } from "livekit-client";
+import type { AudioProcessorOptions, LocalAudioTrack, Track, TrackProcessor } from "livekit-client";
 import {
   GtcrnWorkletNode,
   loadGtcrn,
@@ -46,6 +46,22 @@ export interface RnnoiseGraph {
   destroy(): void;
 }
 
+/** Nó que soma qualquer entrada em um canal só ((L+R)/2 no estéreo). */
+export function monoMixer(context: BaseAudioContext): GainNode {
+  return new GainNode(context, { channelCount: 1, channelCountMode: "explicit", channelInterpretation: "speakers" });
+}
+
+/**
+ * A voz sai sempre em mono. O LiveKit marca a track como estéreo quando o microfone informa 2 canais e aí o
+ * Opus é negociado em estéreo: com um microfone que só tem som no canal esquerdo (comum em headsets), quem
+ * ouve escuta só pelo lado esquerdo. Informando 1 canal, o Opus fica mono e o navegador mistura os dois lados.
+ * Chamar antes de publicar a track.
+ */
+export function publishAsMono(track: LocalAudioTrack) {
+  const original = track.getSourceTrackSettings.bind(track);
+  track.getSourceTrackSettings = () => ({ ...original(), channelCount: 1 });
+}
+
 /**
  * Monta microfone -> [GTCRN | RNNoise | Speex] -> [Noise Gate] -> Gain num AudioContext próprio de 48 kHz.
  * Os modelos WASM operam em 48 kHz, e o contexto da sala pode estar em outra taxa.
@@ -73,7 +89,11 @@ export async function createRnnoiseGraph(
     const wasmBinary = results[0] as ArrayBuffer | undefined;
 
     const source = context.createMediaStreamSource(new MediaStream([track]));
-    let current: AudioNode = source;
+    // Microfone estéreo (muitos fones/placas no Windows entregam 2 canais mesmo pedindo 1, às vezes com som
+    // num lado só): mistura em mono antes dos filtros, que só processam o primeiro canal.
+    const mono = monoMixer(context);
+    source.connect(mono);
+    let current: AudioNode = mono;
 
     if (cfg.noise === "gtcrn" && wasmBinary) {
       const node = new GtcrnWorkletNode(context, { maxChannels: 1, wasmBinary });
@@ -133,6 +153,7 @@ export async function createRnnoiseGraph(
       },
       destroy() {
         source.disconnect();
+        mono.disconnect();
         for (const fn of destroyCallbacks) fn();
         void context.close();
       },

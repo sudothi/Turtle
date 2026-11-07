@@ -410,6 +410,7 @@ export class VoiceClient {
       );
       this.set({ screen: room.localParticipant.isScreenShareEnabled, error: undefined });
       if (this.snap.screen) this.startStats();
+      else await this.stopScreenAudio(room);
     } catch (err) {
       const e = err as Error;
       // Cancelar o seletor do navegador não é erro.
@@ -425,11 +426,25 @@ export class VoiceClient {
     try {
       await room.localParticipant.setScreenShareEnabled(false);
     } finally {
-      this.stopStats();
-      this.set({ screen: false, shareStats: undefined });
-      this.reportState();
-      this.refresh();
+      try {
+        // The browser may have already removed the video, leaving only audio.
+        await this.stopScreenAudio(room);
+      } finally {
+        if (this.room === room) {
+          this.stopStats();
+          this.set({ screen: false, shareStats: undefined });
+          this.reportState();
+          this.refresh();
+        }
+      }
     }
+  }
+
+  private async stopScreenAudio(room: Room) {
+    const track = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+    if (!track) return;
+    track.stop();
+    await room.localParticipant.unpublishTrack(track, true);
   }
 
   setScreenProfile(screenProfile: ScreenProfileId) {
@@ -664,10 +679,16 @@ export class VoiceClient {
         refresh();
       })
       .on(RoomEvent.LocalTrackPublished, refresh)
-      .on(RoomEvent.LocalTrackUnpublished, () => {
+      .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         // O botão "Parar compartilhamento" do navegador encerra a captura por fora do app.
         if (this.room !== room) return;
         const lp = room.localParticipant;
+        if (pub.source === Track.Source.ScreenShare && !lp.isScreenShareEnabled) {
+          // TrackEnded only unpublishes the ended track, not its paired audio.
+          void this.stopScreenAudio(room).catch(() => {
+            if (this.room === room) this.set({ error: "Não foi possível encerrar o áudio da transmissão. Saia da chamada para interrompê-lo." });
+          });
+        }
         if (this.snap.screen && !lp.isScreenShareEnabled) {
           this.stopStats();
           this.set({ screen: false, shareStats: undefined });

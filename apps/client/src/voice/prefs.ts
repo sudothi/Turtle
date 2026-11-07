@@ -13,6 +13,8 @@ export interface AudioPrefs {
   inputGain: number;
   /** Volume da voz por pessoa (userId -> 0..1). */
   volumes: Record<string, number>;
+  /** Pessoas silenciadas só para mim (a voz delas some daqui, o volume guardado não muda). */
+  localMutes: Record<string, boolean>;
   /** Volume do áudio das transmissões de tela por pessoa (userId -> 0..1). */
   streamVolumes: Record<string, number>;
   cameraId: string;
@@ -48,7 +50,7 @@ const KEY = "turtle.audio";
 const validNoise = new Set<NoiseMode>(["gtcrn", "rnnoise", "speex", "browser", "off"]);
 const defaults: AudioPrefs = {
   inputId: "default", outputId: "default", noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1,
-  volumes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false, screenSimulcast: false,
+  volumes: {}, localMutes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false, screenSimulcast: false,
 };
 
 export function loadPrefs(): AudioPrefs {

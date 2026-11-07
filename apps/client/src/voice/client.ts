@@ -518,6 +518,15 @@ export class VoiceClient {
     this.applyVolumes();
   }
 
+  /** Silenciar uma pessoa só para mim (os outros continuam ouvindo). */
+  setLocalMute(userId: string, muted: boolean) {
+    const localMutes = { ...this.snap.prefs.localMutes };
+    if (muted) localMutes[userId] = true;
+    else delete localMutes[userId];
+    this.savePrefs({ localMutes });
+    this.applyVolumes();
+  }
+
   /** Volume do áudio da transmissão de tela de uma pessoa (separado da voz dela). */
   setStreamVolume(userId: string, volume: number) {
     this.savePrefs({ streamVolumes: { ...this.snap.prefs.streamVolumes, [userId]: volume } });
@@ -535,7 +544,7 @@ export class VoiceClient {
   }
 
   private volumeFor(userId: string) {
-    return this.snap.deafened ? 0 : (this.snap.prefs.volumes[userId] ?? 1);
+    return this.snap.deafened || this.snap.prefs.localMutes[userId] ? 0 : (this.snap.prefs.volumes[userId] ?? 1);
   }
 
   private streamVolumeFor(userId: string) {

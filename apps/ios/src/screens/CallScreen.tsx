@@ -63,7 +63,7 @@ const s = StyleSheet.create({
   avatar: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
   expandTarget: { position: "absolute", right: 0, top: 0, width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   expandIcon: { width: 28, height: 28, backgroundColor: colors.panel, borderRadius: 4, alignItems: "center", justifyContent: "center" },
-  memberName: { position: "absolute", left: 8, bottom: 8, right: 8, borderRadius: 4, backgroundColor: "rgba(0,0,0,0.7)", padding: 6, flexDirection: "row", alignItems: "center", gap: 6 },
+  memberName: { position: "absolute", left: 8, bottom: 8, right: 8, borderRadius: 4, backgroundColor: "rgba(0,0,0,0.4)", padding: 6, flexDirection: "row", alignItems: "center", gap: 6 },
   controls: { flexDirection: "row", justifyContent: "center", flexWrap: "wrap", gap: 10, paddingVertical: 16, paddingHorizontal: 12 },
   control: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", backgroundColor: colors.elevated },
 });

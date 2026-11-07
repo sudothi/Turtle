@@ -84,7 +84,7 @@ function Names({ profile, role, onOpen }: { profile: ProfileView; role?: ServerR
         {profile.staff && <StaffTag />}
         {role && roleLabel[role] && <span className="up-role">{roleLabel[role]}</span>}
       </div>
-      <ActivityLine userId={profile.id} className="up-activity" />
+      <ActivityLine userId={profile.id} className="up-activity" place />
     </div>
   );
 }

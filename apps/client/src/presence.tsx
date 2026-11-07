@@ -23,14 +23,21 @@ const minutes = (since?: string) => {
   const m = since ? Math.floor((Date.now() - Date.parse(since)) / 60_000) : NaN;
   return Number.isFinite(m) && m >= 1 ? (m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`) : "";
 };
-/** Texto curto da atividade: "Jogando League of Legends · Na fila · Ranqueada", ou "Em chamada em #sala". */
-export function activityText(a: Activity | undefined, call: string | undefined) {
+/**
+ * Texto curto da atividade: "Jogando League of Legends · Na fila · Ranqueada", ou "Em chamada".
+ * O lugar da chamada ("Em chamada em #sala · Servidor") só aparece com `place`, no perfil.
+ */
+export function activityText(a: Activity | undefined, call: string | undefined, place = false) {
   if (a) return [`Jogando ${games[a.game]}`, a.phase && gamePhaseLabel[a.phase], a.detail, minutes(a.since)].filter(Boolean).join(" · ");
-  return call ? `Em chamada em ${call}` : undefined;
+  if (!call) return undefined;
+  return place ? `Em chamada em ${call}` : "Em chamada";
 }
 
-/** Linha de atividade (jogo ou chamada) abaixo do nome; não renderiza nada se a pessoa não está fazendo nada. */
-export function ActivityLine({ userId, className = "" }: { userId: string; className?: string }) {
+/**
+ * Linha de atividade (jogo ou chamada) abaixo do nome; não renderiza nada se a pessoa não está fazendo nada.
+ * `place` mostra onde é a chamada (só no perfil; nas listas fica só "Em chamada").
+ */
+export function ActivityLine({ userId, className = "", place = false }: { userId: string; className?: string; place?: boolean }) {
   const { activities, calls } = useContext(PresenceContext);
   const a = activities?.[userId];
   // Atualiza o "há X min" uma vez por minuto, só enquanto há jogo na tela.
@@ -40,6 +47,6 @@ export function ActivityLine({ userId, className = "" }: { userId: string; class
     const t = setInterval(() => tick((n) => n + 1), 60_000);
     return () => clearInterval(t);
   }, [a]);
-  const text = activityText(a, calls?.[userId]);
+  const text = activityText(a, calls?.[userId], place);
   return text ? <span className={`activity-line ${className}`} title={text}>{text}</span> : null;
 }

@@ -92,7 +92,7 @@ fun ProfileSheet(userId: String, myId: String?, vm: AppViewModel, onDismiss: () 
                         }
                     }
                     Text("@${p.username}", color = Ink.Muted)
-                    if (p.id in vm.state.value.online) vm.state.value.activityOf(p.id)?.let { Text(it, color = Ink.PaperDim, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+                    if (p.id in vm.state.value.online) vm.state.value.activityOf(p.id, place = true)?.let { Text(it, color = Ink.PaperDim, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
                     p.bio?.takeIf { it.isNotBlank() }?.let {
                         SectionLabel("Sobre mim", Modifier.padding(top = 16.dp, bottom = 4.dp))
                         Text(it, color = Ink.PaperDim)

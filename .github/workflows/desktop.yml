@@ -17,6 +17,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @turtle/desktop typecheck
       - run: pnpm desktop:dist
+      # Áudio da transmissão por processo: o addon foi junto (fora do asar) e carrega no Windows.
+      - name: Fumaça do áudio da transmissão
+        working-directory: apps/desktop
+        run: node scripts/testar-audio.cjs release/win-unpacked
       # O instalador não é assinado (decisão do thiago): o SHA-256 do instalador vai no resumo da execução para conferência.
       - name: SHA-256 do instalador
         shell: bash

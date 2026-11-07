@@ -20,6 +20,8 @@ import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfil
 import { preferHardwareH264 } from "./codec";
 import { preloadNoiseWasm, publishAsMono, RnnoiseProcessor } from "./rnnoise";
 import { loadSoundPrefs, playSound, type SoundName } from "../sounds";
+import { desktop } from "../desktop";
+import { DesktopShareAudio, desktopShareAudioSupported } from "./screen-audio";
 
 export interface CallParticipant {
   id: string;
@@ -41,6 +43,8 @@ export interface VideoTile {
   track?: Track;
   watching: boolean;
   speaking: boolean;
+  /** A transmissão tem áudio (do computador de quem transmite). */
+  hasAudio?: boolean;
 }
 
 /** Diagnóstico da sua própria transmissão, lido do encoder. */
@@ -147,6 +151,8 @@ export class VoiceClient {
   /** Até quando ignorar entradas e saídas dos outros (logo depois de reconectar o LiveKit reanuncia todo mundo). */
   private presenceQuietUntil = 0;
   private lastPresenceSound = 0;
+  /** Áudio da transmissão vindo do app desktop (por processo, sem o som do Turtle). */
+  private shareAudio?: DesktopShareAudio;
 
   constructor(private report: VoiceReporter) {
     // A rede voltou: tenta já, sem esperar a vez.
@@ -278,6 +284,7 @@ export class VoiceClient {
       return;
     }
     this.stopStats();
+    this.stopShareAudio();
     this.asked.clear();
     this.set({ status: "reconnecting", channelId, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false });
     const timer = setTimeout(() => void this.join(channelId, true), delay);
@@ -335,6 +342,7 @@ export class VoiceClient {
   /** Volta ao estado "fora da chamada", mantendo mudo/ensurdecer e as preferências. */
   private resetCall(extra: Partial<VoiceSnapshot>) {
     this.stopStats();
+    this.stopShareAudio();
     this.watching.clear();
     this.asked.clear();
     this.set({ status: "idle", channelId: undefined, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false, ...extra });
@@ -380,11 +388,21 @@ export class VoiceClient {
     if (!room || this.snap.status === "idle" || room.localParticipant.isScreenShareEnabled) return;
     const { screenProfile, screenAudio, screenSimulcast } = this.snap.prefs;
     const prof = screenProfiles[screenProfile];
+    // App desktop novo (Windows): o vídeo vem sem áudio e o áudio vem por processo, sem o som do Turtle
+    // (quem está na chamada não se escuta) e, numa janela, só o som daquele programa.
+    // O AudioContext nasce aqui, ainda dentro do clique.
+    let ctx = screenAudio && desktop()?.shareAudio ? DesktopShareAudio.context() : undefined;
+    const native = !!ctx && (await desktopShareAudioSupported()) && (await desktop()!.shareAudio!.want(true).catch(() => false));
+    if (!native && ctx) {
+      void ctx.close().catch(() => {});
+      ctx = undefined;
+    }
     try {
       await room.localParticipant.setScreenShareEnabled(
         true,
         {
-          audio: screenAudio
+          // No navegador, restrictOwnAudio tira o som da própria aba (Chrome); o Electron antigo ignora.
+          audio: screenAudio && !native
             ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, restrictOwnAudio: true }
             : false,
           resolution: { width: prof.width, height: prof.height, frameRate: prof.fps },
@@ -410,13 +428,56 @@ export class VoiceClient {
       );
       this.set({ screen: room.localParticipant.isScreenShareEnabled, error: undefined });
       if (this.snap.screen) this.startStats();
+      if (ctx && this.snap.screen) {
+        const c = ctx;
+        ctx = undefined;
+        await this.publishShareAudio(room, c);
+      }
     } catch (err) {
       const e = err as Error;
       // Cancelar o seletor do navegador não é erro.
       this.set({ screen: false, error: e.name === "NotAllowedError" || /Permission denied/i.test(e.message) ? undefined : `Não deu para transmitir a tela (${e.message}).` });
+    } finally {
+      if (native) void desktop()?.shareAudio?.want(false).catch(() => {});
+      if (ctx) void ctx.close().catch(() => {});
     }
     this.reportState();
     this.refresh();
+  }
+
+  /** Publica o áudio por processo da fonte escolhida. Se falhar, a transmissão segue sem som. */
+  private async publishShareAudio(room: Room, ctx: AudioContext) {
+    const res = await DesktopShareAudio.start(ctx).catch((err: Error) => ({ reason: err.message }));
+    if (!(res instanceof DesktopShareAudio)) {
+      const why = res.reason === "own-window" ? "a janela é do próprio Turtle" : res.reason === "no-process" ? "não achei o programa dessa janela" : res.reason;
+      this.set({ error: `A transmissão está sem áudio (${why}).` });
+      return;
+    }
+    // Parou de transmitir enquanto o áudio começava.
+    if (this.room !== room || !room.localParticipant.isScreenShareEnabled) return res.stop();
+    this.shareAudio = res;
+    try {
+      await room.localParticipant.publishTrack(res.track, {
+        source: Track.Source.ScreenShareAudio,
+        // Igual ao áudio de tela do navegador: estéreo, sem DTX nem RED, 128 kb/s (música e jogo).
+        audioPreset: { maxBitrate: 128_000 },
+        forceStereo: true,
+        dtx: false,
+        red: false,
+      });
+    } catch (err) {
+      this.stopShareAudio();
+      this.set({ error: `A transmissão está sem áudio (${(err as Error).message}).` });
+    }
+  }
+
+  /** Para o áudio da transmissão e tira a publicação dele (o LiveKit não tira sozinho quando o vídeo acaba por fora). */
+  private stopShareAudio() {
+    const a = this.shareAudio;
+    this.shareAudio = undefined;
+    a?.stop();
+    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
+    if (pub?.track) void this.room?.localParticipant.unpublishTrack(pub.track).catch(() => {});
   }
 
   async stopScreen() {
@@ -425,6 +486,7 @@ export class VoiceClient {
     try {
       await room.localParticipant.setScreenShareEnabled(false);
     } finally {
+      this.stopShareAudio();
       this.stopStats();
       this.set({ screen: false, shareStats: undefined });
       this.reportState();
@@ -669,7 +731,11 @@ export class VoiceClient {
       .on(RoomEvent.TrackUnpublished, (pub, p) => {
         this.asked.delete(pub.trackSid);
         // A pessoa parou de transmitir: na próxima vez, o Assistir volta a ser uma escolha.
-        if (pub.source === Track.Source.ScreenShare) this.watching.delete(p.identity);
+        if (pub.source === Track.Source.ScreenShare) {
+          this.watching.delete(p.identity);
+          // Sem o vídeo, o áudio da tela dela não fica tocando (cancela a assinatura se ainda estiver publicado).
+          this.syncSubscriptions(p);
+        }
         refresh();
       })
       .on(RoomEvent.LocalTrackPublished, refresh)
@@ -677,6 +743,7 @@ export class VoiceClient {
         // O botão "Parar compartilhamento" do navegador encerra a captura por fora do app.
         if (this.room !== room) return;
         const lp = room.localParticipant;
+        if (!lp.isScreenShareEnabled && (this.shareAudio || lp.getTrackPublication(Track.Source.ScreenShareAudio))) this.stopShareAudio();
         if (this.snap.screen && !lp.isScreenShareEnabled) {
           this.stopStats();
           this.set({ screen: false, shareStats: undefined });
@@ -752,7 +819,8 @@ export class VoiceClient {
       const scr = p.getTrackPublication(Track.Source.ScreenShare);
       if (scr) {
         const watching = isLocal || this.watching.has(p.identity);
-        videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching });
+        const hasAudio = !!p.getTrackPublication(Track.Source.ScreenShareAudio);
+        videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching, hasAudio });
       }
     }
     this.set({

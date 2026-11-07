@@ -119,6 +119,45 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, onMen
   );
 }
 
+/** Volume do áudio da transmissão (separado da voz da pessoa), no canto do vídeo: clique abre o controle. */
+function StreamVolume({ v, voice, snap }: { v: VideoTile; voice: VoiceClient; snap: VoiceSnapshot }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const vol = snap.prefs.streamVolumes[v.userId] ?? 1;
+  // Volume antes de mutar, para o botão de mudo voltar onde estava.
+  const before = useRef(vol || 1);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  const set = (n: number) => {
+    if (n > 0) before.current = n;
+    voice.setStreamVolume(v.userId, n);
+  };
+  return (
+    <div ref={box} className="stream-volume" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <IconButton label={`Volume da transmissão: ${Math.round(vol * 100)}%`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Icon name={vol === 0 ? "speaker-off" : "speaker"} size={18} />
+      </IconButton>
+      {open && (
+        <div className="stream-volume-pop lino" role="group" aria-label={`Volume da transmissão de ${v.name}`}>
+          <IconButton label={vol === 0 ? "Ativar som da transmissão" : "Silenciar transmissão"} onClick={() => set(vol === 0 ? before.current : 0)}>
+            <Icon name={vol === 0 ? "speaker-off" : "speaker"} size={18} />
+          </IconButton>
+          <input
+            type="range" min={0} max={1} step={0.05} aria-label={`Volume da transmissão de ${v.name}`}
+            value={vol}
+            onChange={(e) => set(Number(e.target.value))}
+          />
+          <span className="stream-volume-pct">{Math.round(vol * 100)}%</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Cartão de uma transmissão de tela. Quem está transmitindo só chega a você depois de clicar em Assistir. */
 function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile; voice: VoiceClient; snap: VoiceSnapshot; focused?: boolean; onFocus: () => void; strip?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -159,6 +198,7 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
           <IconButton label="Tela cheia" onClick={(e) => { e.stopPropagation(); toggleFullscreen(ref.current, mobile); }}>
             <Icon name="screen" size={18} />
           </IconButton>
+          {!v.isLocal && v.hasAudio && <StreamVolume v={v} voice={voice} snap={snap} />}
           {!v.isLocal && (
             <select
               className="watch-quality"
@@ -178,14 +218,6 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
             </IconButton>
           )}
         </div>
-      )}
-      {v.track && !strip && !v.isLocal && (
-        <input
-          className="tile-volume visible"
-          type="range" min={0} max={1} step={0.05} aria-label={`Volume da transmissão de ${v.name}`}
-          value={snap.prefs.streamVolumes[v.userId] ?? 1}
-          onChange={(e) => voice.setStreamVolume(v.userId, Number(e.target.value))}
-        />
       )}
     </div>
   );

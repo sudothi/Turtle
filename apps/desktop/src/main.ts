@@ -5,6 +5,7 @@ import { Splash } from "./splash.js";
 import { createTray } from "./tray.js";
 import { updateOnLaunch, watchUpdates } from "./updater.js";
 import { watchGames } from "./games.js";
+import { rememberPicked, shareAudioSupported, startShareAudio, stopShareAudio } from "./screen-audio.js";
 
 /** O instalado abre o site publicado; no dev (`pnpm desktop`), o Vite local. */
 const PROD_URL = "https://app.ogturtle.xyz";
@@ -17,6 +18,8 @@ const keepInTray = app.isPackaged;
 
 /** Pedido de captura em andamento: o app web mostra o seletor e responde com o id escolhido. */
 let pending: ((id: string | null) => void) | undefined;
+/** O app web vai pedir o áudio por processo (screen-audio.ts) depois de escolher a fonte. */
+let wantShareAudio = false;
 
 const fromApp = (sender: WebContents) => win !== undefined && sender === win.webContents;
 
@@ -33,7 +36,7 @@ function installCapture() {
       const id = await new Promise<string | null>((resolve) => {
         pending = resolve;
         win?.webContents.send("screen:pick", {
-          audio: request.audioRequested && process.platform === "win32",
+          audio: (request.audioRequested && process.platform === "win32") || wantShareAudio,
           sources: sources.map((s) => ({
             id: s.id,
             name: s.name,
@@ -45,8 +48,10 @@ function installCapture() {
       });
       pending = undefined;
       const video = sources.find((s) => s.id === id);
+      rememberPicked(video?.id);
       if (!video) return callback({}); // cancelou: o navegador recebe um erro de permissão
-      // Windows: "loopback" captura o som que sai pelos alto-falantes.
+      // Windows, versões antigas do site: "loopback" captura tudo que sai nos alto-falantes (inclusive a
+      // chamada). As novas pedem o vídeo sem áudio e o áudio por processo, em "screen:audio-start".
       callback({ video, audio: request.audioRequested && process.platform === "win32" ? "loopback" : undefined });
     },
     { useSystemPicker: false },
@@ -56,6 +61,18 @@ function installCapture() {
     if (!fromApp(event.sender)) return;
     pending?.(typeof id === "string" ? id : null);
   });
+
+  // Áudio da transmissão separado do Turtle: tela inteira = PC todo menos o Turtle; janela = só aquele programa.
+  ipcMain.handle("screen:audio-supported", (event) => fromApp(event.sender) && shareAudioSupported());
+  ipcMain.handle("screen:audio-want", (event, on: unknown) => {
+    if (fromApp(event.sender)) wantShareAudio = on === true && shareAudioSupported();
+    return wantShareAudio;
+  });
+  ipcMain.handle("screen:audio-start", (event) => {
+    if (!fromApp(event.sender) || !win) return { ok: false, reason: "unsupported" };
+    return startShareAudio(win.webContents);
+  });
+  ipcMain.on("screen:audio-stop", (event) => fromApp(event.sender) && stopShareAudio());
 }
 
 function installPermissions() {
@@ -109,6 +126,9 @@ function createWindow(splash?: Splash) {
   win.webContents.on("will-navigate", (e, url) => {
     if (new URL(url).origin !== clientOrigin) e.preventDefault();
   });
+  // Recarregou ou o site caiu: a transmissão acabou, então o áudio dela também.
+  win.webContents.on("did-start-navigation", (details) => details.isMainFrame && !details.isSameDocument && stopShareAudio());
+  win.webContents.on("render-process-gone", () => stopShareAudio());
 
   // Ctrl+Shift+D: diagnóstico do WebRTC (codificador, fps, perdas). Ctrl+Shift+G: estado da GPU
   // ("Video Encode: Hardware accelerated"). Ctrl+Shift+I: DevTools.
@@ -159,6 +179,7 @@ function createWindow(splash?: Splash) {
   win.on("closed", () => {
     clearTimeout(retry);
     pending?.(null);
+    stopShareAudio();
     win = undefined;
   });
   void win.loadURL(clientUrl);

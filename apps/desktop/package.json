@@ -1,13 +1,13 @@
 {
   "name": "@turtle/desktop",
   "productName": "Turtle",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
     "dev": "echo 'use: pnpm desktop (na raiz) com o pnpm dev rodando'",
-    "build": "esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --external:electron --outfile=dist/main.cjs && esbuild src/preload.cts --bundle --platform=node --format=cjs --target=node22 --external:electron --outfile=dist/preload.cjs",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --external:electron --outfile=dist/main.cjs && esbuild src/preload.cts --bundle --platform=node --format=cjs --target=node22 --external:electron --outfile=dist/preload.cjs && node scripts/copiar-nativo.mjs",
     "typecheck": "tsc --noEmit",
     "test": "echo no tests",
     "start": "pnpm build && electron .",
@@ -24,5 +24,8 @@
     "sharp": "^0.35.5"
   },
   "description": "Turtle: texto, voz e tela só pra amigos",
-  "author": "Turtle"
+  "author": "Turtle",
+  "optionalDependencies": {
+    "loopback-capture": "4.0.0"
+  }
 }

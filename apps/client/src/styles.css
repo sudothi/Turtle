@@ -479,6 +479,12 @@
 .tile-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; opacity: 0; transition: opacity var(--dur); }
 .tile:hover .tile-actions, .tile:focus-within .tile-actions { opacity: 1; }
 .tile-volume.visible { opacity: 1; }
+.stream-volume { position: relative; }
+.stream-volume-pop { --lino-bg: var(--ink-2); position: absolute; top: calc(100% + 6px); right: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border-radius: 8px; background: var(--ink-2); z-index: 3; }
+.stream-volume-pop input { width: 140px; accent-color: var(--paper); }
+.stream-volume-pct { min-width: 4ch; text-align: right; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--paper); }
+/* Com o controle aberto, os botões do canto não somem ao tirar o mouse. */
+.tile-actions:has(.stream-volume-pop) { opacity: 1; }
 .tile-stats { position: absolute; top: 10px; left: 12px; right: 12px; padding: 3px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.7); font-size: var(--fs-xs); z-index: 1; }
 .tile:fullscreen { --lino-radius: 0; background: #000; }
 .focus-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 0; }

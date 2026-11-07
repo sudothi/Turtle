@@ -76,10 +76,14 @@ internal fun inviteCode(text: String): String = text.trim().trimEnd('/').substri
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
 internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it.id == m.id }) this else this + m
 
-/** Linha de atividade: jogo, ou "Em chamada em #sala · Servidor" (só chamadas que o servidor já me mostra). */
-fun UiState.activityOf(userId: String): String? {
+/**
+ * Linha de atividade: jogo, ou "Em chamada" (só chamadas que o servidor já me mostra).
+ * Com [place] (no perfil), diz onde: "Em chamada em #sala · Servidor"; nas listas fica só "Em chamada".
+ */
+fun UiState.activityOf(userId: String, place: Boolean = false): String? {
     activities[userId]?.let { a -> return a.text() }
     val v = voiceStates.firstOrNull { it.userId == userId } ?: return null
+    if (!place) return "Em chamada"
     val sid = v.serverId ?: return "Em chamada em uma conversa"
     val ch = channels[sid]?.firstOrNull { it.id == v.channelId }?.name ?: "voz"
     val srv = servers.firstOrNull { it.id == sid }?.name

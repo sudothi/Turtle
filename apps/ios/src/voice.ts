@@ -85,13 +85,11 @@ export class Voice {
       if (generation !== this.generation) return;
       room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, videoCaptureDefaults: { facingMode: "user", resolution: { width: 1280, height: 720, frameRate: 30 } }, publishDefaults: { dtx: true, videoCodec: "h264" } });
       this.room = room;
-      for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.TrackUnpublished, RoomEvent.TrackUnsubscribed, RoomEvent.ConnectionQualityChanged]) room.on(event, this.refresh);
-      room.on(RoomEvent.TrackSubscribed, track => {
-        this.applyVolumes();
-        this.refresh();
-      });
-      room.on(RoomEvent.TrackPublished, publication => {
+      for (const event of [RoomEvent.ActiveSpeakersChanged, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.TrackUnsubscribed, RoomEvent.ConnectionQualityChanged]) room.on(event, this.refresh);
+      for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted, RoomEvent.TrackPublished, RoomEvent.TrackUnpublished, RoomEvent.TrackSubscribed]) room.on(event, () => {
+        if (this.room !== room) return;
         this.syncSubscriptions();
+        this.refresh();
       });
       room.on(RoomEvent.Reconnecting, () => this.set({ status: "reconnecting" }));
       room.on(RoomEvent.Reconnected, () => { this.set({ status: "connected" }); this.refresh(); });
@@ -172,16 +170,24 @@ export class Voice {
   }
 
   private syncSubscriptions() {
-    for (const participant of this.room?.remoteParticipants.values() ?? []) {
+    const activeScreens = new Set([...(this.room?.remoteParticipants.values() ?? [])].flatMap(participant => {
       const screen = participant.getTrackPublication(Track.Source.ScreenShare);
+      return screen && !screen.isMuted ? [screen.trackSid] : [];
+    }));
+    for (const id of this.watching) if (!activeScreens.has(id)) this.watching.delete(id);
+    for (const participant of this.room?.remoteParticipants.values() ?? []) {
       for (const publication of participant.trackPublications.values()) {
         const subscribed = publication.source === Track.Source.Microphone || this.videoVisible && this.active() && (
-          publication.source === Track.Source.Camera || (publication.source === Track.Source.ScreenShare || publication.source === Track.Source.ScreenShareAudio) && !!screen && this.watching.has(screen.trackSid)
+          publication.source === Track.Source.Camera || (publication.source === Track.Source.ScreenShare || publication.source === Track.Source.ScreenShareAudio) && this.isWatching(participant)
         );
         publication.setSubscribed(subscribed);
       }
     }
     this.applyVolumes();
+  }
+  private isWatching(participant: Participant) {
+    const screen = participant.getTrackPublication(Track.Source.ScreenShare);
+    return this.videoVisible && this.active() && !!screen && !screen.isMuted && this.watching.has(screen.trackSid);
   }
   foreground() { this.syncSubscriptions(); }
   setVideoVisible(visible: boolean) { this.videoVisible = visible; this.syncSubscriptions(); }
@@ -194,7 +200,8 @@ export class Voice {
     for (const participant of this.room?.remoteParticipants.values() ?? []) for (const publication of participant.audioTrackPublications.values()) {
       if (publication.track instanceof RemoteAudioTrack) {
         const values = this.volumes.get(participant.identity);
-        publication.track.setVolume(this.state.deafened ? 0 : publication.source === Track.Source.ScreenShareAudio ? values?.screen ?? 1 : values?.voice ?? 1);
+        const screenAudio = publication.source === Track.Source.ScreenShareAudio;
+        publication.track.setVolume(this.state.deafened || screenAudio && !this.isWatching(participant) ? 0 : screenAudio ? values?.screen ?? 1 : values?.voice ?? 1);
       }
     }
   }

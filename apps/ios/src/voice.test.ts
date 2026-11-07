@@ -166,11 +166,8 @@ describe("camera and screen subscriptions", () => {
     await voice.leave();
   });
   it("keeps independent voice and screen volumes and applies deafening to both", async () => {
-    const { voice } = setup();
-    await voice.join("voice1", "Amigos", false);
-    const micTrack = new fake.AudioTrack(), screenTrack = new fake.AudioTrack();
-    const microphone = { source: "microphone", track: micTrack }, screen = { source: "screen_share_audio", track: screenTrack };
-    fake.Room.instances[0]!.remoteParticipants.set("friend", { identity: "friend", getTrackPublication: () => undefined, trackPublications: new Map(), audioTrackPublications: new Map([["mic", microphone], ["screen", screen]]) });
+    const { voice, mic, audio } = await receivingScreen();
+    const micTrack = mic.track!, screenTrack = audio.track!;
     voice.setVolume("friend", "voice", 0.5); voice.setVolume("friend", "screen", 0.25);
     expect(micTrack.setVolume).toHaveBeenLastCalledWith(0.5);
     expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
@@ -192,6 +189,86 @@ describe("camera and screen subscriptions", () => {
     expect(voice.getSnapshot().camera).toBe(false);
     active = true; voice.foreground();
     expect(voice.getSnapshot().camera).toBe(false);
+    await voice.leave();
+  });
+});
+
+async function receivingScreen() {
+  const { voice } = setup();
+  await voice.join("voice1", "Amigos", false);
+  const room = fake.Room.instances[0]!;
+  const pub = (source: string, track?: InstanceType<typeof fake.AudioTrack>) => ({ source, trackSid: source, isMuted: false, track, setSubscribed: vi.fn() });
+  const mic = pub("microphone", new fake.AudioTrack()), screen = pub("screen_share"), audio = pub("screen_share_audio", new fake.AudioTrack());
+  const publications = new Map([mic, screen, audio].map(p => [p.trackSid, p]));
+  const participant = { identity: "friend", name: "Amigo", getTrackPublication: (source: string) => [...publications.values()].find(p => p.source === source), trackPublications: publications, audioTrackPublications: new Map([[mic.trackSid, mic], [audio.trackSid, audio]]), isSpeaking: false, isMicrophoneEnabled: true };
+  room.remoteParticipants.set(participant.identity, participant);
+  voice.setVideoVisible(true);
+  voice.watchScreen(screen.trackSid, true);
+  return { voice, room, participant, publications, mic, screen, audio };
+}
+
+describe("screen audio cleanup", () => {
+  it("unsubscribes and silences orphaned screen audio as soon as video is unpublished", async () => {
+    const { voice, room, participant, publications, mic, screen, audio } = await receivingScreen();
+    publications.delete(screen.trackSid);
+    room.emit("trackUnpublished", screen, participant);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(mic.track!.setVolume).toHaveBeenLastCalledWith(1);
+    expect(voice.getSnapshot()).toMatchObject({ status: "connected", screens: [] });
+    await voice.leave();
+  });
+  it("keeps late audio silent even when volume and deafening change", async () => {
+    const { voice, room, participant, publications, screen, audio } = await receivingScreen();
+    publications.delete(screen.trackSid);
+    room.emit("trackUnpublished", screen, participant);
+    room.emit("trackSubscribed", audio.track, audio, participant);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    voice.setVolume(participant.identity, "screen", 0.5);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.toggleDeafened();
+    await voice.toggleDeafened();
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+  it("requires watching a new publication explicitly and restores its chosen volume", async () => {
+    const { voice, room, participant, publications, screen, audio } = await receivingScreen();
+    voice.setVolume(participant.identity, "screen", 0.25);
+    publications.delete(screen.trackSid);
+    room.emit("trackUnpublished", screen, participant);
+    const next = { ...screen, trackSid: "next-screen", setSubscribed: vi.fn() };
+    publications.set(next.trackSid, next);
+    room.emit("trackPublished", next, participant);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    expect(voice.getSnapshot().screens).toEqual([expect.objectContaining({ id: next.trackSid, watching: false })]);
+    voice.watchScreen(next.trackSid, true);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0.25);
+    await voice.leave();
+  });
+  it("silences muted screen video and requires a new watch action after unmuting", async () => {
+    const { voice, room, participant, screen, audio } = await receivingScreen();
+    screen.isMuted = true;
+    room.emit("trackMuted", screen, participant);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    screen.isMuted = false;
+    room.emit("trackUnmuted", screen, participant);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    voice.watchScreen(screen.trackSid, true);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(1);
+    await voice.leave();
+  });
+  it("silences screen audio while not watching or when the call screen is hidden", async () => {
+    const { voice, screen, audio } = await receivingScreen();
+    voice.watchScreen(screen.trackSid, false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    voice.watchScreen(screen.trackSid, true);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(1);
+    voice.setVideoVisible(false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
     await voice.leave();
   });
 });

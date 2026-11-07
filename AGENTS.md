@@ -1,4 +1,4 @@
-# Turtle (repo KYODSC) — contexto para agentes
+# Turtle (repo sudothi/turtle) — contexto para agentes
 
 Leia isto antes de mexer em qualquer coisa. É o resumo geral do projeto; os detalhes estão em `docs/` e nas issues/PRs do GitHub (o estado vivo fica lá, não aqui).
 

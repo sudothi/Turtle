@@ -4,8 +4,12 @@
  * - mutar / desmutar: bolha que desce / que sobe
  * - ensurdecer: duas bolhas descendo; voltar o som: duas subindo
  * - transmissão: uma onda chegando (e indo embora, ao parar)
+ * - entrar na chamada: mergulho (onda subindo e bolhas); sair: a onda indo embora com uma bolha afundando
+ * - alguém entra na chamada: duas bolhinhas agudas subindo; alguém sai: as mesmas descendo
  */
-export type SoundName = "message" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff" | "ring";
+export type SoundName =
+  | "message" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff" | "ring"
+  | "callJoin" | "callLeave" | "userJoin" | "userLeave";
 
 const KEY = "turtle.sounds";
 export interface SoundPrefs {
@@ -14,8 +18,10 @@ export interface SoundPrefs {
   volume: number;
   /** Avisar de toda mensagem nos servidores (por padrão, só menções e conversas diretas). */
   allServerMessages: boolean;
+  /** Sons de entrar e sair da chamada (você e os outros). */
+  callPresence: boolean;
 }
-const defaults: SoundPrefs = { enabled: true, volume: 0.6, allServerMessages: false };
+const defaults: SoundPrefs = { enabled: true, volume: 0.6, allServerMessages: false, callPresence: true };
 
 export function loadSoundPrefs(): SoundPrefs {
   try {
@@ -132,6 +138,24 @@ export function playSound(name: SoundName) {
       bubble(c, out, t, 500, 900, 0.14, 0.6);
       bubble(c, out, t + 0.18, 600, 1100, 0.14, 0.6);
       bubble(c, out, t + 0.36, 700, 1300, 0.18, 0.6);
+      break;
+    case "callJoin": // você entrou: mergulho curto e duas bolhas subindo
+      wave(c, out, t, 260, 1500, 0.4, 0.35);
+      bubble(c, out, t + 0.22, 440, 880, 0.12, 0.5);
+      bubble(c, out, t + 0.34, 660, 1320, 0.14, 0.45);
+      break;
+    case "callLeave": // você saiu: a onda vai embora e uma bolha afunda
+      wave(c, out, t, 1500, 260, 0.4, 0.3);
+      bubble(c, out, t + 0.05, 880, 440, 0.13, 0.45);
+      bubble(c, out, t + 0.18, 660, 300, 0.16, 0.45);
+      break;
+    case "userJoin": // alguém entrou: "plip-plip" agudo subindo
+      bubble(c, out, t, 900, 1500, 0.07, 0.4);
+      bubble(c, out, t + 0.08, 1200, 2000, 0.08, 0.35);
+      break;
+    case "userLeave": // alguém saiu: o mesmo descendo
+      bubble(c, out, t, 2000, 1200, 0.08, 0.35);
+      bubble(c, out, t + 0.08, 1500, 900, 0.09, 0.4);
       break;
   }
   // Solta os nós quando o som acaba.

@@ -55,7 +55,7 @@ export default function ConversationScreen() {
     {!presence.connected && <Text accessibilityLiveRegion="polite" style={s.connection}>Sem conexão. Você pode continuar escrevendo.</Text>}
     <Notice>{state.storageError || state.error}</Notice>
     {state.error && <ToolbarButton label="Atualizar conversa" onPress={() => { void conversation.refresh(); }} />}
-    <FlatList key={params.channelId} ref={list} data={rows} inverted style={{ flex: 1 }} keyExtractor={item => item.id}
+    <FlatList key={`history:${params.channelId}`} ref={list} data={rows} inverted style={{ flex: 1 }} keyExtractor={item => item.id}
       contentContainerStyle={s.messages} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
       maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }}
       onScroll={({ nativeEvent }) => { const latest = nativeEvent.contentOffset.y < 80; setAtLatest(latest); conversation.setAtLatest(latest); }} scrollEventThrottle={100}
@@ -97,7 +97,7 @@ export default function ConversationScreen() {
     {!!state.newCount && <Pressable accessibilityRole="button" onPress={jumpLatest} style={s.newMessages}><Text style={text.label}>{state.newCount === 1 ? "Nova mensagem" : `${state.newCount} novas mensagens`} ↓</Text></Pressable>}
     {!!people.error && <View style={{ paddingHorizontal: 16 }}><Text style={text.caption}>Não foi possível carregar as pessoas para menções.</Text><ToolbarButton label="Atualizar pessoas" onPress={people.refresh} /></View>}
     <CallDock onOpen={() => navigation.navigate("Call")} />
-    <Composer key={params.channelId} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />
+    <Composer key={`composer:${params.channelId}`} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />
   </KeyboardAvoidingView></Page>;
 }
 const s = StyleSheet.create({

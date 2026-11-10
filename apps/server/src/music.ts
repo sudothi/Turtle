@@ -43,6 +43,19 @@ export function spotifyTrackId(raw: string): string | null {
 /** Link que pode ser uma faixa do Spotify (direto ou encurtado). */
 export const isSpotifyLink = (raw: string) => !!spotifyTrackId(raw) || SPOTIFY_SHORT.test(raw.trim());
 
+const DEEZER_TRACK = /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?track\/(\d{1,15})(?:[/?#]|$)/i;
+/** Id da faixa num link `deezer.com/track/123` (é o link que a busca de música do app envia). */
+export function deezerTrackId(raw: string): string | null {
+  return DEEZER_TRACK.exec(raw.trim())?.[1] ?? null;
+}
+
+/** Ids aceitos nas rotas: faixa do Spotify (22 caracteres) ou do Deezer (`dz` + número). */
+export const MUSIC_ID = /^(?:[A-Za-z0-9]{22}|dz\d{1,15})$/;
+
+/** Sem o id do Spotify, "Abrir no Spotify" abre a busca pelo artista e título. */
+export const spotifySearchUrl = (title: string, artist: string | null) =>
+  `https://open.spotify.com/search/${encodeURIComponent([artist, title].filter(Boolean).join(" "))}`;
+
 async function readCapped(res: Response, max: number): Promise<Buffer | null> {
   const len = Number(res.headers.get("content-length") ?? 0);
   if (len > max || !res.body) return null;
@@ -118,7 +131,7 @@ export function normalizeName(s: string): string {
     .trim();
 }
 
-interface DeezerHit { id: number; title: string; duration?: number; preview?: string; artist?: { name?: string } }
+interface DeezerHit { id: number; title: string; duration?: number; preview?: string; artist?: { name?: string }; album?: { title?: string; cover_xl?: string; cover_big?: string } }
 
 /** Escolhe no resultado do Deezer a mesma faixa: título igual, mesmo artista ou duração parecida (±4 s). */
 export function pickDeezer(hits: DeezerHit[], want: SpotifyMeta): DeezerHit | null {
@@ -196,13 +209,38 @@ export function musicService(fetcher: Fetcher = defaultFetch) {
     };
   }
 
+  /** Entrada a partir de uma faixa do Deezer (busca do app ou link do Deezer). */
+  function fromDeezer(hit: DeezerHit): Entry {
+    const title = String(hit.title ?? "").slice(0, 200) || "Sem título";
+    const artist = hit.artist?.name?.slice(0, 200) ?? null;
+    const image = hit.album?.cover_xl ?? hit.album?.cover_big ?? null;
+    return {
+      at: Date.now(),
+      image,
+      deezerId: hit.preview ? hit.id : null,
+      track: {
+        id: `dz${hit.id}`, url: spotifySearchUrl(title, artist),
+        title, artist, album: hit.album?.title?.slice(0, 200) ?? null,
+        durationMs: hit.duration ? hit.duration * 1000 : null,
+        hasCover: !!image, previewSource: hit.preview ? "deezer" : null,
+      },
+    };
+  }
+
+  async function loadDeezer(id: string): Promise<Entry> {
+    const res = await get(fetcher, `https://api.deezer.com/track/${id.slice(2)}`, PAGE_MAX, "application/json");
+    let hit: DeezerHit | null = null;
+    try { hit = res ? (JSON.parse(res.body.toString("utf8")) as DeezerHit) : null; } catch { /* resposta inválida */ }
+    return hit && typeof hit.id === "number" && hit.title ? fromDeezer(hit) : { at: Date.now(), track: null, image: null, deezerId: null };
+  }
+
   async function entry(id: string): Promise<Entry> {
     const hit = tracks.get(id);
     // Faixa achada vale um dia; falha é tentada de novo depois de 10 min.
     if (hit && Date.now() - hit.at < (hit.track ? DAY : 600_000)) return hit;
     let job = pending.get(id);
     if (!job) {
-      job = load(id).finally(() => pending.delete(id));
+      job = (id.startsWith("dz") ? loadDeezer(id) : load(id)).finally(() => pending.delete(id));
       pending.set(id, job);
     }
     const e = await job;
@@ -213,8 +251,23 @@ export function musicService(fetcher: Fetcher = defaultFetch) {
   return {
     /** Dados da faixa de um link do Spotify; null se o link não for de faixa ou a página não responder. */
     async resolve(raw: string): Promise<MusicTrack | null> {
-      const id = spotifyTrackId(raw) ?? (SPOTIFY_SHORT.test(raw.trim()) ? await expandShortLink(fetcher, raw) : null);
+      const dz = deezerTrackId(raw);
+      const id = dz ? `dz${dz}` : spotifyTrackId(raw) ?? (SPOTIFY_SHORT.test(raw.trim()) ? await expandShortLink(fetcher, raw) : null);
       return id ? (await entry(id)).track : null;
+    },
+    /** Busca músicas para enviar no chat (Deezer). Cada resultado já fica pronto para capa e prévia. */
+    async search(q: string): Promise<MusicTrack[]> {
+      const res = await get(fetcher, `https://api.deezer.com/search?limit=12&q=${encodeURIComponent(q)}`, PAGE_MAX, "application/json");
+      let hits: DeezerHit[] = [];
+      try { hits = res ? (JSON.parse(res.body.toString("utf8")) as { data?: DeezerHit[] }).data ?? [] : []; } catch { return []; }
+      const out: MusicTrack[] = [];
+      for (const hit of hits) {
+        if (typeof hit?.id !== "number" || !hit.title) continue;
+        const e = fromDeezer(hit);
+        tracks.set(e.track!.id, e);
+        out.push(e.track!);
+      }
+      return out;
     },
     /** Capa em WebP 320x320 (só de faixa já resolvida). */
     async cover(id: string): Promise<Buffer | null> {

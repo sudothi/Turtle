@@ -210,7 +210,14 @@ const icons = {
   smile: <path fillRule="evenodd" fill="currentColor" d="M12 2.5a9.5 9.5 0 1 0 0 19a9.5 9.5 0 1 0 0-19zM8.8 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15.2 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM7.2 13.2h9.6a4.8 4.8 0 0 1-9.6 0z" />,
   "arrow-left": <path d="M10.5 5 3.5 12l7 7M4.5 12h16" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />,
   play: <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" strokeLinejoin="round" />,
-  music: <path d="M9 17.5V5.5l11-2.5v12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />,
+  music: (
+    <>
+      <path d="M9 17.5V6.2l11-2.7v11.4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="6.3" cy="17.6" r="3" fill="currentColor" />
+      <circle cx="17.3" cy="15" r="3" fill="currentColor" />
+    </>
+  ),
+  external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />,
   pause: <path d="M6 4.5h4.2v15H6zM13.8 4.5H18v15h-4.2z" fill="currentColor" />,
 } as const;
 

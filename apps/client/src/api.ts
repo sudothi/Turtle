@@ -109,6 +109,7 @@ export const api = {
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
+  musicSearch: (q: string) => req<MusicTrack[]>("GET", `/music/search?q=${encodeURIComponent(q)}`),
   musicTrack: (url: string) => req<MusicTrack>("GET", `/music/spotify?url=${encodeURIComponent(url)}`),
   linkPreview: (url: string) => req<{ url: string; host: string; title: string | null; description: string | null }>("GET", `/link-preview?url=${encodeURIComponent(url)}`),
   pin: (id: string, on: boolean) => req<Message>(on ? "PUT" : "DELETE", `/messages/${id}/pin`),

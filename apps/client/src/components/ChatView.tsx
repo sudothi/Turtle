@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import {
   ATTACHMENT_MAX_BYTES, MAX_ATTACHMENTS, MENTION_RE, encodeMentions, isInlineImage, mentionedIds, shownName, splitMentions, parseRichText, type RichNode,
-  type Attachment, type Channel, type Member, type Message,
+  type Attachment, type Channel, type Member, type Message, type MusicTrack,
 } from "@turtle/protocol";
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
-import { isSpotifyTrackLink } from "../music";
+import { deezerLink, isSoloMusicLink, isMusicLink } from "../music";
 import { MusicCard } from "./MusicCard";
+import { MusicPicker } from "./MusicPicker";
 import { copyText } from "../clipboard";
 import { useMobile, useMobileBack } from "../mobile";
 
@@ -104,7 +105,16 @@ function firstLink(content: string): string | undefined {
 function LinkCard({ content }: { content: string }) {
   const url = firstLink(content);
   if (!url) return null;
-  return isSpotifyTrackLink(url) ? <MusicCard url={url} fallback={<LinkPreviewCard url={url} />} /> : <LinkPreviewCard url={url} />;
+  if (!isMusicLink(url)) return <LinkPreviewCard url={url} />;
+  // Mensagem que é só o link mostra só o cartão; se o cartão falhar, o link volta.
+  const solo = isSoloMusicLink(content);
+  const fallback = (
+    <>
+      {solo && <div className="msg-text"><a href={url} target="_blank" rel="noopener noreferrer">{url}</a></div>}
+      <LinkPreviewCard url={url} />
+    </>
+  );
+  return <MusicCard url={url} fallback={fallback} />;
 }
 function LinkPreviewCard({ url }: { url: string }) {
   const [p, setP] = useState<Preview>(null);
@@ -634,6 +644,14 @@ export function ChatView({
     setQuery(undefined);
     caretAfter.current = start + shownName(m).length + 2;
   };
+  const [musicOpen, setMusicOpen] = useState(false);
+  const sendMusic = (track: MusicTrack) => {
+    onSend(deezerLink(track.id), [], replying?.id);
+    setReplying(undefined);
+    setMusicOpen(false);
+    atBottom.current = true;
+    input.current?.focus();
+  };
   const send = (e?: FormEvent) => {
     e?.preventDefault();
     if (uploading) return;
@@ -774,7 +792,7 @@ export function ChatView({
             <Icon name="pin" size={13} /> Fixada
           </div>
         )}
-        <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
+        <MessageText content={isSoloMusicLink(m.content) ? "" : m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
         {m.content && <LinkCard content={m.content} />}
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
         {m.reactions.length > 0 && (
@@ -916,6 +934,7 @@ export function ChatView({
             ))}
           </div>
         )}
+        {musicOpen && <MusicPicker onPick={sendMusic} onClose={() => { setMusicOpen(false); input.current?.focus(); }} />}
         {jumpNote && <p className="composer-note" role="status">{jumpNote}</p>}
         {replying && (
           <div className="reply-bar">
@@ -964,6 +983,9 @@ export function ChatView({
               aria-label={dm ? `Mensagem para ${channel.name}` : `Mensagem para #${channel.name}`}
               maxLength={4000}
             />
+            <button type="button" className={`composer-attach composer-music${musicOpen ? " on" : ""}`} title="Enviar música" aria-label="Enviar música" aria-expanded={musicOpen} onClick={() => setMusicOpen((o) => !o)}>
+              <Icon name="music" size={20} />
+            </button>
             <button type="submit" className="composer-send" title={uploading ? "Esperando os arquivos subirem" : "Enviar"} aria-label="Enviar" disabled={uploading}>
               <Icon name="send" size={20} />
             </button>

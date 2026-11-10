@@ -74,7 +74,7 @@ import { fileStore, isFileKey, processAttachment, processImage, type ImageKind }
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
 import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
-import { musicService, type Fetcher } from "./music.js";
+import { MUSIC_ID, musicService, type Fetcher } from "./music.js";
 import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
 
 export interface AppOptions {
@@ -1778,7 +1778,7 @@ export async function buildApp({
     // ---- Cartão de música (link do Spotify) ----
     // Título, artista e capa da página pública do Spotify; prévia de 30 s do Deezer. Capa e áudio passam pelo servidor.
     const music = musicService(musicFetch);
-    const musicLimit = attemptLimiter({ max: 30, windowMs: 60_000 });
+    const musicLimit = attemptLimiter({ max: 60, windowMs: 60_000 });
     authed.get<{ Querystring: { url?: string } }>("/music/spotify", async (req, reply) => {
       const url = String(req.query.url ?? "").slice(0, 500);
       if (!url) return reply.code(400).send({ error: "link inválido" });
@@ -1788,13 +1788,21 @@ export async function buildApp({
       const track = await music.resolve(url);
       return track ?? reply.code(404).send({ error: "música não encontrada" });
     });
+    authed.get<{ Querystring: { q?: string } }>("/music/search", async (req, reply) => {
+      const q = String(req.query.q ?? "").trim().slice(0, 100);
+      if (q.length < 2) return [];
+      const key = me(req).id;
+      if (musicLimit.blockedFor(key)) return reply.code(429).send({ error: "devagar" });
+      musicLimit.hit(key);
+      return music.search(q);
+    });
     authed.get<{ Params: { id: string } }>("/music/:id/cover", async (req, reply) => {
-      const img = /^[A-Za-z0-9]{22}$/.test(req.params.id) ? await music.cover(req.params.id) : null;
+      const img = MUSIC_ID.test(req.params.id) ? await music.cover(req.params.id) : null;
       if (!img) return reply.code(404).send({ error: "sem capa" });
       return reply.header("cache-control", "private, max-age=86400").type("image/webp").send(img);
     });
     authed.get<{ Params: { id: string } }>("/music/:id/preview", async (req, reply) => {
-      const audio = /^[A-Za-z0-9]{22}$/.test(req.params.id) ? await music.preview(req.params.id) : null;
+      const audio = MUSIC_ID.test(req.params.id) ? await music.preview(req.params.id) : null;
       if (!audio) return reply.code(404).send({ error: "sem prévia" });
       return reply.header("cache-control", "private, max-age=3600").type("audio/mpeg").send(audio);
     });

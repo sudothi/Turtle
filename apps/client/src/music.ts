@@ -69,9 +69,20 @@ export async function toggleMusic(owner: string, id: string) {
   }
 }
 
-/** Para a faixa (quando o cartão some da tela, por exemplo ao trocar de canal). */
+/** Capa da faixa (blob:), baixada uma vez. */
+const covers = new Map<string, Promise<string | null>>();
+export function musicCover(id: string) {
+  let job = covers.get(id);
+  if (!job) { job = authedBlobUrl(`/music/${id}/cover`).catch(() => null); covers.set(id, job); }
+  return job;
+}
+
+/** Link que a busca envia no chat. */
+export const deezerLink = (id: string) => `https://www.deezer.com/track/${id.replace(/^dz/, "")}`;
+
+/** Para a faixa (quando o cartão some da tela, por exemplo ao trocar de canal). `prefixo*` para qualquer dono com o prefixo. */
 export function stopMusic(owner: string) {
-  if (state.owner !== owner) return;
+  if (state.owner !== owner && !(owner.endsWith("*") && state.owner?.startsWith(owner.slice(0, -1)))) return;
   audio?.pause();
   set({ owner: null, playing: false, loading: false, position: 0 });
 }
@@ -82,9 +93,11 @@ const subscribe = (fn: () => void) => {
 };
 export const useMusicPlayback = () => useSyncExternalStore(subscribe, () => state);
 
-const SPOTIFY = /^https?:\/\/(?:open\.spotify\.com\/(?:intl-[a-z]{2}(?:-[a-z]{2})?\/)?(?:embed\/)?track\/[A-Za-z0-9]{22}(?:[/?#]|$)|spotify\.link\/[A-Za-z0-9]{4,40}$)/i;
-/** Link de faixa do Spotify (vira cartão de música em vez da prévia comum). */
-export const isSpotifyTrackLink = (url: string) => SPOTIFY.test(url);
+const SPOTIFY = /^https?:\/\/(?:(?:www\.)?deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?track\/\d{1,15}(?:[/?#]|$)|open\.spotify\.com\/(?:intl-[a-z]{2}(?:-[a-z]{2})?\/)?(?:embed\/)?track\/[A-Za-z0-9]{22}(?:[/?#]|$)|spotify\.link\/[A-Za-z0-9]{4,40}$)/i;
+/** Link de faixa do Spotify ou do Deezer (a busca de música envia o do Deezer): vira cartão de música. */
+export const isMusicLink = (url: string) => SPOTIFY.test(url);
+/** Mensagem que é só um link de música (aparece só o cartão, sem o texto do link). */
+export const isSoloMusicLink = (content: string) => !/\s/.test(content.trim()) && SPOTIFY.test(content.trim());
 
 /** "1:05" */
 export const clock = (secs: number) => {

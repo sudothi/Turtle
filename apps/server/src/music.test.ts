@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { allowedHost, isSpotifyLink, musicService, normalizeName, parseSpotifyPage, pickDeezer, spotifyTrackId, type Fetcher } from "./music.js";
+import { MUSIC_ID, allowedHost, deezerTrackId, isSpotifyLink, musicService, normalizeName, parseSpotifyPage, pickDeezer, spotifyTrackId, type Fetcher } from "./music.js";
 
 const ID = "4cOdK2wGLETKBW3PvgPWqT";
 const PAGE = `<html><head>
@@ -18,8 +18,10 @@ async function fake(overrides: Record<string, () => Response> = {}) {
   const calls: string[] = [];
   const routes: Record<string, () => Response> = {
     [`https://open.spotify.com/track/${ID}`]: () => new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }),
+    "https://e-cdns-images.dzcdn.net/images/cover/x/1000x1000.jpg": () => new Response(jpg, { headers: { "content-type": "image/jpeg" } }),
+    "https://api.deezer.com/track/999": () => Response.json({ error: { type: "DataException", code: 800 } }),
     "https://i.scdn.co/image/capa": () => new Response(jpg, { headers: { "content-type": "image/jpeg" } }),
-    "https://api.deezer.com/track/781592622": () => Response.json({ preview: "https://cdnt-preview.dzcdn.net/api/1/1/a/b/c/0/abc.mp3?hdnea=exp=1" }),
+    "https://api.deezer.com/track/781592622": () => Response.json({ id: 781592622, title: "Never Gonna Give You Up", duration: 213, artist: { name: "Rick Astley" }, album: { title: "Whenever You Need Somebody", cover_xl: "https://e-cdns-images.dzcdn.net/images/cover/x/1000x1000.jpg" }, preview: "https://cdnt-preview.dzcdn.net/api/1/1/a/b/c/0/abc.mp3?hdnea=exp=1" }),
     "https://cdnt-preview.dzcdn.net/api/1/1/a/b/c/0/abc.mp3?hdnea=exp=1": () => new Response(MP3, { headers: { "content-type": "audio/mpeg" } }),
     "https://spotify.link/abcDEF123": () => new Response(null, { status: 302, headers: { location: `https://open.spotify.com/track/${ID}?si=x` } }),
     ...overrides,
@@ -29,7 +31,7 @@ async function fake(overrides: Record<string, () => Response> = {}) {
     if (url.startsWith("https://api.deezer.com/search")) {
       return Response.json({ data: [
         { id: 1, title: "Never Gonna Give You Up (Cover)", duration: 200, preview: "x", artist: { name: "Outra Banda" } },
-        { id: 781592622, title: "Never Gonna Give You Up", duration: 213, preview: "https://cdnt-preview.dzcdn.net/x.mp3", artist: { name: "Rick Astley" } },
+        { id: 781592622, title: "Never Gonna Give You Up", duration: 213, preview: "https://cdnt-preview.dzcdn.net/x.mp3", artist: { name: "Rick Astley" }, album: { title: "Whenever You Need Somebody", cover_xl: "https://e-cdns-images.dzcdn.net/images/cover/x/1000x1000.jpg" } },
       ] });
     }
     const r = routes[url];
@@ -112,5 +114,30 @@ describe("cartão de música", () => {
       return r;
     };
     expect(await musicService(evil).resolve(`https://open.spotify.com/track/${ID}`)).toBeNull();
+  });
+
+  it("links do Deezer e ids das rotas", () => {
+    expect(deezerTrackId("https://www.deezer.com/br/track/781592622")).toBe("781592622");
+    expect(deezerTrackId("https://deezer.com/track/12?utm=x")).toBe("12");
+    expect(deezerTrackId("https://evil.com/track/12")).toBeNull();
+    for (const id of [ID, "dz781592622"]) expect(MUSIC_ID.test(id), id).toBe(true);
+    for (const id of ["dz", "dzabc", "../x", "a".repeat(23)]) expect(MUSIC_ID.test(id), id).toBe(false);
+  });
+
+  it("busca devolve faixas prontas para tocar, e o link do Deezer vira o mesmo cartão", async () => {
+    const { fetcher } = await fake();
+    const m = musicService(fetcher);
+    const found = await m.search("rick astley");
+    const t = found.find((x) => x.id === "dz781592622");
+    expect(t).toEqual({
+      id: "dz781592622", url: "https://open.spotify.com/search/Rick%20Astley%20Never%20Gonna%20Give%20You%20Up",
+      title: "Never Gonna Give You Up", artist: "Rick Astley", album: "Whenever You Need Somebody", durationMs: 213_000, hasCover: true, previewSource: "deezer",
+    });
+    expect((await m.cover("dz781592622")) && true).toBe(true);
+    expect((await m.preview("dz781592622"))?.equals(MP3)).toBe(true);
+
+    const fresh = musicService(fetcher);
+    expect(await fresh.resolve("https://www.deezer.com/br/track/781592622")).toEqual(t);
+    expect(await fresh.resolve("https://www.deezer.com/track/999")).toBeNull();
   });
 });

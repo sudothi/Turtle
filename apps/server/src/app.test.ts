@@ -1236,9 +1236,11 @@ describe("limite de tentativas de login", () => {
 describe("quem está de fato na chamada", () => {
   const removed: string[] = [];
   let present = new Set<string>();
+  let lookupError: Error | undefined;
   const fakeRooms = {
     removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
     getParticipant: async (room: string, identity: string) => {
+      if (lookupError) throw lookupError;
       if (!present.has(`${room}:${identity}`)) throw Object.assign(new Error("not found"), { code: "not_found" });
       return {} as any;
     },
@@ -1389,6 +1391,10 @@ describe("quem está de fato na chamada", () => {
     present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
     expect(await hook("participant_left", donoId)).toBe(200);
     await wait(50);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    lookupError = new Error("temporary outage");
+    try { expect(await hook("participant_left", donoId)).toBe(200); }
+    finally { lookupError = undefined; }
     expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
     present = new Set();
     expect(await hook("participant_left", donoId)).toBe(200);

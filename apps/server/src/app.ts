@@ -2018,7 +2018,12 @@ export async function buildApp({
         }
         if (evt.event === "participant_left" && reported(channelId, identity)) {
           // Pode ter só trocado de aparelho: confirma com o LiveKit antes de tirar da lista.
-          const still = await room.getParticipant(name, identity).then(() => true, () => false);
+          let still = true;
+          try { await room.getParticipant(name, identity); }
+          catch (error) {
+            if (error && typeof error === "object" && "code" in error && error.code === "not_found") still = false;
+            else app.log.warn({ channelId, userId: identity }, "livekit: não foi possível confirmar saída da chamada");
+          }
           if (!still) {
             let changed = false;
             for (const [s, v] of voice) if (v.channelId === channelId && v.userId === identity) { voice.delete(s); changed = true; }

@@ -194,6 +194,17 @@ export function ServerSettingsModal({
           </form>
         )}
 
+        {canModerate && (
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={server.soundboardAdminsOnly}
+              onChange={(e) => void run(() => api.setSoundboardAdminsOnly(server.id, e.target.checked))}
+            />
+            Só dono e admins adicionam sons ao soundboard
+          </label>
+        )}
+
         <h3 className="t-eyebrow">Membros — {members.length}</h3>
         <ul className="settings-members">
           {[...members].sort((a, b) => a.username.localeCompare(b.username, "pt-BR")).map((m) => {

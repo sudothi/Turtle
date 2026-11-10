@@ -4,6 +4,8 @@ import { Button, Icon, Modal, TextField, type IconName } from "@turtle/ui";
 import { api } from "../api";
 import { MAX_VOLUME } from "../voice/prefs";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
+import { useSoundboard } from "./Soundboard";
+import { soundboard } from "../soundboard";
 
 /** Onde o menu abre: a pessoa e o ponto do clique. */
 export interface PersonMenuTarget {
@@ -59,6 +61,8 @@ export function PersonMenu({
   const inMyCall = !self && snap.status !== "idle" && snap.participants.some((p) => p.id === userId && !p.isLocal);
   const volume = snap.prefs.volumes[userId] ?? 1;
   const mutedForMe = !!snap.prefs.localMutes[userId];
+  const sb = useSoundboard();
+  const soundsMuted = !!sb.prefs.mutedUsers[userId];
   const destinations = voiceChannels.filter((c) => c.id !== call?.channelId);
 
   // Mantém o menu dentro da janela (abre para cima/esquerda perto da borda).
@@ -159,6 +163,10 @@ export function PersonMenu({
               <button role="menuitemcheckbox" aria-checked={mutedForMe} className="menu-item" onClick={() => voice.setLocalMute(userId, !mutedForMe)}>
                 <span>Silenciar para mim</span>
                 <span className={`person-menu-check ${mutedForMe ? "on" : ""}`} aria-hidden>{mutedForMe && <Icon name="check" size={14} />}</span>
+              </button>
+              <button role="menuitemcheckbox" aria-checked={soundsMuted} className="menu-item" onClick={() => soundboard.setUserMuted(userId, !soundsMuted)}>
+                <span>Silenciar soundboard</span>
+                <span className={`person-menu-check ${soundsMuted ? "on" : ""}`} aria-hidden>{soundsMuted && <Icon name="check" size={14} />}</span>
               </button>
             </>
           )}

@@ -219,7 +219,11 @@ export const MAX_OWNED_SERVERS = 2;
 export const serverRole = z.enum(["owner", "admin", "member"]);
 export type ServerRole = z.infer<typeof serverRole>;
 /** Um servidor visto por quem é membro dele. */
-export const serverSchema = z.object({ id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole, icon: z.string().nullable().default(null) });
+export const serverSchema = z.object({
+  id: z.string(), name: z.string(), ownerId: z.string(), role: serverRole, icon: z.string().nullable().default(null),
+  /** Só dono e admins adicionam sons ao soundboard (por padrão, qualquer membro). */
+  soundboardAdminsOnly: z.boolean().default(false),
+});
 export const SERVER_ICON_MAX_BYTES = 2 * 1024 * 1024;
 export type Server = z.infer<typeof serverSchema>;
 export const memberSchema = z.object({
@@ -336,6 +340,51 @@ export type VoiceState = z.infer<typeof voiceStateSchema>;
 export const voiceTokenSchema = z.object({ url: z.string(), token: z.string() });
 export type VoiceToken = z.infer<typeof voiceTokenSchema>;
 
+// ---- Soundboard ----
+/** Limites dos sons do soundboard (por servidor). O arquivo é sempre WAV PCM 16 bits (o cliente converte). */
+export const SOUND_MAX_BYTES = 512 * 1024;
+export const SOUND_MAX_MS = 5000;
+export const MAX_SOUNDS_PER_SERVER = 24;
+export const SOUND_NAME_MAX = 32;
+/** Intervalo mínimo entre dois sons da mesma pessoa, e quantos ela toca por minuto. */
+export const SOUND_COOLDOWN_MS = 3000;
+export const SOUNDS_PER_MINUTE = 10;
+/** Quantos sons podem tocar ao mesmo tempo numa chamada. */
+export const MAX_CONCURRENT_SOUNDS = 2;
+/** Ícones (SVG linocut do @turtle/ui) que um som pode ter. */
+export const soundIcons = [
+  "turtle", "fish", "cat", "star", "wave", "shell", "bubble", "horn",
+  "bell", "drum", "skull", "heart", "laugh", "ghost", "bomb", "crown",
+  "moon", "sun", "anchor", "duck",
+] as const;
+export const soundIcon = z.enum(soundIcons);
+export type SoundIcon = z.infer<typeof soundIcon>;
+export const soundSchema = z.object({
+  id: z.string(),
+  serverId: z.string(),
+  /** Quem enviou (null se a conta não existe mais). */
+  userId: z.string().nullable(),
+  name: z.string(),
+  icon: soundIcon,
+  /** Volume do som (0 a 1), escolhido por quem enviou; multiplica o volume do soundboard de quem ouve. */
+  volume: z.number(),
+  durationMs: z.number(),
+  /** Arquivo em GET /files/:key. */
+  key: z.string(),
+});
+export type Sound = z.infer<typeof soundSchema>;
+export const soundNameSchema = z.string().trim().min(1).max(SOUND_NAME_MAX);
+export const soundVolumeSchema = z.number().min(0).max(1);
+/** Dados do som novo (vão na query de POST /servers/:id/sounds, junto com o arquivo). */
+export const createSoundQuery = z.object({ name: soundNameSchema, icon: soundIcon.default("star"), volume: z.coerce.number().min(0).max(1).default(1) });
+export const updateSoundBody = z.object({ name: soundNameSchema.optional(), icon: soundIcon.optional(), volume: soundVolumeSchema.optional() });
+export const soundboardSettingsBody = z.object({ adminsOnly: z.boolean() });
+/** Pode editar/apagar este som: quem enviou, ou dono/admin do servidor. */
+export const canEditSound = (sound: Pick<Sound, "userId">, userId: string, role: ServerRole | undefined) =>
+  sound.userId === userId || role === "owner" || role === "admin";
+/** Pode adicionar sons neste servidor. */
+export const canAddSound = (server: Pick<Server, "role" | "soundboardAdminsOnly">) => !server.soundboardAdminsOnly || server.role !== "member";
+
 /** Jogos que o app desktop reconhece (lista fixa: o servidor não aceita outro nome). */
 export const games = {
   lol: "League of Legends",
@@ -386,6 +435,8 @@ export const clientEvent = z.discriminatedUnion("t", [
      */
     nonce: z.string().max(64).optional(),
   }),
+  /** Tocar um som do soundboard na chamada em que estou (todos na chamada ouvem). */
+  z.object({ t: z.literal("soundboardPlay"), soundId: z.string().max(64) }),
   /** channelId null = saiu da voz. */
   z.object({
     t: z.literal("voice"), channelId: z.string().nullable(), muted: z.boolean(), deafened: z.boolean(),
@@ -429,6 +480,10 @@ export const serverEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("voiceStates"), states: z.array(voiceStateSchema) }),
   /** Um admin te moveu para outro canal de voz (`channelId`) ou te desconectou da chamada (null). */
   z.object({ t: z.literal("voiceMoved"), channelId: z.string().nullable(), by: z.string() }),
+  /** Os sons do soundboard deste servidor mudaram: buscar GET /servers/:id/sounds de novo. */
+  z.object({ t: z.literal("sounds"), serverId: z.string() }),
+  /** Alguém tocou um som na sua chamada: cada cliente toca localmente, com o volume de quem ouve. */
+  z.object({ t: z.literal("soundboardPlay"), channelId: z.string(), userId: z.string(), sound: soundSchema }),
   /** Alguém está digitando no canal (some sozinho depois de uns 6 s sem novo aviso). */
   z.object({ t: z.literal("typing"), channelId: z.string(), userId: z.string() }),
   /** Alguém está te ligando numa DM ou grupo. `silent`: você está em Não perturbe (só notificar, sem tocar). */

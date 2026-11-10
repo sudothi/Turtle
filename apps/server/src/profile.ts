@@ -47,7 +47,7 @@ export async function processAttachment(input: Buffer): Promise<{ data: Buffer; 
   return { data: input, ext: "bin", mime: "application/octet-stream", width: null, height: null };
 }
 
-const KEY = /^[A-Za-z0-9_-]{8,64}\.(webp|png|jpg|gif|bin)$/;
+const KEY = /^[A-Za-z0-9_-]{8,64}\.(webp|png|jpg|gif|bin|wav)$/;
 export const isFileKey = (k: string) => KEY.test(k);
 
 export function fileStore(dir: string) {

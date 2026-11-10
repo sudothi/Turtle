@@ -80,6 +80,7 @@ async function uploadIcon(serverId: string, file: Blob): Promise<{ icon: string 
 }
 
 export const api = {
+  joinWaitlist: (email: string) => req<{ ok: true }>("POST", "/waitlist", { email }),
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),

@@ -42,6 +42,8 @@ import {
   clientEvent,
   createChannelBody,
   createInviteBody,
+  createAccountInviteBody,
+  type AccountInvitePreview,
   createServerBody,
   deleteServerBody,
   loginBody,
@@ -607,10 +609,16 @@ export async function buildApp({
     }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     // Marca o convite numa única operação: se dois cadastros usarem o mesmo código ao mesmo tempo, só um vence.
-    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code });
+    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code, serverId: invites.serverId });
     if (!claimed.length) {
       await db.delete(users).where(eq(users.id, id));
       return reply.code(403).send({ error: "convite inválido" });
+    }
+    // Convite de conta com servidor: a pessoa já começa dentro dele (se o servidor ainda existir).
+    const serverId = claimed[0]!.serverId;
+    if (serverId && (await findServer(serverId))) {
+      await db.insert(serverMembers).values({ serverId, userId: id, role: "member" }).onConflictDoNothing();
+      toServer(serverId, { t: "sync" });
     }
     return { token: await startSession(id, req), user };
   });
@@ -634,6 +642,20 @@ export async function buildApp({
     if (row.disabledAt) return reply.code(403).send({ error: "conta desativada" });
     byName.reset(name);
     return { token: await startSession(row.id, req), user: toUser(row) };
+  });
+
+  // Prévia de um convite de conta na tela de cadastro: diz em qual servidor a pessoa vai entrar.
+  // Usa o mesmo limite por IP do cadastro, para não virar um jeito de testar códigos.
+  app.get<{ Params: { code: string } }>("/account-invites/:code", async (req, reply) => {
+    const wait = byIp.blockedFor(req.ip);
+    if (wait) return tooMany(reply, wait);
+    const inv = (await db.select().from(invites).where(eq(invites.code, req.params.code)).limit(1))[0];
+    if (!inv || inv.usedBy) {
+      byIp.hit(req.ip);
+      return reply.code(404).send({ error: "convite inválido" });
+    }
+    const server = inv.serverId ? await findServer(inv.serverId) : undefined;
+    return { serverName: server?.name ?? null } satisfies AccountInvitePreview;
   });
 
   // Prévia pública de um convite de servidor (para a tela "entrar com convite").
@@ -1386,11 +1408,16 @@ export async function buildApp({
       return { url: livekit.url, token: await at.toJwt() } satisfies VoiceToken;
     });
 
-    // Convites de conta (admin do app ou cargo Convidador): criam uma conta que entra no servidor mais antigo.
+    // Convites de conta (admin do app ou cargo Convidador), de uso único. Com `serverId`, a conta nova já entra
+    // nesse servidor; quem convida precisa ser membro dele (não dá para mandar gente para servidor alheio).
     authed.post("/invites", async (req, reply) => {
       if (!canInviteAccounts(me(req))) return reply.code(403).send({ error: "só admin ou convidador" });
+      const body = createAccountInviteBody.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const serverId = body.data.serverId ?? null;
+      if (serverId && !(await member(req, reply, serverId))) return;
       const code = newInviteCode();
-      await db.insert(invites).values({ code, createdBy: me(req).id });
+      await db.insert(invites).values({ code, createdBy: me(req).id, serverId });
       return { code };
     });
 

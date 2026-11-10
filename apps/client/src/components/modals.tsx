@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { shownName, type Account, type Channel, type ChannelKind } from "@turtle/protocol";
+import { shownName, type Account, type Channel, type ChannelKind, type Server } from "@turtle/protocol";
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
 import { copyText } from "../clipboard";
@@ -106,15 +106,20 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
   );
 }
 
-/** Só admin do app (nas Configurações): gera um convite para criar conta no Turtle, de uso único. */
+/** Admin ou Convidador (nas Configurações): convite de uso único para criar conta, opcionalmente já entrando num servidor. */
 export function AppInvitePanel() {
   const [code, setCode] = useState<string>();
   const [error, setError] = useState<string>();
   const [copied, setCopied] = useState(false);
+  const [servers, setServers] = useState<Server[]>([]);
+  const [serverId, setServerId] = useState("");
+  useEffect(() => {
+    api.servers().then(setServers, () => {});
+  }, []);
   const generate = () => {
     setCode(undefined);
     setError(undefined);
-    api.createAccountInvite().then((r) => setCode(r.code), (e: Error) => setError(e.message));
+    api.createAccountInvite(serverId || undefined).then((r) => setCode(r.code), (e: Error) => setError(e.message));
   };
   const link = code ? `${location.origin}/convite/${code}` : "";
   const copy = async () => {
@@ -122,9 +127,19 @@ export function AppInvitePanel() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
+  const target = servers.find((x) => x.id === serverId);
   return (
     <div className="t-field app-invite">
       <span className="t-field-label">Convidar para o Turtle</span>
+      {servers.length > 0 && (
+        <label className="t-muted invite-days">
+          Já entra no servidor{" "}
+          <select value={serverId} onChange={(e) => { setServerId(e.target.value); setCode(undefined); }}>
+            <option value="">nenhum (começa sem servidor)</option>
+            {servers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </label>
+      )}
       {code ? (
         <div className="invite-box lino">
           <code>{link}</code>
@@ -138,7 +153,11 @@ export function AppInvitePanel() {
           <Button size="sm" onClick={generate}>Gerar convite de conta</Button>
         </div>
       )}
-      <span className="t-field-hint">Link de uso único para uma pessoa criar a conta. Depois ela entra nos servidores com convites de servidor.</span>
+      <span className="t-field-hint">
+        {target
+          ? `Link de uso único: a pessoa cria a conta e já cai em ${target.name}.`
+          : "Link de uso único para uma pessoa criar a conta. Depois ela entra nos servidores com convites de servidor."}
+      </span>
       {code && <div className="profile-actions"><Button size="sm" variant="ghost" onClick={generate}>Gerar outro</Button></div>}
       {error && <div className="err" role="alert">{error}</div>}
     </div>

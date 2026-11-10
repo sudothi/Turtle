@@ -182,6 +182,9 @@ CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 
 -- Apelido por servidor (menu de clique direito na pessoa).
 ALTER TABLE server_members ADD COLUMN IF NOT EXISTS nickname text;
+
+-- Convite de conta que já coloca a pessoa num servidor.
+ALTER TABLE invites ADD COLUMN IF NOT EXISTS server_id text REFERENCES servers(id) ON DELETE SET NULL;
 `;
 
 export interface DbHandle {

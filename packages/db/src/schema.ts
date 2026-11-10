@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 export const waitlistEntries = pgTable("waitlist_entries", {
   email: text("email").primaryKey(),
@@ -45,6 +45,8 @@ export const invites = pgTable("invites", {
   code: text("code").primaryKey(),
   createdBy: text("created_by"),
   usedBy: text("used_by"),
+  /** Servidor em que a conta nova já entra ao se cadastrar (null = começa sem servidor). */
+  serverId: text("server_id").references((): AnyPgColumn => servers.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

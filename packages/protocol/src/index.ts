@@ -507,3 +507,19 @@ export const MAX_PINS = 50;
 export const MAX_EMOJI_LENGTH = 16;
 /** Public waiting list; normalized before deduplication and notification. */
 export const waitlistBody = z.object({ email: z.string().trim().max(254).email().transform(email => email.toLowerCase()) });
+
+/** Faixa do Spotify colada no chat (`GET /music/spotify?url=`). Capa e prévia vêm do nosso servidor. */
+export interface MusicTrack {
+  /** Id da faixa no Spotify (22 caracteres). */
+  id: string;
+  /** Link canônico da faixa no Spotify. */
+  url: string;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  durationMs: number | null;
+  /** `GET /music/<id>/cover` devolve a capa (WebP 320x320). */
+  hasCover: boolean;
+  /** `GET /music/<id>/preview` devolve a prévia de 30 s (MP3); null quando não achamos a faixa. */
+  previewSource: "deezer" | null;
+}

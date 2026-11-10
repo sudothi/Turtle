@@ -1,4 +1,4 @@
-import type { AccountInvitePreview, Attachment, SessionInfo, Sound, SoundIcon, Unread, UserStatus } from "@turtle/protocol";
+import type { AccountInvitePreview, Attachment, MusicTrack, SessionInfo, Sound, SoundIcon, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
@@ -24,6 +24,14 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
   }
   return data as T;
+}
+
+/** Baixa um arquivo que exige login (capa e prévia de música) e devolve um blob: para usar em <img>/<audio>. */
+export async function authedBlobUrl(url: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`erro ${res.status}`);
+  return URL.createObjectURL(await res.blob());
 }
 
 /** URL de uma foto/banner a partir da chave guardada no perfil. */
@@ -101,6 +109,8 @@ export const api = {
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
+  musicSearch: (q: string) => req<MusicTrack[]>("GET", `/music/search?q=${encodeURIComponent(q)}`),
+  musicTrack: (url: string) => req<MusicTrack>("GET", `/music/spotify?url=${encodeURIComponent(url)}`),
   linkPreview: (url: string) => req<{ url: string; host: string; title: string | null; description: string | null }>("GET", `/link-preview?url=${encodeURIComponent(url)}`),
   pin: (id: string, on: boolean) => req<Message>(on ? "PUT" : "DELETE", `/messages/${id}/pin`),
   pins: (channelId: string) => req<Message[]>("GET", `/channels/${channelId}/pins`),

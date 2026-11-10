@@ -74,6 +74,7 @@ import { fileStore, isFileKey, processAttachment, processImage, type ImageKind }
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
 import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
+import { MUSIC_ID, musicService, type Fetcher } from "./music.js";
 import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
 
 export interface AppOptions {
@@ -108,6 +109,8 @@ export interface AppOptions {
   voiceGraceMs?: number;
   /** Só para testes: deixa a prévia de links alcançar endereços locais. */
   linkPreviewAllowPrivate?: boolean;
+  /** Só para testes: substitui a busca HTTP do cartão de música (Spotify e Deezer). */
+  musicFetch?: Fetcher;
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
   roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
   /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
@@ -166,7 +169,7 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, waitlistNotify,
+  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   registerWaitlist(app, db, waitlistNotify);
@@ -1770,6 +1773,38 @@ export async function buildApp({
         previewCache.set(url, hit);
       }
       return hit.preview ?? reply.code(404).send({ error: "sem prévia" });
+    });
+
+    // ---- Cartão de música (link do Spotify) ----
+    // Título, artista e capa da página pública do Spotify; prévia de 30 s do Deezer. Capa e áudio passam pelo servidor.
+    const music = musicService(musicFetch);
+    const musicLimit = attemptLimiter({ max: 60, windowMs: 60_000 });
+    authed.get<{ Querystring: { url?: string } }>("/music/spotify", async (req, reply) => {
+      const url = String(req.query.url ?? "").slice(0, 500);
+      if (!url) return reply.code(400).send({ error: "link inválido" });
+      const key = me(req).id;
+      if (musicLimit.blockedFor(key)) return reply.code(429).send({ error: "devagar" });
+      musicLimit.hit(key);
+      const track = await music.resolve(url);
+      return track ?? reply.code(404).send({ error: "música não encontrada" });
+    });
+    authed.get<{ Querystring: { q?: string } }>("/music/search", async (req, reply) => {
+      const q = String(req.query.q ?? "").trim().slice(0, 100);
+      if (q.length < 2) return [];
+      const key = me(req).id;
+      if (musicLimit.blockedFor(key)) return reply.code(429).send({ error: "devagar" });
+      musicLimit.hit(key);
+      return music.search(q);
+    });
+    authed.get<{ Params: { id: string } }>("/music/:id/cover", async (req, reply) => {
+      const img = MUSIC_ID.test(req.params.id) ? await music.cover(req.params.id) : null;
+      if (!img) return reply.code(404).send({ error: "sem capa" });
+      return reply.header("cache-control", "private, max-age=86400").type("image/webp").send(img);
+    });
+    authed.get<{ Params: { id: string } }>("/music/:id/preview", async (req, reply) => {
+      const audio = MUSIC_ID.test(req.params.id) ? await music.preview(req.params.id) : null;
+      if (!audio) return reply.code(404).send({ error: "sem prévia" });
+      return reply.header("cache-control", "private, max-age=3600").type("audio/mpeg").send(audio);
     });
 
     authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));

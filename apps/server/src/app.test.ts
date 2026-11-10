@@ -8,6 +8,11 @@ import { buildApp, voiceRoomName } from "./app.js";
 let handle: DbHandle;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let base = "";
+/** Spotify de mentira: a faixa existe, sem capa, e o Deezer não acha nada. */
+const fakeMusic = async (url: string) =>
+  url.startsWith("https://open.spotify.com/track/")
+    ? new Response(`<meta property="og:title" content="Faixa"><meta property="og:description" content="Banda · Disco · Song · 2020">`, { headers: { "content-type": "text/html" } })
+    : url.startsWith("https://api.deezer.com/search") ? Response.json({ data: [] }) : new Response("", { status: 404 });
 const LK = { url: "ws://lk.test", apiKey: "devkey", apiSecret: "devsecret-devsecret-devsecret-1234" };
 
 const post = async (url: string, body: unknown, token?: string) => {
@@ -28,7 +33,7 @@ beforeAll(async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 } });
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 }, musicFetch: fakeMusic });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -759,6 +764,19 @@ describe("amigos e mensagens diretas", () => {
     for (const x of [A, C]) x.ws.close();
   });
 
+
+  it("cartão de música: exige login, só aceita link do Spotify e sem prévia não serve áudio", async () => {
+    const link = encodeURIComponent("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=1");
+    expect((await get(`/music/spotify?url=${link}`, "")).status).toBe(401);
+    expect((await get(`/music/spotify`, a)).status).toBe(400);
+    expect((await get(`/music/spotify?url=${encodeURIComponent("https://example.com/track/4cOdK2wGLETKBW3PvgPWqT")}`, a)).status).toBe(404);
+    const ok = await get(`/music/spotify?url=${link}`, a);
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ id: "4cOdK2wGLETKBW3PvgPWqT", title: "Faixa", artist: "Banda", hasCover: false, previewSource: null });
+    expect((await get(`/music/4cOdK2wGLETKBW3PvgPWqT/preview`, a)).status).toBe(404);
+    expect((await get(`/music/4cOdK2wGLETKBW3PvgPWqT/cover`, a)).status).toBe(404);
+    expect((await get(`/music/..%2Fx/cover`, a)).status).toBe(404);
+  });
 
   it("prévia de links: exige login e não alcança endereço interno", async () => {
     expect((await get(`/link-preview?url=${encodeURIComponent("http://example.com")}`, "")).status).toBe(401);

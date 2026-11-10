@@ -151,7 +151,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun login(username: String, password: String) = auth { api.login(username.trim(), password) }
 
     fun register(inviteCode: String, username: String, password: String) =
-        auth { api.register(inviteCode.trim(), username.trim(), password) }
+        auth { api.register(xyz.ogturtle.turtle.inviteCode(inviteCode), username.trim(), password) }
 
     private fun auth(block: suspend () -> xyz.ogturtle.turtle.data.AuthResponse) {
         viewModelScope.launch {

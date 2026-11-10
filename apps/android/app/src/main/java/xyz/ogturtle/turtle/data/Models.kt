@@ -126,6 +126,7 @@ data class Message(
     val createdAt: String,
     val editedAt: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    val pinned: Boolean = false,
 ) {
     val author get() = displayName?.takeIf { it.isNotBlank() } ?: username
 }

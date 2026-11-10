@@ -33,6 +33,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -214,6 +217,8 @@ private fun MessageRow(
     Box(
         Modifier
             .fillMaxWidth()
+            // Fixada: trilho à esquerda, como no web.
+            .then(if (m.pinned) Modifier.background(Ink.Ink2).drawBehind { drawRect(Ink.Paper, size = Size(3.dp.toPx(), size.height)) } else Modifier)
             .combinedClickable(
                 onClick = {},
                 onLongClick = { menuOpen = true },
@@ -223,6 +228,13 @@ private fun MessageRow(
             if (header) Avatar(m.author, vm.api.fileUrl(m.avatar), size = 38.dp, modifier = Modifier.clickable { onProfile(m.userId) }) else Spacer(Modifier.size(38.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
+                if (m.pinned) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 2.dp)) {
+                        Icon(Icons.Filled.PushPin, contentDescription = null, tint = Ink.Muted, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("FIXADA", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Ink.Muted)
+                    }
+                }
                 if (header) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(m.author, fontWeight = FontWeight.Bold, color = if (mine) Ink.Paper else Ink.PaperDim, modifier = Modifier.clickable { onProfile(m.userId) })

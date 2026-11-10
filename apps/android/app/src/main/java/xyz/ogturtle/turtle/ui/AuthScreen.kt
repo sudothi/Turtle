@@ -23,6 +23,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,6 +68,16 @@ fun AuthScreen(state: UiState, vm: AppViewModel) {
 
         if (creating) {
             Field("Código do convite", invite, { invite = it })
+            // Convite de conta com servidor: avisa onde a pessoa vai cair.
+            var serverName by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(invite) {
+                serverName = null
+                val code = xyz.ogturtle.turtle.inviteCode(invite)
+                if (code.isEmpty()) return@LaunchedEffect
+                kotlinx.coroutines.delay(400)
+                serverName = vm.api.accountInviteServer(code)
+            }
+            serverName?.let { Text("Você vai entrar direto em $it", color = Ink.Paper, modifier = Modifier.padding(bottom = 8.dp)) }
         }
         Field("Usuário", username, { username = it })
         Field("Senha", password, { password = it }, password = true)

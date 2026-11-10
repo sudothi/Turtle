@@ -28,7 +28,7 @@ O Turtle para iPhone usa React Native/Expo com LiveKit/WebRTC **nativos**, sem W
 
 O deployment target configurado é **iOS 26.0**. O mínimo é o do projeto gerado e do IPA, não uma promessa de suporte a versões anteriores. A compilação em simulador iOS 27 foi exercitada; a matriz física precisa incluir iOS 26 e outro aparelho/versão do grupo, quando disponíveis. O menor iPhone real aceito ainda precisa ser identificado na #59.
 
-## Escopo da versão 0.4.0, build 6
+## Escopo da versão 0.4.0, build 7
 
 - Autenticação por convite, restauração de sessão, navegação nativa e chat confirmado da #113.
 - Amigos, pedidos, DMs/grupos, bloqueios e perfis públicos; leitura e não lidas no backend.
@@ -69,7 +69,7 @@ Sem prova da extensão após reassinatura, a versão atual **não oferece botão
 
 ## Build e entrega (#58)
 
-O build 6 inclui a correção de invalidação de sessão durante recuperação da chamada (#191). A correção #191 já está integrada à main; a entrega do build 6 também deve apontar diretamente para main. O manifesto identifica o commit usado, e o aceite físico continua pendente. O build 5 é a entrega anterior documentada na #58; não reutilizar seu número para um binário diferente.
+O build 7 acrescenta o tratamento nativo de interrupções e a recuperação de gateway da #54, mantendo a correção de sessão da #191. A entrega aponta diretamente para main. O manifesto identifica o commit usado; os cenários físicos da #54/#59 continuam pendentes. O build 6 foi instalado no iPhone 15 do usuário por sideload direto do AltServer 1.8.4; renovação e importação pela Classic ainda não foram comprovadas. Preservar os artefatos anteriores e usar novo número para cada binário.
 
 Em macOS com Xcode/SDK compatíveis e CocoaPods, após `pnpm install`:
 
@@ -79,16 +79,16 @@ pnpm ios:ipa
 
 O script gera o projeto nativo a partir da configuração versionada, instala Pods, faz archive Release sem assinatura, inclui JavaScript e empacota o IPA. A versão e o build vêm de `apps/ios/package.json`; `app.config.ts` usa os mesmos valores. Saídas:
 
-- `apps/ios/release/Turtle-0.4.0-build6.ipa`
-- `apps/ios/release/Turtle-0.4.0-build6.ipa.sha256`
-- `apps/ios/release/Turtle-0.4.0-build6.ipa.json`
+- `apps/ios/release/Turtle-0.4.0-build7.ipa`
+- `apps/ios/release/Turtle-0.4.0-build7.ipa.sha256`
+- `apps/ios/release/Turtle-0.4.0-build7.ipa.json`
 
 O manifesto registra versão, build, bundle ID, iOS mínimo, commit, presença de alterações locais (`sourceDirty`) e SHA-256. Para identificar o código pelo commit, distribuir somente um artefato com `sourceDirty: false`. O empacotamento recusa sobrescrever IPA, checksum ou manifesto do mesmo build; incrementar `iosBuildNumber` para uma nova entrega. O script confere a versão do archive e a presença das descrições de câmera/microfone. Artefatos e o projeto gerado são ignorados pelo Git. O IPA é **para importar e reassinar**, não uma distribuição já assinada. Compartilhar o IPA e o checksum juntos pelo canal privado do grupo; não criar release pública nem source AltStore antes do aceite de instalação manual. Não há workflow automático de publicação.
 
 Para conferir a transferência, rode na pasta do IPA:
 
 ```sh
-shasum -a 256 -c Turtle-0.4.0-build6.ipa.sha256
+shasum -a 256 -c Turtle-0.4.0-build7.ipa.sha256
 ```
 
 Instalação: AltServer no computador, AltStore Classic no iPhone, importar o IPA em My Apps > + e seguir os pedidos de confiança/Modo Desenvolvedor. Cada participante usa a própria conta. No modelo gratuito, a documentação Classic informa renovação em sete dias, três apps ativos (AltStore ocupa uma vaga) e até dez App IDs registrados simultaneamente. Extensões usam App IDs adicionais. Conferir os limites que a instalação final mostrar.
@@ -117,7 +117,11 @@ Use o IPA importado pelo mesmo caminho dos amigos e outra conta no web/desktop. 
 
 Registrar por cenário: versão/build/commit do app, versão do backend, iPhone/iOS, assinatura/método de instalação, duração, resultado, bateria/temperatura e reprodução de falhas. Não incluir tokens, senhas ou URLs autenticadas. Resultados não executados continuam pendentes. As issues existentes #46/#54/#55/#56/#57/#58/#59 concentram esses pontos; não criar duplicatas.
 
-O servidor continua usando o gateway como fonte da verdade de voz e remove a presença quando o socket fecha. O cliente reenvia seu estado ao reconectar, mas a continuidade de presença durante suspensão ainda depende de validação e pode exigir trabalho de backend na #54. TURN e backups mantêm seu escopo nas issues próprias.
+Com o backend desta etapa da #54, uma chamada que perde o socket de chat conserva o estado apenas mediante sessão válida, permissão atual e presença real no LiveKit. A consulta periódica usa intervalo de 15 s, prazo de confirmação de 45 s e timeout de até 5 s; revogação e saída da mídia removem o estado. Um novo relatório de voz substitui o antigo e impede que uma consulta atrasada restaure participantes fantasmas. A presença online continua vinculada ao chat, separada da presença na chamada. A preservação exige o deploy autorizado desse backend; gerar o IPA não publica o servidor.
+
+No build 7, AVAudioSession é observado por um módulo Expo local Swift. Ele bloqueia o áudio nativo durante interrupção e só libera depois de o TypeScript fechar a track do microfone; o estado pendente também é consultado na retomada. A câmera desliga ao deixar o estado ativo, inclusive ao abrir notificações, e permanece desligada ao voltar por decisão do usuário. PiP fica para outra etapa. O gateway detecta abertura sem conclusão (10 s) e falta de pong (15 s), usa backoff e renova as leituras ao retomar, preservando rascunhos e evitando reenvio automático de pendências. Ver detalhes e roteiro em [apps/ios/README.md](../../apps/ios/README.md).
+
+As verificações automatizadas e a compilação do módulo não aprovam Siri, Bluetooth, 30 minutos bloqueado, troca Wi-Fi/celular ou rede restritiva. Registrar essas evidências usando o build 7 e o backend desta etapa na #54/#59. TURN e backups mantêm seu escopo nas issues próprias.
 
 Na recuperação automática da chamada, um 401 ao buscar novo token deve passar pelo encerramento de mídia e invalidação da sessão do workspace, assim como um 401 nas demais requisições autenticadas (#47/#54). Um 403/404 encerra somente a chamada; falhas temporárias mantêm a política de retentativa e a credencial salva. Esse comportamento tem cobertura automatizada; revogação durante chamada em aparelho continua no aceite físico.
 

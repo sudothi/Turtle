@@ -11,3 +11,6 @@ apps/desktop/release/
 
 # Decisões e planos locais da versão iOS
 /.local/ios/
+
+# Planos e validações locais do site
+/.local/web/

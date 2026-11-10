@@ -446,3 +446,5 @@ export const MAX_REACTION_KINDS = 20;
 /** Mensagens fixadas por canal. */
 export const MAX_PINS = 50;
 export const MAX_EMOJI_LENGTH = 16;
+/** Public waiting list; normalized before deduplication and notification. */
+export const waitlistBody = z.object({ email: z.string().trim().max(254).email().transform(email => email.toLowerCase()) });

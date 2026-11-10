@@ -51,9 +51,9 @@ export function AuthScreen({ onAuth, onHome }: { onAuth: (u: User) => void; /** 
     <main className="auth lino-live">
       {onHome ? (
         <a
-          href="/"
+          href="/entrar"
           className="auth-brand"
-          aria-label="Página inicial do Turtle"
+          aria-label="Página de entrada do Turtle"
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
             e.preventDefault();

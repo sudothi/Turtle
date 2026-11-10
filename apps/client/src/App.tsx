@@ -6,11 +6,12 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { Workspace } from "./screens/Workspace";
 import { Landing } from "./screens/Landing";
 import { desktop } from "./desktop";
+import { appSurface } from "./routes";
 
 /** Dentro de um app (desktop, APK ou PWA instalado) não tem página inicial: abre direto no login. */
 const insideApp = () => !!desktop() || matchMedia("(display-mode: standalone)").matches;
 
-/** Rotas do site público. O resto (/, /login, /convite/<código>) segue como antes. */
+/** Navigation shared by public pages and the web workspace. */
 const usePath = () => {
   const [path, setPath] = useState(() => location.pathname);
   useEffect(() => {
@@ -18,8 +19,8 @@ const usePath = () => {
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
-  const go = useCallback((to: string) => {
-    if (to !== location.pathname) history.pushState(null, "", to);
+  const go = useCallback((to: string, replace = false) => {
+    if (to !== location.pathname) history[replace ? "replaceState" : "pushState"](null, "", to);
     setPath(to);
     scrollTo(0, 0);
   }, []);
@@ -45,14 +46,14 @@ export function App() {
   const logout = useCallback(() => {
     if (getToken()) void api.logout().catch(() => {});
     clearSession();
-  }, [clearSession]);
+    if (!insideApp()) go("/entrar", true);
+  }, [clearSession, go]);
   const onAuth = useCallback((u: User) => {
-    // Depois de entrar, a barra de endereço volta para a raiz (o app).
-    if (location.pathname === "/login") history.replaceState(null, "", "/");
     setUser(u);
-  }, []);
-  // A página inicial (com o botão de download) é só do site no navegador.
-  const landing = path === "/download" ? "download" : path === "/" && !user && !insideApp() ? "home" : null;
+    go(insideApp() ? "/" : "/app", true);
+  }, [go]);
+  const surface = appSurface(path, !!user, insideApp());
+  const landing = surface === "waitlist" || surface === "home" || surface === "download" ? surface : null;
   return (
     <>
       <LinoDefs />
@@ -65,7 +66,7 @@ export function App() {
       ) : user ? (
         <Workspace user={user} onLogout={logout} />
       ) : (
-        <AuthScreen onAuth={onAuth} onHome={insideApp() ? undefined : () => go("/")} />
+        <AuthScreen onAuth={onAuth} onHome={insideApp() ? undefined : () => go("/entrar")} />
       )}
     </>
   );

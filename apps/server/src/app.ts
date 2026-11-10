@@ -68,9 +68,11 @@ import { fileStore, isFileKey, processAttachment, processImage, type ImageKind }
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
 import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
+import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
 
 export interface AppOptions {
   db: Db;
+  waitlistNotify?: WaitlistNotice;
   /** Convite inicial criado se ainda não existe nenhum usuário (primeiro usuário vira admin). */
   bootstrapInvite?: string;
   /** Sem isso, o endpoint de token de voz responde 503. */
@@ -158,9 +160,10 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate,
+  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, waitlistNotify,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
+  registerWaitlist(app, db, waitlistNotify);
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);

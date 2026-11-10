@@ -72,6 +72,13 @@ services:
       BOOTSTRAP_INVITE: ${BOOTSTRAP_INVITE:?defina BOOTSTRAP_INVITE}
       UPLOAD_DIR: /data/uploads
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      WAITLIST_NOTIFY_TO: ${WAITLIST_NOTIFY_TO:-tchemello@ucs.br}
     volumes: ["uploads:/data/uploads"]
 
 volumes: { caddy_data: {}, caddy_config: {}, pg_data: {}, uploads: {} }

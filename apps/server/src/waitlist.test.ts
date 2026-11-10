@@ -45,6 +45,16 @@ describe("public waiting list", () => {
 });
 
 describe("persisted waitlist notifications", () => {
+  it("starts delivering saved signups when the server restarts with a mailer configured", async () => {
+    await signup({ email: "waiting@example.test" }, "203.0.113.30");
+    const notify = vi.fn(async () => {});
+    const configured = await buildApp({ db: handle.db, waitlistNotify: notify });
+    try {
+      await configured.ready();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    } finally { await configured.close(); }
+    expect((await handle.db.select().from(waitlistEntries))[0]!.notificationSentAt).toBeInstanceOf(Date);
+  });
   it("delivers pending signups once even when two workers claim the same row", async () => {
     await handle.db.insert(waitlistEntries).values({ email: "amigo@example.test" });
     const notify = vi.fn(async () => {});

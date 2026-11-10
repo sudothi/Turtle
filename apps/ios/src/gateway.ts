@@ -10,6 +10,8 @@ export class Gateway {
   private socket?: WebSocket;
   private retry?: ReturnType<typeof setTimeout>;
   private heartbeat?: ReturnType<typeof setInterval>;
+  private connecting?: ReturnType<typeof setTimeout>;
+  private pong?: ReturnType<typeof setTimeout>;
   private stopped = true;
   private attempts = 0;
   private ringExpiry?: ReturnType<typeof setTimeout>;
@@ -22,7 +24,12 @@ export class Gateway {
   getSnapshot = () => this.state;
   subscribeEvents = (fn: (event: ServerEvent) => void) => { this.events.add(fn); return () => { this.events.delete(fn); }; };
   private set(patch: Partial<GatewayState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); }
-  private send(value: ClientEvent) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(value)); }
+  private send(value: ClientEvent) {
+    const socket = this.socket;
+    if (socket?.readyState !== 1) return;
+    try { socket.send(JSON.stringify(value)); }
+    catch { this.disconnected(socket); }
+  }
   dismissRing(decline = false) {
     const ring = this.state.ring;
     clearTimeout(this.ringExpiry);
@@ -48,20 +55,30 @@ export class Gateway {
     if (this.stopped) return;
     const socket = new WebSocket(this.api.gatewayUrl());
     this.socket = socket;
+    this.connecting = setTimeout(() => this.disconnected(socket), 10_000);
     socket.onopen = () => {
       if (this.socket !== socket || this.stopped) return;
-      this.api.authenticateGateway(socket);
-      this.attempts = 0;
+      clearTimeout(this.connecting);
+      try { this.api.authenticateGateway(socket); }
+      catch { this.disconnected(socket); return; }
       this.set({ connected: true, states: [], revision: this.state.revision + 1 });
       this.send(this.report);
+      if (this.socket !== socket) return;
       this.sync();
-      this.heartbeat = setInterval(() => this.send({ t: "ping" }), 25_000);
+      const ping = () => {
+        this.pong = setTimeout(() => this.disconnected(socket), 15_000);
+        this.send({ t: "ping" });
+      };
+      ping();
+      if (this.socket === socket) this.heartbeat = setInterval(ping, 25_000);
     };
     socket.onmessage = event => {
       if (this.socket !== socket) return;
       try {
         const parsed = serverEvent.safeParse(JSON.parse(String(event.data)));
         if (!parsed.success) return;
+        this.attempts = 0;
+        if (parsed.data.t === "pong") { clearTimeout(this.pong); this.pong = undefined; return; }
         if (parsed.data.t === "ring") {
           this.dismissRing();
           this.set({ ring: parsed.data });
@@ -75,23 +92,26 @@ export class Gateway {
         this.events.forEach(fn => fn(parsed.data));
       } catch { /* Malformed messages do not tear down native audio. */ }
     };
-    socket.onerror = () => { if (this.socket === socket) socket.close(); };
-    socket.onclose = event => {
-      if (this.socket !== socket) return;
-      clearInterval(this.heartbeat);
-      this.socket = undefined;
-      this.dismissRing();
-      this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
-      if (event.code === 4401) { this.stop(); this.expired(); return; }
-      if (!this.stopped) {
-        const delay = Math.min(30_000, 1_000 * 2 ** this.attempts++) + Math.random() * 500;
-        this.retry = setTimeout(() => this.connect(), delay);
-      }
-    };
+    socket.onerror = () => this.disconnected(socket);
+    socket.onclose = event => this.disconnected(socket, event.code);
+  }
+
+  private disconnected(socket: WebSocket, code?: number) {
+    if (this.socket !== socket) return;
+    this.release();
+    this.dismissRing();
+    this.set({ connected: false, states: [], online: [], busy: [], activities: {} });
+    if (code === 4401) { this.stop(); this.expired(); return; }
+    if (!this.stopped) {
+      const delay = Math.min(30_000, 1_000 * 2 ** this.attempts++) + Math.random() * 500;
+      this.retry = setTimeout(() => { this.retry = undefined; this.connect(); }, delay);
+    }
   }
 
   private release() {
     clearInterval(this.heartbeat);
+    clearTimeout(this.connecting);
+    clearTimeout(this.pong);
     const socket = this.socket;
     this.socket = undefined;
     if (socket) {

@@ -72,4 +72,12 @@ describe("iOS call lifecycle", () => {
     expect(owner.voice.interrupt).not.toHaveBeenCalled();
     expect(owner.voice.background).not.toHaveBeenCalled();
   });
+  it("retains the native interruption guard until media teardown reaches idle", () => {
+    const { lifecycle, audio, status } = setup();
+    status("leaving");
+    expect(audio.setCallActive).toHaveBeenCalledExactlyOnceWith(true);
+    status("idle");
+    expect(audio.setCallActive).toHaveBeenLastCalledWith(false);
+    lifecycle.stop();
+  });
 });

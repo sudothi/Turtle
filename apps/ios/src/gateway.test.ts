@@ -17,6 +17,45 @@ class Socket {
 let gateway: Gateway;
 beforeEach(() => { vi.useFakeTimers(); Socket.all = []; vi.stubGlobal("WebSocket", Socket); gateway = new Gateway({ gatewayUrl: () => "wss://test/ws", authenticateGateway: (socket: Socket) => socket.send(JSON.stringify({ t: "auth", token: "session" })) } as Api, vi.fn(), vi.fn()); });
 afterEach(() => { gateway.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+it("replaces a transport that remains connecting instead of waiting forever", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  gateway.start(); const first = Socket.all[0]!;
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(first.close).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(Socket.all).toHaveLength(2);
+  vi.restoreAllMocks();
+});
+it("recovers a half-open socket whose send succeeds but server pong never arrives", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  gateway.start(); const first = Socket.all[0]!; first.open();
+  gateway.update({ t: "voice", channelId: "call", muted: true, deafened: false, camera: false, screen: false });
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(gateway.getSnapshot().connected).toBe(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  const replacement = Socket.all[1]!; replacement.open();
+  expect(replacement.send).toHaveBeenCalledWith(expect.stringContaining('"channelId":"call"'));
+  vi.restoreAllMocks();
+});
+it("keeps an acknowledged socket and does not replace it when the previous pong deadline passes", async () => {
+  gateway.start(); const socket = Socket.all[0]!; socket.open(); socket.receive({ t: "pong" });
+  await vi.advanceTimersByTimeAsync(25000);
+  socket.receive({ t: "pong" });
+  await vi.advanceTimersByTimeAsync(14999);
+  expect(Socket.all).toHaveLength(1);
+  expect(gateway.getSnapshot().connected).toBe(true);
+});
+it("resets backoff only after a valid authenticated server message", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  gateway.start(); const first = Socket.all[0]!; first.open(); first.onerror?.();
+  await vi.advanceTimersByTimeAsync(1000);
+  const second = Socket.all[1]!; second.open(); second.onerror?.();
+  await vi.advanceTimersByTimeAsync(1000); expect(Socket.all).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(1000); expect(Socket.all).toHaveLength(3);
+  const third = Socket.all[2]!; third.open(); third.receive({ t: "pong" }); third.onerror?.();
+  await vi.advanceTimersByTimeAsync(1000); expect(Socket.all).toHaveLength(4);
+  vi.restoreAllMocks();
+});
 it("forwards validated chat events, detaches screens and ignores replaced sockets", () => {
   const events = vi.fn(); const off = gateway.subscribeEvents(events);
   gateway.start(); const first = Socket.all[0]!; first.open();

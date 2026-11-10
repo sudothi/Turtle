@@ -362,7 +362,9 @@
 .call-lobby h2 { margin: 0; font-size: var(--fs-2xl); }
 .call-lobby p { margin: 0 0 12px; }
 
-.tiles { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 12px; padding: 16px; align-content: center; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* Linhas do tamanho do conteúdo: com aspect-ratio, linhas automáticas encolhiam e a transmissão (16:9) passava
+   por cima dos cartões de baixo (bem visível com tela em pé ou janela estreita). "safe center" deixa rolar até o topo. */
+.tiles { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 12px; padding: 16px; align-content: safe center; grid-auto-rows: max-content; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); container-type: size; }
 .tile {
   --lino-bg: var(--ink-3);
   --lino-radius: 10px;
@@ -472,6 +474,13 @@
 .tile.has-video .video-view { inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); border-radius: calc(var(--lino-radius) - 3px); }
 .tile.has-video .tile-name, .tile.has-video .tile-quality, .tile.has-video .tile-actions, .tile.has-video .tile-volume { z-index: 1; }
 .screen-tile { grid-column: span 2; aspect-ratio: 16 / 9; }
+/* Na grade, a transmissão fica em até 60% da altura do palco: sobra espaço para as pessoas e o vídeo
+   (contain) se ajusta dentro, seja qual for a proporção da tela de quem transmite. */
+.tiles .screen-tile { max-height: 60cqh; min-height: 0; width: 100%; }
+.tiles:has(.screen-tile) > .tile:not(.screen-tile) { max-height: max(120px, calc(40cqh - 12px)); min-height: 0; }
+/* Só cabe uma coluna: "span 2" criaria uma coluna extra fora da tela. */
+@container (max-width: 491px) { .tiles .screen-tile { grid-column: 1 / -1; } }
+.tiles .screen-tile:fullscreen, .tiles > .tile:fullscreen { max-height: none; }
 .screen-tile.focused { grid-column: auto; }
 .screen-wait { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--paper); text-align: center; padding: 8px; }
 .live-badge { padding: 1px 6px; border-radius: 3px; background: var(--paper); color: var(--ink-0); font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.06em; }

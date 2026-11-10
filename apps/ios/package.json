@@ -48,5 +48,5 @@
     "typescript": "~6.0.3",
     "vitest": "^3.2.0"
   },
-  "iosBuildNumber": "6"
+  "iosBuildNumber": "7"
 }

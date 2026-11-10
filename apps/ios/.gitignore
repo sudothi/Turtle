@@ -1,4 +1,4 @@
 .expo/
-ios/
+/ios/
 release/
 .env.local

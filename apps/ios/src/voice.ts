@@ -27,6 +27,8 @@ export class Voice {
   private watching = new Set<string>();
   private volumes = new Map<string, { voice: number; screen: number }>();
   private generation = 0;
+  private captureGeneration = 0;
+  private interrupted = false;
   private retry?: ReturnType<typeof setTimeout>;
   private recoveringSince = 0;
   private attempts = 0;
@@ -75,6 +77,7 @@ export class Voice {
   }
 
   private async connect(generation: number, channelId: string, microphone: boolean, recovering = false) {
+    const captureGeneration = this.captureGeneration;
     let room: Room | undefined;
     try {
       const token = await this.api.voiceToken(channelId);
@@ -107,9 +110,10 @@ export class Voice {
       this.syncSubscriptions();
       this.recoveringSince = 0;
       this.set({ status: "connected", error: undefined });
-      if (microphone && this.active()) {
+      if (microphone && this.active() && !this.interrupted && captureGeneration === this.captureGeneration) {
         try { await room.localParticipant.setMicrophoneEnabled(true); }
         catch { this.set({ error: "Microfone indisponível. Você está só ouvindo. Confira a permissão do Turtle nos Ajustes." }); }
+        if (captureGeneration !== this.captureGeneration) await room.localParticipant.setMicrophoneEnabled(false);
       }
       if (generation === this.generation) this.refresh();
     } catch (error) {
@@ -148,6 +152,8 @@ export class Voice {
   leave(error?: string): Promise<void> {
     if (this.leaving) return this.leaving;
     ++this.generation;
+    ++this.captureGeneration;
+    this.interrupted = false;
     this.watching.clear(); this.volumes.clear();
     clearTimeout(this.retry); this.retry = undefined;
     this.set({ status: "leaving", muted: true, error });
@@ -213,25 +219,28 @@ export class Voice {
   }
   async toggleCamera() {
     const room = this.room;
-    if (!room || this.state.busy || this.state.status !== "connected" || !this.active()) return;
+    if (!room || this.state.busy || this.state.status !== "connected" || !this.active() || this.interrupted) return;
     this.set({ busy: true, error: undefined });
+    const captureGeneration = this.captureGeneration;
     try {
       await room.localParticipant.setCameraEnabled(!this.state.camera, { facingMode: this.state.facing });
-      if (!this.active()) await room.localParticipant.setCameraEnabled(false);
+      if (!this.active() || captureGeneration !== this.captureGeneration) await room.localParticipant.setCameraEnabled(false);
     } catch { this.set({ error: "Não foi possível abrir a câmera. Confira a permissão do Turtle nos Ajustes." }); }
     finally { if (this.room === room) { this.refresh(); this.set({ busy: false }); } }
   }
   async flipCamera() {
     const room = this.room;
     const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
-    if (!room || !(track instanceof LocalVideoTrack) || this.state.busy || !this.active()) return;
+    if (!room || !(track instanceof LocalVideoTrack) || this.state.busy || !this.active() || this.interrupted) return;
     const facing = this.state.facing === "user" ? "environment" : "user";
+    const captureGeneration = this.captureGeneration;
     this.set({ busy: true, error: undefined });
     try { await track.restartTrack({ facingMode: facing }); this.set({ facing }); }
     catch { this.set({ error: "Não foi possível trocar a câmera." }); }
-    finally { if (this.room === room) { if (!this.active()) await room.localParticipant.setCameraEnabled(false).catch(() => {}); this.refresh(); this.set({ busy: false }); } }
+    finally { if (this.room === room) { if (!this.active() || captureGeneration !== this.captureGeneration) await room.localParticipant.setCameraEnabled(false).catch(() => {}); this.refresh(); this.set({ busy: false }); } }
   }
   async background() {
+    ++this.captureGeneration;
     this.watching.clear();
     this.syncSubscriptions();
     const room = this.room;
@@ -241,11 +250,28 @@ export class Voice {
     }
   }
 
+  async interrupt() {
+    this.interrupted = true;
+    ++this.captureGeneration;
+    this.recoveryMicrophone = false;
+    const room = this.room;
+    this.set({ muted: true, error: "Áudio interrompido pelo iOS. Ao retornar, o microfone continuará fechado." });
+    await this.background();
+    if (room) await room.localParticipant.setMicrophoneEnabled(false);
+    if (this.room === room) this.refresh();
+  }
+
+  interruptionEnded() { this.interrupted = false; }
+
   async toggleMute() {
     const room = this.room;
-    if (!room || this.state.status !== "connected" || this.state.busy || this.state.deafened || !this.active()) return;
+    if (!room || this.state.status !== "connected" || this.state.busy || this.state.deafened || !this.active() || this.interrupted) return;
     this.set({ busy: true, error: undefined });
-    try { await room.localParticipant.setMicrophoneEnabled(this.state.muted); }
+    const captureGeneration = this.captureGeneration;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(this.state.muted);
+      if (this.interrupted || captureGeneration !== this.captureGeneration) await room.localParticipant.setMicrophoneEnabled(false);
+    }
     catch { this.set({ error: "Não foi possível mudar o microfone. Confira a permissão nos Ajustes." }); }
     finally { if (this.room === room) { this.refresh(); this.set({ busy: false }); } }
   }

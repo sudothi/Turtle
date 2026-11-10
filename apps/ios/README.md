@@ -41,7 +41,7 @@ O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configura
 pnpm ios:ipa
 ```
 
-O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.4.0-build6.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; o build number vem de `package.json` e o bundle ID de `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
+O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.4.0-build7.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; o build number vem de `package.json` e o bundle ID de `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
 
 Instale AltServer no Mac/Windows e AltStore Classic no iPhone seguindo os guias oficiais abaixo. Cada participante usa sua própria conta Apple gratuita. Transfira o IPA ao iPhone, abra AltStore > My Apps > `+` e selecione-o. Autorize confiança/Modo Desenvolvedor quando solicitado. O fluxo de importação, reassinatura e renovação ainda exige validação no aparelho do grupo.
 
@@ -74,9 +74,20 @@ Para a navegação da #48, validar também:
 5. Modo avião durante a escrita/envio, retorno à rede e mais de uma página recebida durante a desconexão. Conferir texto preservado, histórico sem lacunas/duplicação e recuperação de edições/exclusões de outro cliente.
 6. Teclado aberto em retrato/paisagem, texto ampliado, VoiceOver e chamada ativa: compositor, sugestões, botões e barra de voz devem permanecer acessíveis. Registrar a validação no menor iPhone suportado; testes de unidade não comprovam posição visual ou foco do teclado.
 
+## Ciclo de vida da chamada — build 7 (#54)
+
+- Trocar de app, bloquear a tela ou abrir a Central de Notificações desliga a câmera; retornar não a religa. Somente o botão Ligar câmera retoma vídeo. PiP fica para uma evolução futura.
+- Uma interrupção real de áudio (Siri/ligação) segura a unidade de áudio nativa do WebRTC até o app fechar o microfone. Ao terminar, volta à escuta, respeitando ensurdecer; abrir microfone exige ação manual. A proteção também cobre um evento que o JavaScript perdeu durante suspensão, consultando o estado nativo ao retornar.
+- O módulo local `modules/turtle-call-audio` observa AVAudioSession e não solicita novos entitlements. **Atualizar o IPA é obrigatório**; Metro sozinho não instala esse módulo.
+- O gateway aguarda no máximo 10 s pela abertura e 15 s por uma resposta a ping. Falhas usam espera crescente com jitter, preservam a sessão em falha temporária e reenviam o estado de voz ao reconectar. Um 401/4401 continua invalidando a sessão.
+- Na retomada, o gateway é substituído, o diretório de servidores/canais é recarregado e as telas visíveis atualizam suas leituras por revisão. Conversas ativas recuperam lacunas no histórico sem reenviar mensagens pendentes automaticamente; as demais telas atualizam ao receber foco.
+- O backend conserva uma chamada sem chat apenas enquanto a sessão da conta está válida, a pessoa continua autorizada e o LiveKit confirma sua presença. Consulta a cada 15 s, tolerância máxima de 45 s sem confirmação e timeout de consulta de até 5 s. Revogação, saída da mídia ou perda de permissão limpam o estado; não depende de um heartbeat JavaScript rodando indefinidamente.
+
+O build 7 é compatível com os endpoints atuais, mas a preservação de presença exige publicar o backend desta PR. Isso não é feito pelo build ou merge. Encerrar o processo continua encerrando a mídia; o app não usa push silencioso para mantê-la ativa.
+
 ## Limites da versão
 
-Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. A presença ainda usa o gateway existente: é reenviada após reconexão/retorno, mas o backend a remove quando o WebSocket cai. Continuidade de presença/voz em todos os casos de suspensão exige a #54 e validação real. Não há CallKit/PushKit, push nem publicação da tela do iPhone nesta versão. Há câmera, recepção de telas e cartão de chamada recebida com o app ativo. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
+Áudio usa WebRTC nativo e `UIBackgroundModes: audio`. A integração do SDK configura AVAudioSession nativamente. Com o backend da #54, a presença da chamada pode sobreviver à queda do gateway: sessão, permissão e mídia são verificadas no LiveKit periodicamente. Sem esse backend atualizado, permanece o comportamento anterior de remover a presença ao fechar o socket. O aceite de suspensão/voz no aparelho continua pendente. Não há CallKit/PushKit, push nem publicação da tela do iPhone nesta versão. Há câmera, recepção de telas e cartão de chamada recebida com o app ativo. O processo encerrado não continua a chamada. TURN/conectividade de redes restritas continua relacionado à #14.
 
 Testes de unidade e build não comprovam áudio, permissões, entitlements ou duração em tela bloqueada. O aceite da #46 depende da instalação final em iPhone real; mantenha resultados não executados como pendentes.
 

@@ -31,6 +31,32 @@ beforeEach(() => { fake.Room.instances = []; vi.clearAllMocks(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("native call lifecycle", () => {
+  it("keeps the microphone closed after a system interruption until explicitly reopened", async () => {
+    const { voice } = setup();
+    await voice.join("voice1", "Amigos", true);
+    await voice.interrupt();
+    await voice.toggleMute();
+    expect(voice.getSnapshot().muted).toBe(true);
+    voice.interruptionEnded();
+    expect(voice.getSnapshot().muted).toBe(true);
+    await voice.toggleMute();
+    expect(voice.getSnapshot().muted).toBe(false);
+    await voice.leave();
+  });
+  it("does not reopen capture if interruption happens while requesting a recovery token", async () => {
+    vi.useFakeTimers();
+    const { voice, api } = setup();
+    await voice.join("voice1", "Amigos", true);
+    fake.Room.instances[0]!.emit("disconnected", 0);
+    let resolve!: (value: { url: string; token: string }) => void;
+    api.voiceToken.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await vi.advanceTimersByTimeAsync(1000);
+    await voice.interrupt(); voice.interruptionEnded();
+    resolve({ url: "wss://voice.test", token: "token" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.Room.instances[1]!.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    await voice.leave();
+  });
   it("joins listen-only without publishing a microphone and reports gateway state", async () => {
     const { voice, report } = setup();
     await voice.join("voice1", "Amigos", false);
@@ -169,6 +195,23 @@ describe("call recovery", () => {
 
 
 describe("camera and screen subscriptions", () => {
+  it("keeps the camera off after a brief inactive/active transition during camera startup", async () => {
+    let active = true;
+    const { voice } = setup(() => active);
+    await voice.join("voice1", "Amigos", false);
+    const room = fake.Room.instances[0]!;
+    let finish!: () => void;
+    room.localParticipant.setCameraEnabled.mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => { finish = resolve; });
+      room.localParticipant.isCameraEnabled = true;
+    });
+    const starting = voice.toggleCamera();
+    active = false; await voice.background();
+    active = true; voice.foreground(); finish(); await starting;
+    expect(voice.getSnapshot().camera).toBe(false);
+    expect(room.localParticipant.setCameraEnabled).toHaveBeenLastCalledWith(false);
+    await voice.leave();
+  });
   it("subscribes to cameras only on the call screen and to shared screen/audio only on request", async () => {
     const { voice } = setup();
     await voice.join("voice1", "Amigos", false);

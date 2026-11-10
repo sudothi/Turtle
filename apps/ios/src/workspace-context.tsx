@@ -8,6 +8,8 @@ import type { Api } from "./api";
 import { Resource } from "./resource";
 import { session } from "./runtime";
 import { WorkspaceSession } from "./workspace-session";
+import { CallLifecycle } from "./call-lifecycle";
+import { callAudio } from "./call-audio";
 
 const Context = createContext<{ workspace: WorkspaceSession; user: User } | null>(null);
 
@@ -19,8 +21,9 @@ export function WorkspaceProvider({ api, user, children }: { api: Api; user: Use
     const stopProfile = workspace.gateway.subscribeEvents(event => {
       if (event.t === "userUpdate" && event.user.id === user.id) void api.me().then(fresh => session.updateUser(fresh, api)).catch(workspace.reject);
     });
-    const listener = AppState.addEventListener("change", state => { if (state === "active") { workspace.resume(); workspace.voice.foreground(); } else { void workspace.chat.flush().catch(() => {}); void workspace.voice.background(); } });
-    return () => { stopProfile(); listener.remove(); void workspace.dispose(); };
+    const lifecycle = new CallLifecycle(workspace, callAudio, AppState.currentState ?? "unknown");
+    const listener = AppState.addEventListener("change", lifecycle.change);
+    return () => { stopProfile(); listener.remove(); lifecycle.stop(); void workspace.dispose().finally(() => callAudio.setCallActive(false)).catch(() => {}); };
   }, [workspace]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

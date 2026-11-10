@@ -33,7 +33,7 @@ beforeAll(async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 }, musicFetch: fakeMusic });
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 }, maxDiskUsageRatio: 1.01, musicFetch: fakeMusic, roomService: { removeParticipant: async () => {}, getParticipant: async () => { throw Object.assign(new Error("not found"), { code: "not_found" }); } } });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -1236,10 +1236,12 @@ describe("limite de tentativas de login", () => {
 describe("quem está de fato na chamada", () => {
   const removed: string[] = [];
   let present = new Set<string>();
+  let lookupError: Error | undefined;
   const fakeRooms = {
     removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
     getParticipant: async (room: string, identity: string) => {
-      if (!present.has(`${room}:${identity}`)) throw new Error("not found");
+      if (lookupError) throw lookupError;
+      if (!present.has(`${room}:${identity}`)) throw Object.assign(new Error("not found"), { code: "not_found" });
       return {} as any;
     },
   };
@@ -1276,7 +1278,7 @@ describe("quem está de fato na chamada", () => {
 
   beforeAll(async () => {
     h = await createDb();
-    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, roomService: fakeRooms });
+    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, voiceReconcileMs: 30, voiceLeaseMs: 150, roomService: fakeRooms });
     url = await srv.listen({ port: 0, host: "127.0.0.1" });
     const reg = async (inviteCode: string, username: string, token?: string) => {
       const code = inviteCode || (await (await fetch(url + "/invites", { method: "POST", headers: { authorization: `Bearer ${token}` } })).json()).code;
@@ -1322,6 +1324,56 @@ describe("quem está de fato na chamada", () => {
     expect(await hook("participant_joined", foraId, voiceRoomName(sala), "Bearer falso")).toBe(401);
   });
 
+  it("preserva a voz nativa ao cair o gateway e remove a presença quando a mídia termina", async () => {
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(dono);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false, camera: true }));
+    await wait(50);
+    mobile.ws.close();
+    await wait(120);
+    expect(lastStates(watcher.events)).toMatchObject([{ userId: donoId, camera: false, muted: true }]);
+    const replacement = await wsOpen(dono);
+    replacement.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(80);
+    expect(lastStates(watcher.events)).toHaveLength(1);
+    expect(lastStates(watcher.events)[0].muted).toBe(false);
+    replacement.ws.close();
+    await wait(80);
+    present = new Set();
+    await wait(100);
+    expect(lastStates(watcher.events)).toEqual([]);
+    watcher.ws.close();
+  });
+
+  it("revogar a sessão derruba a mídia mesmo depois que o gateway do aparelho fechou", async () => {
+    const login = await (await fetch(url + "/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "voz-dono", password: "12345678" }) })).json() as any;
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(login.token);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50); mobile.ws.close(); await wait(80);
+    expect(lastStates(watcher.events)).toHaveLength(1);
+    removed.length = 0;
+    const result = await fetch(url + "/auth/logout", { method: "POST", headers: { authorization: `Bearer ${login.token}` } });
+    expect(result.status).toBe(200);
+    await wait(80);
+    expect(lastStates(watcher.events)).toEqual([]);
+    expect(removed).toContain(`${voiceRoomName(sala)}:${donoId}`);
+    present = new Set(); watcher.ws.close();
+  });
+
+  it("relatório de voz seguido de fechamento imediato não deixa participante fantasma", async () => {
+    present = new Set();
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(dono);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    mobile.ws.close();
+    await wait(200);
+    expect(lastStates(watcher.events)).toEqual([]);
+    watcher.ws.close();
+  });
+
   it("webhook: quem entra sem permissão sai na hora; quem entra e não avisa o gateway sai depois", async () => {
     removed.length = 0;
     expect(await hook("participant_joined", foraId)).toBe(200);
@@ -1350,6 +1402,10 @@ describe("quem está de fato na chamada", () => {
     present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
     expect(await hook("participant_left", donoId)).toBe(200);
     await wait(50);
+    expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
+    lookupError = new Error("temporary outage");
+    try { expect(await hook("participant_left", donoId)).toBe(200); }
+    finally { lookupError = undefined; }
     expect(lastStates(watcher.events).map((s: any) => s.userId)).toEqual([donoId]);
     present = new Set();
     expect(await hook("participant_left", donoId)).toBe(200);
@@ -1434,7 +1490,7 @@ describe("conexão do WebSocket", () => {
 describe("cota de anexos", () => {
   it("recusa com 413 quando passa da cota e mostra o uso em /me/storage", async () => {
     const h = await createDb();
-    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150 });
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150, maxDiskUsageRatio: 1.01 });
     const url = await a.listen({ port: 0, host: "127.0.0.1" });
     const json = async (path: string, body: unknown, token?: string) =>
       (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
@@ -1459,7 +1515,7 @@ describe("cota de anexos", () => {
 
   it("expira anexos antigos mantendo as mensagens e liberando a cota; bloqueia upload se o disco encher", async () => {
     const h = await createDb();
-    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30 });
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30, maxDiskUsageRatio: 1.01 });
     const url = await a.listen({ port: 0, host: "127.0.0.1" });
     const json = async (path: string, body: unknown, token?: string) =>
       (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;

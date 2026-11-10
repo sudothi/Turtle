@@ -104,7 +104,8 @@ describe("yt-dlp", () => {
 });
 
 describe("cookies do yt-dlp", () => {
-  it("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", async () => {
+  // O yt-dlp falso é um script sh; o servidor roda em Linux, então no Windows o teste não se aplica.
+  it.skipIf(process.platform === "win32")("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", async () => {
     const dir = mkdtempSync(join(tmpdir(), "turtle-ck-"));
     const bin = join(dir, "fake-yt");
     writeFileSync(bin, "#!/bin/sh\necho \"$@\"\n", { mode: 0o755 });

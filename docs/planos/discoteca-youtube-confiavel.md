@@ -19,6 +19,7 @@ Meta do thiago: a discoteca toca **música inteira, sempre**. Sem prévia de 30 
 | C | **PO token** com o plugin `bgutil-ytdlp-pot-provider` (container ao lado do api) | Média: ajuda em vídeos barrados por falta de token, não resolve IP queimado | Grátis; mais uma peça no compose | Frágil: o YouTube muda; atualizar yt-dlp e plugin |
 | D | **Proxy residencial pago** só para o yt-dlp | Alta | Mensalidade; serviço externo | Baixa |
 | E | **Baixar no aparelho de quem pôs a música** (app desktop/Android usa o IP de casa e envia o áudio ao servidor) | Alta | Muito código; web puro não consegue | Alta |
+| G | **Player oficial do YouTube (IFrame API) em cada aparelho**: ninguém baixa nada; cada um toca o vídeo no próprio navegador/app, com o IP de casa, e o servidor só manda o relógio (como já é hoje) | Alta, sem bloqueio por IP e sem credencial | Pode aparecer anúncio para quem não tem Premium; alguns vídeos proíbem incorporar; sincronia um pouco menos exata; o player precisa ficar visível (regra do YouTube); Android nativo exige a biblioteca do player | Baixa; o servidor deixa de baixar YouTube (sem cache, sem yt-dlp para ele) |
 | F | Fontes sem bloqueio (SoundCloud/Bandcamp) como complemento | Boa, mas o catálogo é menor | Nenhum | Baixa |
 
 ## Recomendação

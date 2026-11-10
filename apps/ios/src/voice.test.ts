@@ -24,7 +24,8 @@ import { Voice } from "./voice";
 function setup(active = () => true) {
   const api = { voiceToken: vi.fn(async () => ({ url: "wss://voice.example.test", token: "room-token" })) };
   const report = vi.fn<(state: VoiceReport) => void>();
-  return { api, report, voice: new Voice(api, report, active) };
+  const expired = vi.fn<(error: unknown) => void>();
+  return { api, report, expired, voice: new Voice(api, report, active, expired) };
 }
 beforeEach(() => { fake.Room.instances = []; vi.clearAllMocks(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -139,6 +140,30 @@ describe("call recovery", () => {
     await vi.advanceTimersByTimeAsync(30000);
     expect(api.voiceToken).toHaveBeenCalledTimes(2);
     expect(voice.getSnapshot().status).toBe("idle");
+  });
+  it("reports an expired account session when fetching a recovery token returns 401", async () => {
+    vi.useFakeTimers();
+    const { voice, api, expired } = setup();
+    await voice.join("voice1", "Amigos", true);
+    const error = Object.assign(new Error("session revoked"), { status: 401 });
+    api.voiceToken.mockRejectedValueOnce(error);
+    fake.Room.instances[0]!.emit("disconnected", 0);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(expired).toHaveBeenCalledExactlyOnceWith(error);
+    expect(api.voiceToken).toHaveBeenCalledTimes(2);
+    expect(voice.getSnapshot()).toMatchObject({ status: "idle", muted: true });
+    expect(fake.audio.stopAudioSession).toHaveBeenCalled();
+  });
+  it.each([403, 404, 503])("does not invalidate the account session for recovery HTTP %s", async status => {
+    vi.useFakeTimers();
+    const { voice, api, expired } = setup();
+    await voice.join("voice1", "Amigos", false);
+    api.voiceToken.mockRejectedValueOnce(Object.assign(new Error("unavailable"), { status }));
+    fake.Room.instances[0]!.emit("disconnected", 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(expired).not.toHaveBeenCalled();
+    expect(voice.getSnapshot().status).toBe(status === 503 ? "reconnecting" : "idle");
+    await voice.leave();
   });
 });
 

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Api } from "./api";
-const fake = vi.hoisted(() => ({ voices: [] as { leave: ReturnType<typeof vi.fn>; join: ReturnType<typeof vi.fn> }[], gateways: [] as { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] }));
+const fake = vi.hoisted(() => ({ voices: [] as { leave: ReturnType<typeof vi.fn>; join: ReturnType<typeof vi.fn>; expired: (error: unknown) => void }[], gateways: [] as { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] }));
 vi.mock("react-native", () => ({ AppState: { currentState: "active" } }));
 vi.mock("./voice", () => ({ Voice: class {
   leave = vi.fn(async () => {}); join = vi.fn(async () => {});
-  constructor() { fake.voices.push(this); }
+  constructor(_api: unknown, _report: unknown, _active: unknown, readonly expired: (error: unknown) => void) { fake.voices.push(this); }
 } }));
 vi.mock("./gateway", () => ({ Gateway: class {
   start = vi.fn(); stop = vi.fn(); resume = vi.fn(); update = vi.fn();
@@ -50,6 +50,17 @@ describe("workspace lifetime", () => {
     const { workspace, voice, auth } = setup();
     const error = new ApiError(401, "invalid"); await workspace.reject(error);
     expect(voice.leave).toHaveBeenCalledOnce(); expect(auth.rejectIfUnauthorized).toHaveBeenCalledWith(error);
+  });
+  it("invalidates a session revoked during automatic call recovery after native media stops", async () => {
+    const { workspace, voice, auth } = setup();
+    let finish!: () => void;
+    voice.leave.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const error = new ApiError(401, "invalid");
+    voice.expired(error);
+    expect(auth.rejectIfUnauthorized).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(auth.rejectIfUnauthorized).toHaveBeenCalledExactlyOnceWith(error));
+    await workspace.dispose();
   });
   it("a failed logout leaves drafts editable for the still authenticated user", async () => {
     const { workspace, auth } = setup(); await workspace.chat.ready;

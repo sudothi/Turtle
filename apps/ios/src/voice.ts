@@ -35,7 +35,7 @@ export class Voice {
   private leaving?: Promise<void>;
   private state = initial();
   private listeners = new Set<() => void>();
-  constructor(private readonly api: Pick<Api, "voiceToken">, private readonly report: (value: VoiceReport) => void, private readonly active: () => boolean) {}
+  constructor(private readonly api: Pick<Api, "voiceToken">, private readonly report: (value: VoiceReport) => void, private readonly active: () => boolean, private readonly expired: (error: unknown) => void = () => {}) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   clearError = () => this.set({ error: undefined });
@@ -139,6 +139,7 @@ export class Voice {
         if (generation !== this.generation) return;
         if (typeof error === "object" && error && "status" in error && [401, 403, 404].includes(Number(error.status))) {
           void this.leave("Você não tem mais acesso à chamada. Entre novamente para conferir sua sessão.");
+          if (Number(error.status) === 401) this.expired(error);
         } else this.scheduleRecovery(generation, channelId);
       });
     }, Math.min(remaining, 1_000 * 2 ** Math.min(this.attempts++, 4)));

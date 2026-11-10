@@ -1,6 +1,13 @@
 import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
+export const waitlistEntries = pgTable("waitlist_entries", {
+  email: text("email").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  notificationAttemptedAt: timestamp("notification_attempted_at", { withTimezone: true }),
+  notificationSentAt: timestamp("notification_sent_at", { withTimezone: true }),
+});
+
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),

@@ -12,6 +12,9 @@ export { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export const MIGRATION = `
+CREATE TABLE IF NOT EXISTS waitlist_entries (
+  email text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(),
+  notification_attempted_at timestamptz, notification_sent_at timestamptz);
 CREATE TABLE IF NOT EXISTS users (
   id text PRIMARY KEY, username text NOT NULL UNIQUE, password_hash text NOT NULL,
   is_admin boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());

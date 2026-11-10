@@ -322,6 +322,7 @@ describe("discoteca no app", () => {
     expect(part.headers.get("content-range")).toBe(`bytes 100-199/${WEBM.length}`);
     expect((await part.arrayBuffer()).byteLength).toBe(100);
     expect((await fetch(base + state.audio.replace(/audio\/[\w-]{22}/, "audio/aaaaaaaaaaaaaaaaaaaaaa"))).status).toBe(404);
+    await until(() => B.events.some((e) => e.t === "jukebox" && e.state?.current?.cover));
     const cover = (await call("GET", `/jukebox/${sala}`, dono)).body.state.current.cover;
     expect((await fetch(base + cover)).headers.get("content-type")).toBe("image/webp");
 

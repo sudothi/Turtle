@@ -116,6 +116,8 @@ export function jukeboxService(opts: JukeboxOptions) {
   for (const f of readdirSync(cacheDir)) if (FILE.test(f) && audioType(f)) onDisk.set(f.slice(0, f.lastIndexOf(".")), f);
   const downloads = new Map<string, Promise<string>>();
   const covers = new Map<string, Promise<boolean>>();
+  /** Capas já gravadas: só elas vão no estado (URL antes do arquivo existir viraria imagem quebrada). */
+  const coverReady = new Set<string>();
   /** Metadados de links e buscas já resolvidos (não roda o yt-dlp de novo para o mesmo link). */
   const resolved = new Map<string, { at: number; track: Track }>();
 
@@ -136,7 +138,7 @@ export function jukeboxService(opts: JukeboxOptions) {
   const toItem = (i: Item): JukeboxItem => ({
     id: i.id, title: i.title, artist: i.artist, durationMs: i.durationMs, source: i.source, preview: i.preview, link: i.link,
     addedBy: i.addedBy, status: i.status,
-    cover: covers.has(i.key) ? `/jukebox/cover/${sign(`${i.key}.webp`)}/${i.key}.webp` : null,
+    cover: coverReady.has(i.key) ? `/jukebox/cover/${sign(`${i.key}.webp`)}/${i.key}.webp` : null,
   });
   const stateOf = (b: Box): JukeboxState => ({
     channelId: b.channelId, serverId: b.serverId,
@@ -167,9 +169,10 @@ export function jukeboxService(opts: JukeboxOptions) {
     })().catch(() => false);
     covers.set(t.key, job);
     void job.then((ok) => {
-      if (!ok) covers.delete(t.key);
+      if (!ok) return void covers.delete(t.key);
+      coverReady.add(t.key);
       // A capa chegou depois: avisa as chamadas que têm essa faixa.
-      else for (const b of boxes.values()) if ([b.current, ...b.queue].some((i) => i?.key === t.key)) emit(b);
+      for (const b of boxes.values()) if ([b.current, ...b.queue].some((i) => i?.key === t.key)) emit(b);
     });
     return job;
   }

@@ -7,7 +7,7 @@ import { clock, coverTint, musicCover, stopMusic, toggleMusic, useMusicPlayback 
 const tracks = new Map<string, Promise<MusicTrack | null>>();
 
 /** Vinil entalhado: sulcos cortados em traços irregulares e a capa no selo (estrela quando não há capa). */
-function Vinyl({ cover }: { cover: string | null }) {
+export function Vinyl({ cover }: { cover: string | null }) {
   const clip = `music-label-${useId().replace(/:/g, "")}`;
   return (
     <svg className="music-vinyl-disc" viewBox="0 0 100 100" aria-hidden="true" focusable="false">

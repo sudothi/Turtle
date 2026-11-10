@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
 import { Avatar, Icon, StaffTag, type IconName } from "@turtle/ui";
+import { useJukebox } from "../jukebox";
+import { JukeboxChannelLine } from "./Jukebox";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -116,6 +118,7 @@ export function ChannelSidebar({
 }) {
   const text = channels.filter((c) => c.kind === "text");
   const voice = channels.filter((c) => c.kind === "voice");
+  const jukeboxStates = useJukebox().states;
   return (
     <aside className="sidebar" aria-label="Canais">
       <HeaderMenu name={serverName} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLeave={onLeave} />
@@ -158,6 +161,7 @@ export function ChannelSidebar({
                     </button>
                   )}
                 </div>
+                <JukeboxChannelLine state={jukeboxStates[c.id]} />
                 {members.length > 0 && (
                   <ul className="voice-members">
                     {members.map((v) => (

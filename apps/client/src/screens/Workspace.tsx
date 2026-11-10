@@ -14,6 +14,7 @@ import { UserPanel } from "../components/UserPanel";
 import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { soundboard } from "../soundboard";
+import { jukebox } from "../jukebox";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
@@ -327,7 +328,12 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     if (snap.screen !== prev.screen) playSound(snap.screen ? "screenOn" : "screenOff");
     lastSnap.current = { muted: snap.muted, deafened: snap.deafened, screen: snap.screen };
   }, [snap.muted, snap.deafened, snap.screen]);
-  useEffect(() => setSoundOutput(snap.prefs.outputId), [snap.prefs.outputId]);
+  useEffect(() => {
+    setSoundOutput(snap.prefs.outputId);
+    jukebox.setOutput(snap.prefs.outputId);
+  }, [snap.prefs.outputId]);
+  // A discoteca toca a música da chamada em que estou (e cala quando ensurdeço ou saio).
+  useEffect(() => jukebox.setCall(snap.status === "idle" ? null : (snap.channelId ?? null), snap.deafened), [snap.status, snap.channelId, snap.deafened]);
 
   // ---- Aviso falado (leitor de tela) de quem entra/sai da chamada e de mudo/ensurdecido ----
   const [liveNote, setLiveNote] = useState("");
@@ -374,6 +380,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       const s = new WebSocket(`${proto}://${location.host}/ws`);
       ws.current = s;
       s.onopen = () => {
+        // O servidor manda de novo o estado de todas as discotecas logo depois de conectar.
+        jukebox.reset();
         s.send(JSON.stringify({ t: "auth", token: getToken() ?? "" }));
         attempts = 0;
         voice.resendState();
@@ -406,6 +414,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         }
         if (evt.t === "error" && !evt.nonce) soundboard.onError(evt.error);
         if (evt.t === "sounds") void soundboard.load(evt.serverId);
+        if (evt.t === "jukebox") jukebox.onEvent(evt);
         if (evt.t === "soundboardPlay" && evt.channelId === voice.getSnapshot().channelId) void soundboard.onEvent(evt, voice.getSnapshot().deafened);
         if (evt.t === "error" && evt.nonce) {
           const nonce = evt.nonce;
@@ -731,6 +740,10 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       : messages,
     voiceStates: nicks.size ? voiceStates.map((v) => (v.serverId === serverId && nicks.has(v.userId) ? { ...v, displayName: nicks.get(v.userId)! } : v)) : voiceStates,
   }), [nicks, members, messages, voiceStates, serverId]);
+  const nameOf = useCallback((id: string) => {
+    const m = named.members.find((x) => x.userId === id);
+    return m ? shownName(m) : undefined;
+  }, [named.members]);
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
@@ -955,7 +968,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             noServer
           )
         ) : view === "voice" ? (
-          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={named.voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} server={servers.find((x) => x.id === known[voiceView ?? ""]?.serverId)} meId={user.id} />
+          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={named.voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} server={servers.find((x) => x.id === known[voiceView ?? ""]?.serverId)} meId={user.id} nameOf={nameOf} />
         ) : (
           <ChatView
             channel={textChannel}

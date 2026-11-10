@@ -1239,7 +1239,7 @@ describe("quem está de fato na chamada", () => {
   const fakeRooms = {
     removeParticipant: async (room: string, identity: string) => void removed.push(`${room}:${identity}`),
     getParticipant: async (room: string, identity: string) => {
-      if (!present.has(`${room}:${identity}`)) throw new Error("not found");
+      if (!present.has(`${room}:${identity}`)) throw Object.assign(new Error("not found"), { code: "not_found" });
       return {} as any;
     },
   };
@@ -1276,7 +1276,7 @@ describe("quem está de fato na chamada", () => {
 
   beforeAll(async () => {
     h = await createDb();
-    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, roomService: fakeRooms });
+    srv = await buildApp({ db: h.db, bootstrapInvite: "boot3", livekit: LK, heartbeatMs: 100, voiceGraceMs: 150, voiceReconcileMs: 30, voiceLeaseMs: 150, roomService: fakeRooms });
     url = await srv.listen({ port: 0, host: "127.0.0.1" });
     const reg = async (inviteCode: string, username: string, token?: string) => {
       const code = inviteCode || (await (await fetch(url + "/invites", { method: "POST", headers: { authorization: `Bearer ${token}` } })).json()).code;
@@ -1320,6 +1320,45 @@ describe("quem está de fato na chamada", () => {
 
   it("webhook: assinatura inválida é recusada", async () => {
     expect(await hook("participant_joined", foraId, voiceRoomName(sala), "Bearer falso")).toBe(401);
+  });
+
+  it("preserva a voz nativa ao cair o gateway e remove a presença quando a mídia termina", async () => {
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(dono);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false, camera: true }));
+    await wait(50);
+    mobile.ws.close();
+    await wait(120);
+    expect(lastStates(watcher.events)).toMatchObject([{ userId: donoId, camera: false, muted: true }]);
+    const replacement = await wsOpen(dono);
+    replacement.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(80);
+    expect(lastStates(watcher.events)).toHaveLength(1);
+    expect(lastStates(watcher.events)[0].muted).toBe(false);
+    replacement.ws.close();
+    await wait(80);
+    present = new Set();
+    await wait(100);
+    expect(lastStates(watcher.events)).toEqual([]);
+    watcher.ws.close();
+  });
+
+  it("revogar a sessão derruba a mídia mesmo depois que o gateway do aparelho fechou", async () => {
+    const login = await (await fetch(url + "/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "voz-dono", password: "12345678" }) })).json() as any;
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(login.token);
+    present = new Set([`${voiceRoomName(sala)}:${donoId}`]);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await wait(50); mobile.ws.close(); await wait(80);
+    expect(lastStates(watcher.events)).toHaveLength(1);
+    removed.length = 0;
+    const result = await fetch(url + "/auth/logout", { method: "POST", headers: { authorization: `Bearer ${login.token}` } });
+    expect(result.status).toBe(200);
+    await wait(80);
+    expect(lastStates(watcher.events)).toEqual([]);
+    expect(removed).toContain(`${voiceRoomName(sala)}:${donoId}`);
+    present = new Set(); watcher.ws.close();
   });
 
   it("webhook: quem entra sem permissão sai na hora; quem entra e não avisa o gateway sai depois", async () => {

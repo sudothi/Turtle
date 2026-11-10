@@ -78,6 +78,7 @@ import { MUSIC_ID, musicService, type Fetcher } from "./music.js";
 import { audioType, jukeboxService } from "./jukebox.js";
 import { ytdlp, ytdlpRunner, type YtdlpRun } from "./ytdlp.js";
 import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
+import { VoicePresence } from "./voice-presence.js";
 
 export interface AppOptions {
   db: Db;
@@ -109,6 +110,9 @@ export interface AppOptions {
   maxDiskUsageRatio?: number;
   /** Quanto esperar, depois de alguém entrar numa sala do LiveKit, para conferir se avisou o gateway. Padrão: 30 s. */
   voiceGraceMs?: number;
+  /** Consulta das chamadas cujo gateway caiu. Padrões: 15 s entre consultas e 45 s de tolerância a falhas. */
+  voiceReconcileMs?: number;
+  voiceLeaseMs?: number;
   /** Só para testes: deixa a prévia de links alcançar endereços locais. */
   linkPreviewAllowPrivate?: boolean;
   /** Só para testes: substitui a busca HTTP do cartão de música (Spotify e Deezer). */
@@ -198,7 +202,7 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify, jukebox: jukeboxOpts = {},
+  voiceGraceMs = 30_000, voiceReconcileMs = 15_000, voiceLeaseMs = 45_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify, jukebox: jukeboxOpts = {},
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   registerWaitlist(app, db, waitlistNotify);
@@ -232,8 +236,14 @@ export async function buildApp({
   const closeSessions = (pred: (s: { userId: string; tokenHash: string; sessionId: string }) => boolean) => {
     for (const [sock, info] of socketSessions) {
       if (pred(info)) {
+        const call = voice.get(sock);
+        voice.delete(sock);
         socketSessions.delete(sock);
         sock.close(4401, "unauthorized");
+        if (call) {
+          broadcastVoice();
+          if (room) void room.removeParticipant(voiceRoomName(call.channelId), call.userId).catch(() => {});
+        }
       }
     }
   };
@@ -330,8 +340,39 @@ export async function buildApp({
     sentNonces.set(key, { id, at: now });
   };
 
-  // Estado de voz por conexão WebSocket: some sozinho quando a conexão cai.
-  const voice = new Map<Socket, VoiceState>();
+  // O áudio nativo pode sobreviver ao gateway; só preserva voz com sessão/permissão/mídia verificadas.
+  const voice = new VoicePresence<Socket>({
+    intervalMs: voiceReconcileMs, leaseMs: voiceLeaseMs,
+    changed: () => broadcastVoice(),
+    removed: socket => { if (!online.has(socket)) socketSessions.delete(socket); },
+    disconnect: async state => {
+      if (room && ![...voice.values()].some(v => v.userId === state.userId && v.channelId === state.channelId)) {
+        await room.removeParticipant(voiceRoomName(state.channelId), state.userId);
+      }
+    },
+    probe: room ? async (socket, state) => {
+      const info = socketSessions.get(socket);
+      if (!info) return null;
+      const session = (await db.select({ disabledAt: users.disabledAt }).from(sessions).innerJoin(users, eq(users.id, sessions.userId))
+        .where(and(eq(sessions.tokenHash, info.tokenHash), eq(sessions.userId, state.userId), gt(sessions.expiresAt, new Date()))).limit(1))[0];
+      if (!session || session.disabledAt || !(await mayJoinCall(state.channelId, state.userId))) return null;
+      try {
+        const participant = await room.getParticipant(voiceRoomName(state.channelId), state.userId);
+        const active = (source: TrackSource) => participant.tracks?.some(track => track.source === source && !track.muted) ?? false;
+        return { muted: !active(TrackSource.MICROPHONE), camera: active(TrackSource.CAMERA), screen: active(TrackSource.SCREEN_SHARE) };
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "not_found") return null;
+        throw error;
+      }
+    } : undefined,
+  });
+  app.addHook("onClose", async () => voice.close());
+  async function mayJoinCall(channelId: string, userId: string) {
+    const channel = await findChannel(channelId);
+    if (!channel) return false;
+    if (channel.kind === "dm") return (await isDmMember(channel.id, userId)) && !(await dmBlocked(channel.id));
+    return channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, userId));
+  }
   const voiceStatesFor = (socket: Socket): ServerEvent => {
     const mine = memberships.get(socket);
     const seen = new Set<string>();
@@ -1223,6 +1264,7 @@ export async function buildApp({
       const channel = await findChannel(body.data.channelId);
       if (!channel || channel.kind !== "voice" || channel.serverId !== req.params.id) return reply.code(404).send({ error: "canal de voz não existe" });
       if (call[1].channelId === channel.id) return { ok: true };
+      if (!online.has(call[0])) return reply.code(409).send({ error: "o aparelho está desconectado do chat; aguarde a reconexão ou desconecte a pessoa da chamada" });
       // Quem se move é o próprio aplicativo da pessoa: ele sai da sala atual e entra na nova.
       call[0].send(JSON.stringify({ t: "voiceMoved", channelId: channel.id, by: me(req).id } satisfies ServerEvent));
       return { ok: true };
@@ -1231,7 +1273,7 @@ export async function buildApp({
       const call = await voiceModerator(req, reply);
       if (!call) return;
       const [sock, v] = call;
-      sock.send(JSON.stringify({ t: "voiceMoved", channelId: null, by: me(req).id } satisfies ServerEvent));
+      if (online.has(sock)) sock.send(JSON.stringify({ t: "voiceMoved", channelId: null, by: me(req).id } satisfies ServerEvent));
       voice.delete(sock);
       broadcastVoice();
       if (room) await room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {});
@@ -1942,13 +1984,6 @@ export async function buildApp({
     const receiver = new WebhookReceiver(livekit.apiKey, livekit.apiSecret);
     const checks = new Set<ReturnType<typeof setTimeout>>();
     app.addHook("onClose", async () => { for (const t of checks) clearTimeout(t); });
-    /** Pode estar nesta sala agora (mesma regra do token)? */
-    const mayJoin = async (channelId: string, userId: string) => {
-      const channel = await findChannel(channelId);
-      if (!channel) return false;
-      if (channel.kind === "dm") return (await isDmMember(channel.id, userId)) && !(await dmBlocked(channel.id));
-      return channel.kind === "voice" && !!channel.serverId && !!(await roleIn(channel.serverId, userId));
-    };
     const reported = (channelId: string, userId: string) => [...voice.values()].some((v) => v.channelId === channelId && v.userId === userId);
     app.register(async (hook) => {
       hook.addContentTypeParser("application/webhook+json", { parseAs: "string" }, (_req, body, done) => done(null, body));
@@ -1965,7 +2000,7 @@ export async function buildApp({
         const channelId = name.slice("voice-".length);
         if (evt.event === "participant_joined") {
           // Entrou sem permissão (token antigo de quem foi expulso): sai na hora.
-          if (!(await mayJoin(channelId, identity))) {
+          if (!(await mayJoinCall(channelId, identity))) {
             await room.removeParticipant(name, identity).catch(() => {});
             return { ok: true };
           }
@@ -2039,7 +2074,7 @@ export async function buildApp({
       online.set(socket, connected);
       socketSessions.set(socket, { userId: connected.id, tokenHash: sess.tokenHash, sessionId: sess.sessionId });
       // Ping a cada heartbeatMs: quem não responde (notebook dormiu, Wi-Fi caiu sem fechar) é derrubado,
-      // e o close tira a pessoa da presença e da chamada. Qualquer mensagem também conta como sinal de vida.
+      // e o close tira a presença online; a voz pode continuar se o LiveKit confirmar a mídia nativa.
       let alive = true;
       socket.on("pong", () => (alive = true));
       const beat = setInterval(() => {
@@ -2053,14 +2088,14 @@ export async function buildApp({
       friendSets.set(socket, await loadFriendSet(connected.id));
       cleanup = () => {
         clearInterval(beat);
-        socketSessions.delete(socket);
         online.delete(socket);
         memberships.delete(socket);
         dmSets.delete(socket);
         friendSets.delete(socket);
         activities.delete(socket);
         presence();
-        if (voice.delete(socket)) broadcastVoice();
+        if (voice.has(socket)) voice.detach(socket);
+        else socketSessions.delete(socket);
       };
       if (gone) return cleanup();
       presence();
@@ -2144,7 +2179,7 @@ export async function buildApp({
           playing.push(now + row.durationMs);
           soundsPlaying.set(v.channelId, playing);
           const out = JSON.stringify({ t: "soundboardPlay", channelId: v.channelId, userId: user.id, sound: toSound(row) } satisfies ServerEvent);
-          for (const [s, state] of voice) if (state.channelId === v.channelId) s.send(out);
+          for (const [s, state] of voice) if (state.channelId === v.channelId && online.has(s)) s.send(out);
           return;
         }
         if (evt.t === "voice") {

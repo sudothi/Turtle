@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
 import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Activity, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
@@ -13,12 +13,14 @@ import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
 import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
+import { soundboard } from "../soundboard";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
 import { DmGroupPanel, DmProfilePanel, ProfileModal, ProfilePopout, type ProfileHandlers } from "../components/UserProfile";
 import { AddToGroupModal, FriendsPanel, HomeSidebar, NewGroupModal } from "../components/Home";
 import { MemberList } from "../components/MemberList";
+import { PersonMenu, openAt, type PersonMenuTarget } from "../components/PersonMenu";
 import { CreateChannelModal, EditChannelModal, InviteModal } from "../components/modals";
 import { CreateServerModal, JoinServerModal, ServerSettingsModal } from "../components/ServerModals";
 
@@ -94,6 +96,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     const focused = document.activeElement && document.activeElement !== document.body ? document.activeElement.getBoundingClientRect() : undefined;
     setPopout({ id, anchor: recent ?? focused });
   }, []);
+  const [personMenu, setPersonMenu] = useState<PersonMenuTarget>();
+  const openPersonMenu = useCallback((userId: string, e: ReactMouseEvent) => setPersonMenu(openAt(userId, e)), []);
+  const closePersonMenu = useCallback(() => setPersonMenu(undefined), []);
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState<ChannelKind>();
   const [inviting, setInviting] = useState(false);
@@ -399,6 +404,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           if (evt.nonce) setOutbox((l) => (l.some((o) => o.nonce === evt.nonce) ? l.filter((o) => o.nonce !== evt.nonce) : l));
           onMessage.current(evt.message);
         }
+        if (evt.t === "error" && !evt.nonce) soundboard.onError(evt.error);
+        if (evt.t === "sounds") void soundboard.load(evt.serverId);
+        if (evt.t === "soundboardPlay" && evt.channelId === voice.getSnapshot().channelId) void soundboard.onEvent(evt, voice.getSnapshot().deafened);
         if (evt.t === "error" && evt.nonce) {
           const nonce = evt.nonce;
           setOutbox((l) => l.map((o) => (o.nonce === nonce ? { ...o, status: "failed", error: evt.error } : o)));
@@ -464,6 +472,15 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         if (evt.t === "ring") onRing.current(evt);
         if (evt.t === "ringEnd") setRings((l) => l.filter((x) => x.channelId !== evt.channelId));
         if (evt.t === "ringDeclined") setLiveNote("Chamada recusada");
+        // Um admin me moveu de canal de voz (entro no novo) ou me desconectou (o LiveKit já derruba a conexão).
+        if (evt.t === "voiceMoved") {
+          if (evt.channelId) {
+            const to = evt.channelId;
+            const from = voice.getSnapshot().channelId;
+            setVoiceView((v) => (v === from ? to : v));
+            void voice.join(to);
+          } else void voice.leave();
+        }
       };
       s.onclose = (ev) => {
         if (ev.code === 4401) {
@@ -496,6 +513,21 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       ws.current?.close();
     };
   }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
+
+  // O soundboard toca pelo WebSocket (o servidor confere e repassa para a chamada).
+  useEffect(() => {
+    soundboard.setSender((evt) => {
+      const s = ws.current;
+      if (s?.readyState !== WebSocket.OPEN) return false;
+      s.send(JSON.stringify(evt));
+      return true;
+    });
+    return () => soundboard.setSender(undefined);
+  }, []);
+  // Ensurdeceu ou saiu da chamada: corta o som que estiver tocando.
+  useEffect(() => {
+    if (snap.deafened || !snap.channelId) soundboard.stopAll();
+  }, [snap.deafened, snap.channelId]);
 
   /** Envia pelo WebSocket se estiver aberto; senão fica na fila e vai quando reconectar. */
   const transmit = useCallback((o: Outgoing) => {
@@ -683,10 +715,22 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const asChannel = (d: Dm): Channel => ({ id: d.channelId, serverId: "", name: dmTitle(d), kind: "text" });
   const dmChannel: Channel | undefined = dm && asChannel(dm);
   const dmMembers: Member[] = dm
-    ? [...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const, staff: false }))
+    ? [...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }].map((p) => ({ userId: p.id, username: p.username, displayName: p.displayName, avatar: p.avatar, role: "member" as const, staff: false, nickname: null }))
     : [];
   const pendingIn = friends.filter((f) => f.status === "incoming").length;
   const server = servers.find((s) => s.id === serverId);
+  // Apelidos do servidor aberto: entram no lugar do nome de exibição no chat, nos membros e na chamada.
+  const nicks = useMemo(() => new Map(home ? [] : members.filter((m) => m.nickname).map((m) => [m.userId, m.nickname!] as const)), [members, home]);
+  const named = useMemo(() => ({
+    members: nicks.size ? members.map((m) => (nicks.has(m.userId) ? { ...m, displayName: nicks.get(m.userId)! } : m)) : members,
+    messages: nicks.size
+      ? messages.map((m) => {
+          const reply = m.replyTo && nicks.has(m.replyTo.userId) ? { ...m.replyTo, displayName: nicks.get(m.replyTo.userId)! } : m.replyTo;
+          return nicks.has(m.userId) || reply !== m.replyTo ? { ...m, displayName: nicks.get(m.userId) ?? m.displayName, replyTo: reply } : m;
+        })
+      : messages,
+    voiceStates: nicks.size ? voiceStates.map((v) => (v.serverId === serverId && nicks.has(v.userId) ? { ...v, displayName: nicks.get(v.userId)! } : v)) : voiceStates,
+  }), [nicks, members, messages, voiceStates, serverId]);
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
@@ -711,8 +755,29 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     onChanged: () => { setProfileVersion((n) => n + 1); void loadHome().catch(() => {}); },
     onEditProfile: () => setSettings("profile"),
     onOpenServer: (id) => chooseServer(id),
+    streaming: (id) => voiceStates.some((v) => v.userId === id && v.screen),
+    // Assistir pelo perfil, como no Discord: entra na chamada da pessoa (se ainda não está nela), abre o palco e assiste.
+    onWatch: (id) => {
+      const vs = voiceStates.find((v) => v.userId === id && v.screen);
+      if (!vs) return;
+      const dm = dms.find((d) => d.channelId === vs.channelId);
+      if (dm) {
+        openDm(dm);
+        setDmCall(true);
+      } else {
+        setHome(false);
+        if (vs.serverId !== serverId) chooseServer(vs.serverId);
+        setVoiceView(vs.channelId);
+        setView("voice");
+        showContent();
+      }
+      void (async () => {
+        if (voice.getSnapshot().channelId !== vs.channelId || voice.getSnapshot().status === "idle") await voice.join(vs.channelId);
+        voice.watch(id);
+      })();
+    },
   };
-  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} callServer={callServer} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
 
   // Celular: barra da chamada ativa quando se está em outra tela (chat, outro servidor, Amigos).
   const callChannel = snap.channelId ? known[snap.channelId] ?? (dms.find((d) => d.channelId === snap.channelId) && asChannel(dms.find((d) => d.channelId === snap.channelId)!)) : undefined;
@@ -811,7 +876,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           view={view}
           current={current}
           voiceView={voiceView}
-          voiceStates={voiceStates}
+          voiceStates={named.voiceStates}
           speaking={speaking}
           onText={(id) => { setCurrent(id); setView("text"); showContent(); }}
           onVoice={(id) => { setVoiceView(id); setView("voice"); showContent(); void voice.join(id); }}
@@ -820,6 +885,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           onSettings={() => setServerSettings(true)}
           onLeave={server.role === "owner" ? undefined : () => leaveServer(server)}
           onProfile={setViewProfile}
+          onMenu={openPersonMenu}
           footer={footer}
           unread={unread}
           onEdit={setEditingChannel}
@@ -835,8 +901,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         {home ? (
           dmChannel && dm && dmCall ? (
             <div className="dm-call">
-              <button className="plain-btn dm-call-back" onClick={() => setDmCall(false)}>← Voltar ao chat</button>
-              <CallView channel={dmChannel} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} />
+              <button className="plain-btn dm-call-back" onClick={() => setDmCall(false)}><Icon name="arrow-left" size={16} /> Voltar ao chat</button>
+              <CallView channel={dmChannel} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} />
             </div>
           ) : dmChannel && dm ? (
             <ChatView
@@ -889,14 +955,14 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             noServer
           )
         ) : view === "voice" ? (
-          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} />
+          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={named.voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} server={servers.find((x) => x.id === known[voiceView ?? ""]?.serverId)} meId={user.id} />
         ) : (
           <ChatView
             channel={textChannel}
             typing={typingIds(textChannel?.id)}
             onTyping={() => textChannel && sendTyping(textChannel.id)}
-            messages={messages}
-            members={members}
+            messages={named.messages}
+            members={named.members}
             meId={user.id}
             onSend={send}
             outbox={pendingHere}
@@ -918,7 +984,24 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         ? <DmGroupPanel people={[...dm.users, { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar }]} online={online} onProfile={setViewProfile} />
         : dm.users[0] && <DmProfilePanel userId={dm.users[0].id} h={profileHandlers} version={profileVersion} onFull={() => setFullProfile(dm.users[0]!.id)} onOpenUser={setFullProfile} />)}
       {mobile && (showMembers || showDmPanel) && <button className="m-backdrop" aria-label="Fechar painel" onClick={() => setDrawer(false)} />}
-      {showMembers && <MemberList members={members} online={online} onProfile={(m) => setViewProfile(m.userId)} />}
+      {showMembers && <MemberList members={named.members} online={online} onProfile={(m) => setViewProfile(m.userId)} onMenu={openPersonMenu} />}
+      {personMenu && (
+        <PersonMenu
+          key={`${personMenu.userId}:${personMenu.x}:${personMenu.y}`}
+          target={personMenu}
+          meId={user.id}
+          server={home ? undefined : server}
+          members={home ? dmMembers : members}
+          voiceStates={voiceStates}
+          voiceChannels={home ? [] : channels.filter((c) => c.kind === "voice")}
+          snap={snap}
+          voice={voice}
+          fallbackName={snap.participants.find((p) => p.id === personMenu.userId)?.name}
+          onProfile={setViewProfile}
+          onMessage={(id) => void messageUser(id)}
+          onClose={closePersonMenu}
+        />
+      )}
       <ScreenPicker />
       {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
       {newGroup && <NewGroupModal friends={friends} onClose={() => setNewGroup(false)} onCreated={(d) => { setDms((l) => [d, ...l.filter((x) => x.channelId !== d.channelId)]); openDm(d); }} />}

@@ -404,6 +404,44 @@ describe("servidores", () => {
     forasteiro.close();
   });
 
+  it("menu da pessoa: apelido, mover e desconectar da chamada seguem as regras de moderação", async () => {
+    // bia é a dona; ana e caio entram como membros comuns
+    for (const t of [ana, caio]) await post(`/invites/${(await post(`/servers/${lagoa}/invites`, {}, bia)).body.code}/join`, {}, t);
+    const nick = (user: string, nickname: string | null, token: string) => patch(`/servers/${lagoa}/members/${user}/nickname`, { nickname }, token);
+    expect((await nick(anaId, "Aninha", ana)).status).toBe(200); // cada um muda o seu
+    expect((await nick(caioId, "Caiozão", ana)).status).toBe(403); // membro não muda o dos outros
+    expect((await nick(biaId, "Chefe", ana)).status).toBe(403);
+    expect((await nick(caioId, "x".repeat(33), bia)).status).toBe(400);
+    expect((await nick(caioId, "Caiozão", bia)).status).toBe(200); // dona muda
+    const names = (await get(`/servers/${lagoa}/members`, bia)).body;
+    expect(names.find((m: any) => m.userId === anaId).nickname).toBe("Aninha");
+    expect(names.find((m: any) => m.userId === caioId).nickname).toBe("Caiozão");
+    expect((await nick(caioId, "", bia)).body.nickname).toBeNull(); // vazio tira o apelido
+
+    const sala = (await channelsOf(lagoa, bia)).find((c: any) => c.kind === "voice");
+    const outra = (await post(`/servers/${lagoa}/channels`, { name: "outra sala", kind: "voice" }, bia)).body;
+    const texto = (await channelsOf(lagoa, bia)).find((c: any) => c.kind === "text");
+    const dona = await listen(bia);
+    const caioWs = await listen(caio);
+    await settle();
+    expect((await post(`/servers/${lagoa}/voice/${caioId}/move`, { channelId: outra.id }, bia)).status).toBe(404); // ainda não está na chamada
+    caioWs.ws.send(JSON.stringify({ t: "voice", channelId: sala.id, muted: false, deafened: false }));
+    await settle();
+    expect((await post(`/servers/${lagoa}/voice/${caioId}/move`, { channelId: outra.id }, ana)).status).toBe(403); // membro não move
+    expect((await post(`/servers/${lagoa}/voice/${caioId}/move`, { channelId: texto.id }, bia)).status).toBe(404); // só para canal de voz
+    expect((await post(`/servers/${lagoa}/voice/${caioId}/move`, { channelId: outra.id }, bia)).status).toBe(200);
+    await settle();
+    expect(caioWs.events.find((e) => e.t === "voiceMoved")).toMatchObject({ channelId: outra.id, by: biaId });
+    expect((await del(`/servers/${lagoa}/voice/${caioId}`, ana)).status).toBe(403);
+    expect((await del(`/servers/${lagoa}/voice/${caioId}`, bia)).status).toBe(200);
+    await settle();
+    expect(caioWs.events.filter((e) => e.t === "voiceMoved").at(-1)).toMatchObject({ channelId: null });
+    expect(dona.events.filter((e) => e.t === "voiceStates").at(-1).states.map((v: any) => v.userId)).not.toContain(caioId);
+    dona.close();
+    caioWs.close();
+    for (const id of [anaId, caioId]) await del(`/servers/${lagoa}/members/${id}`, bia);
+  });
+
   it("apagar o servidor remove canais e mensagens e avisa os membros", async () => {
     const online = await listen(ana);
     const inv = await post(`/servers/${lagoa}/invites`, {}, bia);
@@ -1711,5 +1749,31 @@ describe("sessões, senha e contas desativadas (#89)", () => {
 
     await a.close();
     await h.close();
+  });
+});
+
+describe("convite de conta com servidor", () => {
+  it("convite de conta com servidor: a conta nova já entra nele; só membro do servidor gera", async () => {
+    const login = (await post("/auth/login", { username: "thiago", password: "12345678" })).body.token;
+    // quem convida precisa ser membro do servidor
+    const other = await post("/auth/register", { inviteCode: (await post("/invites", {}, login)).body.code, username: "eva", password: "12345678" });
+    const evaServer = await post("/servers", { name: "Da Eva" }, other.body.token);
+    expect((await post("/invites", { serverId: evaServer.body.id }, login)).status).toBe(404);
+    const mine = (await get("/servers", login)).body as { id: string; name: string }[];
+    const own = mine.length ? { body: mine[0]! } : await post("/servers", { name: "Casa do Thiago" }, login);
+    const inv = await post("/invites", { serverId: own.body.id }, login);
+    expect(inv.status).toBe(200);
+    const preview = await fetch(`${base}/account-invites/${inv.body.code}`);
+    expect(await preview.json()).toEqual({ serverName: own.body.name });
+    const r = await post("/auth/register", { inviteCode: inv.body.code, username: "duda", password: "12345678" });
+    expect(r.status).toBe(200);
+    expect((await get("/servers", r.body.token)).body).toMatchObject([{ id: own.body.id, role: "member" }]);
+    expect((await get(`/servers/${own.body.id}/members`, login)).body.some((m: any) => m.username === "duda")).toBe(true);
+    // uso único, e a prévia some depois de usado
+    expect((await post("/auth/register", { inviteCode: inv.body.code, username: "duda2", password: "12345678" })).status).toBe(403);
+    expect((await fetch(`${base}/account-invites/${inv.body.code}`)).status).toBe(404);
+    // sem servidor a prévia diz null
+    const plain = await post("/invites", {}, login);
+    expect(await (await fetch(`${base}/account-invites/${plain.body.code}`)).json()).toEqual({ serverName: null });
   });
 });

@@ -20,6 +20,9 @@ import { loadPrefs, micConstraints, needsAudioProcessor, savePrefs, screenProfil
 import { preferHardwareH264 } from "./codec";
 import { preloadNoiseWasm, publishAsMono, RnnoiseProcessor } from "./rnnoise";
 import { loadSoundPrefs, playSound, type SoundName } from "../sounds";
+import { desktop } from "../desktop";
+import { DesktopShareAudio, desktopShareAudioSupported } from "./screen-audio";
+import { SpeakingDetector } from "./speaking";
 
 export interface CallParticipant {
   id: string;
@@ -41,6 +44,8 @@ export interface VideoTile {
   track?: Track;
   watching: boolean;
   speaking: boolean;
+  /** A transmissão tem áudio (do computador de quem transmite). */
+  hasAudio?: boolean;
 }
 
 /** Diagnóstico da sua própria transmissão, lido do encoder. */
@@ -137,6 +142,8 @@ export class VoiceClient {
   private joinSeq = 0;
   /** Quem você escolheu assistir (transmissões de tela só chegam a quem pede). */
   private watching = new Set<string>();
+  /** Anel de quem fala medido aqui (rápido); o do servidor fica de reserva. */
+  private speakingDetector = new SpeakingDetector(() => this.micTracks(), () => this.refresh());
   /** Publicações remotas para as quais já pedimos (ou cancelamos) a assinatura. */
   private asked = new Set<string>();
   private statsTimer?: ReturnType<typeof setInterval>;
@@ -147,6 +154,8 @@ export class VoiceClient {
   /** Até quando ignorar entradas e saídas dos outros (logo depois de reconectar o LiveKit reanuncia todo mundo). */
   private presenceQuietUntil = 0;
   private lastPresenceSound = 0;
+  /** Áudio da transmissão vindo do app desktop (por processo, sem o som do Turtle). */
+  private shareAudio?: DesktopShareAudio;
 
   constructor(private report: VoiceReporter) {
     // A rede voltou: tenta já, sem esperar a vez.
@@ -206,12 +215,15 @@ export class VoiceClient {
       adaptiveStream: true,
       dynacast: true,
       disconnectOnPageLeave: true,
+      // Áudio das pessoas passa por um GainNode do Web Audio: só assim o volume por pessoa passa de 100% (até 200%).
+      webAudioMix: true,
       audioCaptureDefaults: micConstraints(prefs),
       audioOutput: { deviceId: prefs.outputId },
       publishDefaults: { audioPreset: { maxBitrate: 64_000 }, dtx: true, red: true, forceStereo: false },
     });
     this.room = room;
     this.wire(room);
+    this.speakingDetector.start();
 
     try {
       // Token + conexão e microfone em paralelo: entrar fica abaixo de ~1 s numa rede boa.
@@ -228,6 +240,8 @@ export class VoiceClient {
         this.applyVolume(p);
         this.syncSubscriptions(p);
       }
+      // Com webAudioMix a saída escolhida vai para o AudioContext, que só existe depois de conectar.
+      if (prefs.outputId && prefs.outputId !== "default") void room.switchActiveDevice("audiooutput", prefs.outputId).catch(() => {});
       this.rejoin = undefined;
       this.set({ status: "connected" });
       this.presenceQuietUntil = Date.now() + 1500;
@@ -278,6 +292,7 @@ export class VoiceClient {
       return;
     }
     this.stopStats();
+    this.stopShareAudio();
     this.asked.clear();
     this.set({ status: "reconnecting", channelId, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false });
     const timer = setTimeout(() => void this.join(channelId, true), delay);
@@ -334,7 +349,9 @@ export class VoiceClient {
 
   /** Volta ao estado "fora da chamada", mantendo mudo/ensurdecer e as preferências. */
   private resetCall(extra: Partial<VoiceSnapshot>) {
+    this.speakingDetector.stop();
     this.stopStats();
+    this.stopShareAudio();
     this.watching.clear();
     this.asked.clear();
     this.set({ status: "idle", channelId: undefined, participants: [], videos: [], camera: false, screen: false, shareStats: undefined, needsAudioUnlock: false, ...extra });
@@ -380,11 +397,21 @@ export class VoiceClient {
     if (!room || this.snap.status === "idle" || room.localParticipant.isScreenShareEnabled) return;
     const { screenProfile, screenAudio, screenSimulcast } = this.snap.prefs;
     const prof = screenProfiles[screenProfile];
+    // App desktop novo (Windows): o vídeo vem sem áudio e o áudio vem por processo, sem o som do Turtle
+    // (quem está na chamada não se escuta) e, numa janela, só o som daquele programa.
+    // O AudioContext nasce aqui, ainda dentro do clique.
+    let ctx = screenAudio && desktop()?.shareAudio ? DesktopShareAudio.context() : undefined;
+    const native = !!ctx && (await desktopShareAudioSupported()) && (await desktop()!.shareAudio!.want(true).catch(() => false));
+    if (!native && ctx) {
+      void ctx.close().catch(() => {});
+      ctx = undefined;
+    }
     try {
       await room.localParticipant.setScreenShareEnabled(
         true,
         {
-          audio: screenAudio
+          // No navegador, restrictOwnAudio tira o som da própria aba (Chrome); o Electron antigo ignora.
+          audio: screenAudio && !native
             ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, restrictOwnAudio: true }
             : false,
           resolution: { width: prof.width, height: prof.height, frameRate: prof.fps },
@@ -411,13 +438,60 @@ export class VoiceClient {
       this.set({ screen: room.localParticipant.isScreenShareEnabled, error: undefined });
       if (this.snap.screen) this.startStats();
       else await this.stopScreenAudio(room);
+      if (ctx && this.snap.screen) {
+        const c = ctx;
+        ctx = undefined;
+        await this.publishShareAudio(room, c);
+      }
     } catch (err) {
       const e = err as Error;
       // Cancelar o seletor do navegador não é erro.
       this.set({ screen: false, error: e.name === "NotAllowedError" || /Permission denied/i.test(e.message) ? undefined : `Não deu para transmitir a tela (${e.message}).` });
+    } finally {
+      if (native) void desktop()?.shareAudio?.want(false).catch(() => {});
+      if (ctx) void ctx.close().catch(() => {});
     }
     this.reportState();
     this.refresh();
+  }
+
+  /** Publica o áudio por processo da fonte escolhida. Se falhar, a transmissão segue sem som. */
+  private async publishShareAudio(room: Room, ctx: AudioContext) {
+    const res = await DesktopShareAudio.start(ctx).catch((err: Error) => ({ reason: err.message }));
+    if (!(res instanceof DesktopShareAudio)) {
+      const why = res.reason === "own-window" ? "a janela é do próprio Turtle" : res.reason === "no-process" ? "não achei o programa dessa janela" : res.reason;
+      this.set({ error: `A transmissão está sem áudio (${why}).` });
+      return;
+    }
+    // Parou de transmitir enquanto o áudio começava.
+    if (this.room !== room || !room.localParticipant.isScreenShareEnabled) return res.stop();
+    this.shareAudio = res;
+    try {
+      await room.localParticipant.publishTrack(res.track, {
+        source: Track.Source.ScreenShareAudio,
+        // Igual ao áudio de tela do navegador: estéreo, sem DTX nem RED, 128 kb/s (música e jogo).
+        audioPreset: { maxBitrate: 128_000 },
+        forceStereo: true,
+        dtx: false,
+        red: false,
+      });
+      // O vídeo acabou enquanto o áudio publicava: não deixa o áudio sozinho na sala.
+      if (this.room === room && !room.localParticipant.isScreenShareEnabled) await this.stopScreenAudio(room);
+    } catch (err) {
+      this.stopShareAudio();
+      this.set({ error: `A transmissão está sem áudio (${(err as Error).message}).` });
+    }
+  }
+
+  /** Para o áudio da transmissão e tira a publicação dele (o LiveKit não tira sozinho quando o vídeo acaba por fora). */
+  private stopShareAudio() {
+    const room = this.room;
+    if (room) void this.stopScreenAudio(room).catch(() => {});
+    else {
+      const a = this.shareAudio;
+      this.shareAudio = undefined;
+      a?.stop();
+    }
   }
 
   async stopScreen() {
@@ -440,7 +514,11 @@ export class VoiceClient {
     }
   }
 
+  /** Versão que espera: para o áudio por processo do app desktop e o áudio de tela do navegador, e tira a publicação. */
   private async stopScreenAudio(room: Room) {
+    const a = this.shareAudio;
+    this.shareAudio = undefined;
+    a?.stop();
     const track = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
     if (!track) return;
     track.stop();
@@ -533,6 +611,15 @@ export class VoiceClient {
     this.applyVolumes();
   }
 
+  /** Silenciar uma pessoa só para mim (os outros continuam ouvindo). */
+  setLocalMute(userId: string, muted: boolean) {
+    const localMutes = { ...this.snap.prefs.localMutes };
+    if (muted) localMutes[userId] = true;
+    else delete localMutes[userId];
+    this.savePrefs({ localMutes });
+    this.applyVolumes();
+  }
+
   /** Volume do áudio da transmissão de tela de uma pessoa (separado da voz dela). */
   setStreamVolume(userId: string, volume: number) {
     this.savePrefs({ streamVolumes: { ...this.snap.prefs.streamVolumes, [userId]: volume } });
@@ -540,6 +627,7 @@ export class VoiceClient {
   }
 
   async unlockAudio() {
+    this.speakingDetector.resume();
     await this.room?.startAudio();
   }
 
@@ -550,7 +638,7 @@ export class VoiceClient {
   }
 
   private volumeFor(userId: string) {
-    return this.snap.deafened ? 0 : (this.snap.prefs.volumes[userId] ?? 1);
+    return this.snap.deafened || this.snap.prefs.localMutes[userId] ? 0 : (this.snap.prefs.volumes[userId] ?? 1);
   }
 
   private streamVolumeFor(userId: string) {
@@ -714,8 +802,8 @@ export class VoiceClient {
         // O botão "Parar compartilhamento" do navegador encerra a captura por fora do app.
         if (this.room !== room) return;
         const lp = room.localParticipant;
-        if (pub.source === Track.Source.ScreenShare && !lp.isScreenShareEnabled) {
-          // TrackEnded only unpublishes the ended track, not its paired audio.
+        if (!lp.isScreenShareEnabled && (pub.source === Track.Source.ScreenShare || this.shareAudio || lp.getTrackPublication(Track.Source.ScreenShareAudio))) {
+          // TrackEnded só tira a publicação da track que acabou, não o áudio pareado (do navegador ou do app desktop).
           void this.stopScreenAudio(room).catch(() => {
             if (this.room === room) this.set({ error: "Não foi possível encerrar o áudio da transmissão. Saia da chamada para interrompê-lo." });
           });
@@ -776,6 +864,22 @@ export class VoiceClient {
       });
   }
 
+  /** Track de microfone de cada pessoa da sala (a minha e as que já chegaram aqui). */
+  private micTracks() {
+    const out = new Map<string, MediaStreamTrack>();
+    const room = this.room;
+    if (!room) return out;
+    for (const p of [room.localParticipant, ...room.remoteParticipants.values()]) {
+      const t = p.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+      if (t) out.set(p.identity, t);
+    }
+    return out;
+  }
+
+  private speakingOf(p: Participant) {
+    return this.speakingDetector.isSpeaking(p.identity) ?? p.isSpeaking;
+  }
+
   private refresh() {
     const room = this.room;
     if (!room) return;
@@ -783,20 +887,21 @@ export class VoiceClient {
       id: p.identity,
       name: p.name || p.identity,
       isLocal,
-      speaking: p.isSpeaking,
+      speaking: this.speakingOf(p),
       muted: isLocal ? this.snap.muted : (p.getTrackPublication(Track.Source.Microphone)?.isMuted ?? true),
       quality: qualityName(p.connectionQuality),
     });
     const everyone: [Participant, boolean][] = [[room.localParticipant, true], ...[...room.remoteParticipants.values()].map((p): [Participant, boolean] => [p, false])];
     const videos: VideoTile[] = [];
     for (const [p, isLocal] of everyone) {
-      const base = { userId: p.identity, name: p.name || p.identity, isLocal, speaking: p.isSpeaking };
+      const base = { userId: p.identity, name: p.name || p.identity, isLocal, speaking: this.speakingOf(p) };
       const cam = p.getTrackPublication(Track.Source.Camera);
       if (cam && !cam.isMuted) videos.push({ ...base, key: `${p.identity}:camera`, source: "camera", track: cam.track, watching: true });
       const scr = p.getTrackPublication(Track.Source.ScreenShare);
       if (scr && !scr.isMuted) {
         const watching = isLocal || this.watching.has(p.identity);
-        videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching });
+        const hasAudio = !!p.getTrackPublication(Track.Source.ScreenShareAudio);
+        videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching, hasAudio });
       }
     }
     this.set({

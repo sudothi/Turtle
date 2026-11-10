@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
 import { Avatar, Icon, StaffTag, type IconName } from "@turtle/ui";
@@ -82,6 +82,7 @@ export function ChannelSidebar({
   onSettings,
   onLeave,
   onProfile,
+  onMenu,
   footer,
   unread,
   onEdit,
@@ -109,6 +110,8 @@ export function ChannelSidebar({
   onLeave?: () => void;
   /** Abre o cartão de perfil de quem está na chamada. */
   onProfile: (userId: string) => void;
+  /** Clique direito em quem está na chamada (menu da pessoa). */
+  onMenu?: (userId: string, e: ReactMouseEvent) => void;
   footer: ReactNode;
 }) {
   const text = channels.filter((c) => c.kind === "text");
@@ -159,7 +162,7 @@ export function ChannelSidebar({
                   <ul className="voice-members">
                     {members.map((v) => (
                       <li key={v.userId}>
-                        <button className="voice-member-who" title="Ver perfil" onClick={() => onProfile(v.userId)}>
+                        <button className="voice-member-who" title="Ver perfil" onClick={() => onProfile(v.userId)} onContextMenu={onMenu && ((e) => onMenu(v.userId, e))}>
                           <Avatar name={shownName(v)} src={fileUrl(v.avatar)} size={24} speaking={speaking.has(v.userId)} />
                           <span className="voice-member-name">{shownName(v)}</span>
                           {v.staff && <StaffTag />}

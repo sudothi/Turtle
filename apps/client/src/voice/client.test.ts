@@ -6,6 +6,7 @@ vi.mock("./rnnoise", () => ({ preloadNoiseWasm: vi.fn(async () => undefined), pu
 vi.mock("./codec", () => ({ preferHardwareH264: vi.fn() }));
 vi.mock("../sounds", () => ({ loadSoundPrefs: () => ({}), playSound: vi.fn() }));
 vi.mock("../api", () => ({ api: { voiceToken: vi.fn(async () => ({ url: "wss://voice.test", token: "test" })) } }));
+vi.mock("../desktop", () => ({ desktop: () => undefined }));
 vi.mock("livekit-client", async original => {
   const sdk = await original<typeof import("livekit-client")>();
   const { EventEmitter } = await import("node:events");

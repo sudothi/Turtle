@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { User } from "@turtle/protocol";
 import { Button, TextField, TurtleLogo, TurtleMark } from "@turtle/ui";
 import { api, setToken } from "../api";
@@ -22,6 +22,14 @@ export function AuthScreen({ onAuth, onHome }: { onAuth: (u: User) => void; /** 
   const [mode, setMode] = useState<Mode>(linkCode ? "register" : "login");
   const [error, setError] = useState<{ fields: Field[]; message: string }>();
   const [busy, setBusy] = useState(false);
+  // Convite de conta que já coloca num servidor: mostra qual, para a pessoa saber onde vai cair.
+  const [joining, setJoining] = useState<string | null>(null);
+  useEffect(() => {
+    if (!linkCode) return;
+    let stale = false;
+    api.accountInvitePreview(linkCode).then((p) => !stale && setJoining(p.serverName), () => {});
+    return () => { stale = true; };
+  }, [linkCode]);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -51,9 +59,9 @@ export function AuthScreen({ onAuth, onHome }: { onAuth: (u: User) => void; /** 
     <main className="auth lino-live">
       {onHome ? (
         <a
-          href="/"
+          href="/inicio"
           className="auth-brand"
-          aria-label="Página inicial do Turtle"
+          aria-label="Página de entrada do Turtle"
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
             e.preventDefault();
@@ -80,7 +88,7 @@ export function AuthScreen({ onAuth, onHome }: { onAuth: (u: User) => void; /** 
           ) : (
             <header>
               <h1 className="t-display">Criar uma conta</h1>
-              <p className="t-muted">Só entra quem recebeu um convite.</p>
+              <p className="t-muted">{joining ? <>Você vai entrar direto em <b>{joining}</b>.</> : "Só entra quem recebeu um convite."}</p>
             </header>
           )}
 

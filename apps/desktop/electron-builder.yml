@@ -12,6 +12,9 @@ files:
   - package.json
   - "!node_modules/**"
 asar: true
+# Addon nativo do áudio da transmissão (screen-audio.ts): .node não carrega de dentro do asar.
+asarUnpack:
+  - dist/native/**
 electronLanguages: [pt-BR, en-US]
 
 win:

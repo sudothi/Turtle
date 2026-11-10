@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { shownName, type Person, type ProfileView, type ServerRole } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { copyText } from "../clipboard";
 import { ActivityLine, usePresence } from "../presence";
 
 /*
@@ -25,6 +26,10 @@ export interface ProfileHandlers {
   /** Abre as configurações do próprio perfil. */
   onEditProfile: () => void;
   onOpenServer?: (serverId: string) => void;
+  /** A pessoa está transmitindo a tela numa chamada que você enxerga. */
+  streaming?: (userId: string) => boolean;
+  /** Entrar na chamada dela (se precisar) e assistir à transmissão. */
+  onWatch?: (userId: string) => void;
 }
 
 /** Carrega o perfil e recarrega depois de cada ação (amizade, bloqueio). */
@@ -112,7 +117,7 @@ function MoreMenu({ profile, act, align = "right" }: { profile: ProfileView; act
       </IconButton>
       {open && (
         <div className={`menu up-menu lino up-menu-${align}`} role="menu">
-          <button role="menuitem" className="menu-item" onClick={() => { setOpen(false); void navigator.clipboard?.writeText(profile.username); }}>
+          <button role="menuitem" className="menu-item" onClick={() => { setOpen(false); void copyText(profile.username); }}>
             <span>Copiar nome de usuário</span>
             <Icon name="copy" size={16} />
           </button>
@@ -240,6 +245,15 @@ export function ProfilePopout({
         </Masthead>
         <div className="up-body">
           <Names profile={profile} role={role} onOpen={onFull} />
+          {!mine && h.onWatch && h.streaming?.(userId) && (
+            <div className="up-live">
+              <span className="live-badge">AO VIVO</span>
+              <span className="t-muted">Transmitindo a tela</span>
+              <Button block size="sm" onClick={() => { onClose(); h.onWatch!(userId); }}>
+                <Icon name="eye" size={18} /> Assistir transmissão
+              </Button>
+            </div>
+          )}
           <div className="up-card">
             <About profile={profile} compact />
           </div>

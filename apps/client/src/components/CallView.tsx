@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type TouchEvent } from "react";
-import { shownName, type Channel, type VoiceState } from "@turtle/protocol";
+import { useEffect, useRef, useState, type MouseEvent, type TouchEvent } from "react";
+import { shownName, type Channel, type Server, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
-import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
+import { Avatar, Button, Icon, IconButton, SoundIcon, StaffTag } from "@turtle/ui";
+import { SoundboardButton, useSoundboard } from "./Soundboard";
+import { MAX_VOLUME } from "../voice/prefs";
 import type { CallParticipant, ShareStats, VideoTile, VoiceClient, VoiceSnapshot } from "../voice/client";
 import { ChannelHeader } from "./ChatView";
 import { ShareModal } from "./ShareModal";
@@ -83,11 +85,12 @@ function StatsLine({ stats }: { stats?: ShareStats }) {
 }
 
 /** Cartão de uma pessoa: câmera se estiver ligada, senão o avatar. */
-function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, strip }: { p: CallParticipant; onProfile?: (userId: string) => void; profile?: VoiceState; camera?: VideoTile; voice: VoiceClient; snap: VoiceSnapshot; onFocus: () => void; strip?: boolean }) {
+function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, onMenu, strip }: { p: CallParticipant; onProfile?: (userId: string) => void; onMenu?: PersonMenuHandler; profile?: VoiceState; camera?: VideoTile; voice: VoiceClient; snap: VoiceSnapshot; onFocus: () => void; strip?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const speaking = p.speaking && !p.muted;
+  const flash = useSoundboard().flashes[p.id];
   return (
-    <div ref={ref} className={`tile lino lino-lg ${speaking ? "speaking" : ""} ${camera?.track ? "has-video" : ""}`} onDoubleClick={() => (camera ? toggleFullscreen(ref.current) : onFocus())}>
+    <div ref={ref} className={`tile lino lino-lg ${speaking ? "speaking" : ""} ${camera?.track ? "has-video" : ""}`} onDoubleClick={() => (camera ? toggleFullscreen(ref.current) : onFocus())} onContextMenu={onMenu && ((e) => onMenu(p.id, e))}>
       {camera?.track ? <VideoView track={camera.track} className={p.isLocal && snap.facing === "user" ? "mirror" : ""} /> : <Avatar name={profile ? shownName(profile) : p.name} src={fileUrl(profile?.avatar)} size={strip ? 48 : 88} speaking={speaking} />}
       <div className="tile-name">
         {p.muted && <Icon name="mic-off" size={16} />}
@@ -97,6 +100,11 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, strip
           {p.isLocal && " (você)"}
         </button>
       </div>
+      {flash && (
+        <div className="tile-sound lino" key={flash.until} role="status" aria-label={`${p.name} tocou ${flash.sound.name}`} title={flash.sound.name}>
+          <SoundIcon name={flash.sound.icon} size={strip ? 16 : 24} />
+        </div>
+      )}
       {!strip && qualityLabel[p.quality] && <div className="tile-quality t-muted">{qualityLabel[p.quality]}</div>}
       {!strip && (
         <div className="tile-actions">
@@ -110,10 +118,49 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, strip
       {!strip && !p.isLocal && (
         <input
           className="tile-volume"
-          type="range" min={0} max={1} step={0.05} aria-label={`Volume de ${p.name}`}
+          type="range" min={0} max={MAX_VOLUME} step={0.05} aria-label={`Volume de ${p.name}`}
           value={snap.prefs.volumes[p.id] ?? 1}
           onChange={(e) => voice.setVolume(p.id, Number(e.target.value))}
         />
+      )}
+    </div>
+  );
+}
+
+/** Volume do áudio da transmissão (separado da voz da pessoa), no canto do vídeo: clique abre o controle. */
+function StreamVolume({ v, voice, snap }: { v: VideoTile; voice: VoiceClient; snap: VoiceSnapshot }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const vol = snap.prefs.streamVolumes[v.userId] ?? 1;
+  // Volume antes de mutar, para o botão de mudo voltar onde estava.
+  const before = useRef(vol || 1);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  const set = (n: number) => {
+    if (n > 0) before.current = n;
+    voice.setStreamVolume(v.userId, n);
+  };
+  return (
+    <div ref={box} className="stream-volume" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <IconButton label={`Volume da transmissão: ${Math.round(vol * 100)}%`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Icon name={vol === 0 ? "speaker-off" : "speaker"} size={18} />
+      </IconButton>
+      {open && (
+        <div className="stream-volume-pop lino" role="group" aria-label={`Volume da transmissão de ${v.name}`}>
+          <IconButton label={vol === 0 ? "Ativar som da transmissão" : "Silenciar transmissão"} onClick={() => set(vol === 0 ? before.current : 0)}>
+            <Icon name={vol === 0 ? "speaker-off" : "speaker"} size={18} />
+          </IconButton>
+          <input
+            type="range" min={0} max={MAX_VOLUME} step={0.05} aria-label={`Volume da transmissão de ${v.name}`}
+            value={vol}
+            onChange={(e) => set(Number(e.target.value))}
+          />
+          <span className="stream-volume-pct">{Math.round(vol * 100)}%</span>
+        </div>
       )}
     </div>
   );
@@ -159,6 +206,7 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
           <IconButton label="Tela cheia" onClick={(e) => { e.stopPropagation(); toggleFullscreen(ref.current, mobile); }}>
             <Icon name="screen" size={18} />
           </IconButton>
+          {!v.isLocal && v.hasAudio && <StreamVolume v={v} voice={voice} snap={snap} />}
           {!v.isLocal && (
             <select
               className="watch-quality"
@@ -179,20 +227,15 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
           )}
         </div>
       )}
-      {v.track && !strip && !v.isLocal && (
-        <input
-          className="tile-volume visible"
-          type="range" min={0} max={1} step={0.05} aria-label={`Volume da transmissão de ${v.name}`}
-          value={snap.prefs.streamVolumes[v.userId] ?? 1}
-          onChange={(e) => voice.setStreamVolume(v.userId, Number(e.target.value))}
-        />
-      )}
     </div>
   );
 }
 
+/** Clique direito numa pessoa (abre o menu dela). */
+export type PersonMenuHandler = (userId: string, e: MouseEvent) => void;
+
 /** Palco da chamada, no estilo do Discord: grade de cartões e barra de controles embaixo. */
-export function CallView({ channel, snap, voice, members = [], onProfile }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[]; onProfile?: (userId: string) => void }) {
+export function CallView({ channel, snap, voice, members = [], onProfile, onMenu, server, meId }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[]; onProfile?: (userId: string) => void; onMenu?: PersonMenuHandler; /** Servidor da chamada (liga o soundboard). */ server?: Server; meId?: string }) {
   const [focus, setFocus] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const mobile = useMobile();
@@ -218,7 +261,7 @@ export function CallView({ channel, snap, voice, members = [], onProfile }: { ch
   const focusedScreen = screens.find((v) => v.key === focus && v.track);
 
   const person = (p: CallParticipant, strip?: boolean) => (
-    <PersonTile key={p.id} p={p} profile={members.find((m) => m.userId === p.id)} camera={cameras.get(p.id)} voice={voice} snap={snap} strip={strip} onFocus={() => {}} onProfile={onProfile} />
+    <PersonTile key={p.id} p={p} profile={members.find((m) => m.userId === p.id)} camera={cameras.get(p.id)} voice={voice} snap={snap} strip={strip} onFocus={() => {}} onProfile={onProfile} onMenu={onMenu} />
   );
   const screen = (v: VideoTile, strip?: boolean) => (
     <ScreenTile key={v.key} v={v} voice={voice} snap={snap} strip={strip} focused={focusedScreen?.key === v.key} onFocus={() => setFocus(focusedScreen?.key === v.key ? undefined : v.key)} />
@@ -233,7 +276,7 @@ export function CallView({ channel, snap, voice, members = [], onProfile }: { ch
       {!inThis ? (
         <div className="call-lobby">
           <div className="call-lobby-faces">
-            {here.length ? here.map((m) => <button key={m.userId} className="lobby-face" title={`Perfil de ${shownName(m)}`} onClick={() => onProfile?.(m.userId)}><Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={72} /></button>) : <Icon name="speaker" size={56} />}
+            {here.length ? here.map((m) => <button key={m.userId} className="lobby-face" title={`Perfil de ${shownName(m)}`} onClick={() => onProfile?.(m.userId)} onContextMenu={onMenu && ((e) => onMenu(m.userId, e))}><Avatar name={shownName(m)} src={fileUrl(m.avatar)} size={72} /></button>) : <Icon name="speaker" size={56} />}
           </div>
           <h2 className="t-display">{channel.name}</h2>
           <p className="t-muted">{here.length ? `${here.map((m) => shownName(m)).join(", ")} ${here.length > 1 ? "estão" : "está"} na chamada.` : "Ninguém na chamada ainda."}</p>
@@ -285,6 +328,7 @@ export function CallView({ channel, snap, voice, members = [], onProfile }: { ch
             >
               <Icon name={snap.screen ? "screen-off" : "screen"} size={24} />
             </IconButton>}
+            {server && meId && channel.serverId === server.id && <SoundboardButton server={server} meId={meId} deafened={snap.deafened} />}
             <IconButton label="Sair da chamada" className="big hangup" onClick={() => void voice.leave()}>
               <Icon name="phone-off" size={26} />
             </IconButton>

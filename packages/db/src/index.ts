@@ -12,6 +12,9 @@ export { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export const MIGRATION = `
+CREATE TABLE IF NOT EXISTS waitlist_entries (
+  email text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(),
+  notification_attempted_at timestamptz, notification_sent_at timestamptz);
 CREATE TABLE IF NOT EXISTS users (
   id text PRIMARY KEY, username text NOT NULL UNIQUE, password_hash text NOT NULL,
   is_admin boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
@@ -176,6 +179,24 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent text;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at timestamptz NOT NULL DEFAULT now();
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days');
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
+
+-- Apelido por servidor (menu de clique direito na pessoa).
+ALTER TABLE server_members ADD COLUMN IF NOT EXISTS nickname text;
+
+-- Convite de conta que já coloca a pessoa num servidor.
+ALTER TABLE invites ADD COLUMN IF NOT EXISTS server_id text REFERENCES servers(id) ON DELETE SET NULL;
+
+-- Soundboard: sons curtos por servidor, tocados na chamada.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS soundboard_admins_only boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS soundboard_sounds (
+  id text PRIMARY KEY,
+  server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
+  name text NOT NULL, icon text NOT NULL, volume real NOT NULL DEFAULT 1,
+  duration_ms integer NOT NULL, size integer NOT NULL, file_key text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS soundboard_sounds_server_idx ON soundboard_sounds (server_id);
+CREATE UNIQUE INDEX IF NOT EXISTS soundboard_sounds_key_idx ON soundboard_sounds (file_key);
 `;
 
 export interface DbHandle {

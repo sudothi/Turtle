@@ -362,7 +362,9 @@
 .call-lobby h2 { margin: 0; font-size: var(--fs-2xl); }
 .call-lobby p { margin: 0 0 12px; }
 
-.tiles { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 12px; padding: 16px; align-content: center; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* Linhas do tamanho do conteúdo: com aspect-ratio, linhas automáticas encolhiam e a transmissão (16:9) passava
+   por cima dos cartões de baixo (bem visível com tela em pé ou janela estreita). "safe center" deixa rolar até o topo. */
+.tiles { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 12px; padding: 16px; align-content: safe center; grid-auto-rows: max-content; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); container-type: size; }
 .tile {
   --lino-bg: var(--ink-3);
   --lino-radius: 10px;
@@ -472,6 +474,13 @@
 .tile.has-video .video-view { inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); border-radius: calc(var(--lino-radius) - 3px); }
 .tile.has-video .tile-name, .tile.has-video .tile-quality, .tile.has-video .tile-actions, .tile.has-video .tile-volume { z-index: 1; }
 .screen-tile { grid-column: span 2; aspect-ratio: 16 / 9; }
+/* Na grade, a transmissão fica em até 60% da altura do palco: sobra espaço para as pessoas e o vídeo
+   (contain) se ajusta dentro, seja qual for a proporção da tela de quem transmite. */
+.tiles .screen-tile { max-height: 60cqh; min-height: 0; width: 100%; }
+.tiles:has(.screen-tile) > .tile:not(.screen-tile) { max-height: max(120px, calc(40cqh - 12px)); min-height: 0; }
+/* Só cabe uma coluna: "span 2" criaria uma coluna extra fora da tela. */
+@container (max-width: 491px) { .tiles .screen-tile { grid-column: 1 / -1; } }
+.tiles .screen-tile:fullscreen, .tiles > .tile:fullscreen { max-height: none; }
 .screen-tile.focused { grid-column: auto; }
 .screen-wait { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--paper); text-align: center; padding: 8px; }
 .live-badge { padding: 1px 6px; border-radius: 3px; background: var(--paper); color: var(--ink-0); font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.06em; }
@@ -479,6 +488,12 @@
 .tile-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; opacity: 0; transition: opacity var(--dur); }
 .tile:hover .tile-actions, .tile:focus-within .tile-actions { opacity: 1; }
 .tile-volume.visible { opacity: 1; }
+.stream-volume { position: relative; }
+.stream-volume-pop { --lino-bg: var(--ink-2); position: absolute; top: calc(100% + 6px); right: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border-radius: 8px; background: var(--ink-2); z-index: 3; }
+.stream-volume-pop input { width: 140px; accent-color: var(--paper); }
+.stream-volume-pct { min-width: 4ch; text-align: right; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--paper); }
+/* Com o controle aberto, os botões do canto não somem ao tirar o mouse. */
+.tile-actions:has(.stream-volume-pop) { opacity: 1; }
 .tile-stats { position: absolute; top: 10px; left: 12px; right: 12px; padding: 3px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.7); font-size: var(--fs-xs); z-index: 1; }
 .tile:fullscreen { --lino-radius: 0; background: #000; }
 .focus-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 0; }
@@ -587,7 +602,7 @@
 .dm-group-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--ink-4); color: var(--paper); flex: none; }
 .channel.dm .live-badge { margin-left: auto; }
 .dm-call { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.dm-call-back { padding: 6px 16px; text-align: left; color: var(--text-muted); }
+.dm-call-back { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; text-align: left; color: var(--text-muted); }
 .dm-call .call { flex: 1; min-height: 0; }
 .new-group { display: flex; flex-direction: column; gap: 12px; }
 .new-group-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
@@ -841,7 +856,7 @@
 .desktop-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.45; }
 .desktop-foot { margin: 0; }
 
-/* Página inicial do site (/ e /download): tartaruga gigante nadando no canto inferior esquerdo. */
+/* Páginas públicas: a mesma tartaruga nadando no canto inferior esquerdo. */
 .landing { position: relative; min-height: 100%; overflow: hidden; background: var(--ink-0); color: var(--paper); }
 .landing-top { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 28px; }
 .landing-brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-xl); color: var(--paper); text-decoration: none; }
@@ -850,6 +865,13 @@
 .landing-tab:hover { color: var(--paper); }
 .landing-tab.active { color: var(--paper); border-bottom-color: var(--paper); }
 .landing-login { text-decoration: none; display: inline-flex; align-items: center; }
+.waitlist-content { position: relative; z-index: 2; width: min(420px, calc(100% - 56px)); margin: 80px 8vw 240px auto; }
+.waitlist-content h1 { margin: 0 0 var(--sp-4); font-size: var(--fs-2xl); line-height: 1.1; text-wrap: balance; }
+.waitlist-intro { margin: 0 0 var(--sp-6); color: var(--text-muted); line-height: 1.6; text-wrap: pretty; }
+.waitlist-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.waitlist-note { margin: 0; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.5; }
+.waitlist-error { margin: 0; color: var(--paper); font-size: var(--fs-sm); }
+.waitlist-success { margin: 0; padding-block: var(--sp-4); border-block: 2px solid var(--ink-5); line-height: 1.6; }
 .landing-panel {
   --lino-bg: var(--ink-2);
   --lino-border: 2px solid var(--paper);
@@ -898,6 +920,7 @@
   .landing-top { padding: 16px; }
   .landing-brand { font-size: var(--fs-lg); }
   .landing-panel { margin: 8px auto 40vw; padding: 20px; }
+  .waitlist-content { width: calc(100% - 32px); margin: 40px auto max(240px, 65vw); }
   .swim-turtle { left: -50px; bottom: -60px; width: 88vw; }
 }
 .desktop-hero > svg { flex: none; width: 40px; height: 40px; }
@@ -953,3 +976,88 @@ a.auth-brand { text-decoration: none; }
 .ring-card > span { flex: 1; min-width: 0; }
 .watch-quality { font-size: 12px; background: var(--ink-2); color: var(--paper); border: 1px solid var(--text-muted); border-radius: 4px; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 12px 0; cursor: pointer; }
+
+/* Menu do clique direito numa pessoa (call, lista de voz, membros). */
+.menu.person-menu { position: fixed; right: auto; width: 230px; max-height: calc(100vh - 16px); overflow-y: auto; z-index: 60; }
+.person-menu-title { margin: 2px 8px 4px; }
+.person-menu-volume { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; color: var(--paper-dim); font-size: var(--fs-sm); font-weight: 600; }
+.person-menu-volume span { display: flex; justify-content: space-between; }
+.person-menu-volume input { width: 100%; accent-color: var(--paper); }
+.person-menu-check { display: inline-grid; place-items: center; width: 16px; height: 16px; border: 2px solid currentColor; border-radius: 3px; }
+.person-menu-check.on { background: var(--paper); color: var(--ink-0); border-color: var(--paper); }
+.menu-item:hover .person-menu-check.on { background: var(--ink-0); color: var(--paper); border-color: var(--ink-0); }
+
+/* ===================== Soundboard ===================== */
+.sb-anchor { position: relative; }
+.sb-panel {
+  --lino-bg: var(--ink-2); --lino-radius: 12px; --slash-gap: var(--ink-3);
+  position: fixed; bottom: 96px; left: 16px;
+  width: min(420px, calc(100vw - 32px)); max-height: min(520px, 70vh);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px; z-index: 20;
+}
+.sb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sb-head b { font-size: var(--fs-lg, 1.1rem); }
+.sb-volume { display: flex; align-items: center; gap: 8px; }
+.sb-volume input { width: 160px; accent-color: var(--paper); }
+.sb-volume.compact input { width: 110px; }
+.sb-volume-pct { min-width: 3.2em; font-size: var(--fs-xs); color: var(--paper-dim, #9a9790); text-align: right; }
+.sb-search { background: var(--ink-1); color: var(--paper); border: 1px solid var(--ink-4); border-radius: 6px; padding: 8px 10px; font: inherit; }
+.sb-search:focus { outline: 2px solid var(--paper); outline-offset: 1px; }
+.sb-note { margin: 0; font-size: var(--fs-sm); }
+.sb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; overflow-y: auto; padding: 2px; }
+.sb-sound {
+  --lino-bg: var(--ink-3); --lino-radius: 8px; --slash-gap: var(--ink-3);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px 10px;
+  color: var(--paper); border: none; cursor: pointer; font: inherit; font-size: var(--fs-xs); min-height: 82px;
+}
+.sb-sound span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-sound:hover:not(:disabled) { --lino-bg: var(--ink-4); --slash-gap: var(--ink-4); transform: rotate(-2deg); }
+.sb-sound:active:not(:disabled) { --lino-bg: var(--paper); --slash-gap: var(--paper); color: var(--ink-0); }
+.sb-sound:disabled { opacity: 0.45; cursor: not-allowed; }
+.sb-grid.cooling .sb-sound:not(.sb-add) { position: relative; overflow: hidden; }
+.sb-grid.cooling .sb-sound:not(.sb-add)::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--paper);
+  transform-origin: left; animation: sb-cool var(--sb-cool, 3s) linear forwards;
+}
+@keyframes sb-cool { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.sb-add { --lino-bg: transparent; outline: 2px dashed var(--ink-5); outline-offset: -4px; color: var(--paper-dim, #9a9790); }
+.sb-empty { grid-column: 1 / -1; margin: 8px 0; }
+.sb-foot { font-size: var(--fs-xs); min-height: 1.2em; }
+.sb-notice { color: var(--paper); font-weight: 600; }
+.sb-menu { --lino-bg: var(--ink-1); --lino-radius: 8px; position: fixed; z-index: 40; display: flex; flex-direction: column; min-width: 180px; padding: 6px; transform: translate(-50%, -100%); }
+
+.sb-form { display: flex; flex-direction: column; gap: 16px; }
+.sb-file { position: relative; display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; cursor: pointer; }
+.sb-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.sb-trim { display: flex; flex-direction: column; gap: 8px; }
+.sb-wave { --lino-bg: var(--ink-1); --lino-radius: 6px; width: 100%; height: 72px; cursor: crosshair; display: block; }
+.sb-trim-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sb-trim-row label { display: flex; flex-direction: column; gap: 4px; }
+.sb-trim-row input, .sb-vol-row input { accent-color: var(--paper); width: 100%; }
+.sb-icons { border: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+.sb-icons legend { margin-bottom: 8px; padding: 0; }
+.sb-icon { --lino-bg: var(--ink-3); --lino-radius: 6px; --slash-gap: var(--ink-3); display: grid; place-items: center; height: 44px; cursor: pointer; color: var(--paper); }
+.sb-icon:hover { --lino-bg: var(--ink-4); --slash-gap: var(--ink-4); }
+.sb-icon.on { --lino-bg: var(--paper); --slash-gap: var(--paper); color: var(--ink-0); }
+.sb-icon input { position: absolute; opacity: 0; pointer-events: none; }
+.sb-icon:has(input:focus-visible) { outline: 2px solid var(--paper); outline-offset: 2px; }
+.sb-vol-field { display: flex; flex-direction: column; gap: 6px; }
+.sb-vol-row { display: flex; align-items: center; gap: 12px; }
+
+/* Quem tocou um som: o cartão mostra o ícone do som por um instante. */
+.tile-sound {
+  --lino-bg: var(--paper); --lino-radius: 50%; --slash-gap: var(--paper);
+  position: absolute; top: 10px; right: 12px; width: 40px; height: 40px; display: grid; place-items: center;
+  color: var(--ink-0); animation: sb-pop 0.35s ease-out; pointer-events: none;
+}
+.tile.strip .tile-sound, .focus-strip .tile-sound { width: 28px; height: 28px; top: 4px; right: 4px; }
+@keyframes sb-pop { from { transform: scale(0.3) rotate(-25deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .tile-sound, .sb-grid.cooling .sb-sound::after { animation: none; }
+  .sb-sound:hover:not(:disabled) { transform: none; }
+}
+@media (max-width: 700px) { .sb-panel { left: 16px !important; right: 16px; width: auto; } }
+.voice-soundboard { display: flex; flex-direction: column; gap: 6px; }
+/* Mini perfil de quem está transmitindo: botão de assistir, como no Discord. */
+.up-live { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.up-live .t-btn { margin-top: 2px; }

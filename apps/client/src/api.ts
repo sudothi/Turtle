@@ -1,4 +1,4 @@
-import type { Attachment, SessionInfo, Unread, UserStatus } from "@turtle/protocol";
+import type { AccountInvitePreview, Attachment, SessionInfo, Sound, SoundIcon, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
@@ -79,7 +79,25 @@ async function uploadIcon(serverId: string, file: Blob): Promise<{ icon: string 
   return data as { icon: string };
 }
 
+/** Envia um som novo do soundboard (o arquivo já convertido para WAV). */
+async function uploadSound(serverId: string, wav: Blob, meta: { name: string; icon: SoundIcon; volume: number }): Promise<Sound> {
+  const form = new FormData();
+  form.append("file", wav, "som.wav");
+  const token = getToken();
+  const q = new URLSearchParams({ name: meta.name, icon: meta.icon, volume: String(meta.volume) });
+  const res = await fetch(`/servers/${serverId}/sounds?${q}`, { method: "POST", headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? `erro ${res.status}`);
+  return data as Sound;
+}
+
 export const api = {
+  sounds: (serverId: string) => req<Sound[]>("GET", `/servers/${serverId}/sounds`),
+  uploadSound,
+  updateSound: (id: string, p: { name?: string; icon?: SoundIcon; volume?: number }) => req<Sound>("PATCH", `/sounds/${id}`, p),
+  deleteSound: (id: string) => req<{ ok: true }>("DELETE", `/sounds/${id}`),
+  setSoundboardAdminsOnly: (serverId: string, adminsOnly: boolean) => req<{ ok: true }>("PUT", `/servers/${serverId}/soundboard`, { adminsOnly }),
+  joinWaitlist: (email: string) => req<{ ok: true }>("POST", "/waitlist", { email }),
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
@@ -123,11 +141,16 @@ export const api = {
   removeMember: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/members/${userId}`),
   bans: (serverId: string) => req<{ userId: string; username: string; displayName: string | null; reason: string | null; createdAt: string }[]>("GET", `/servers/${serverId}/bans`),
   banMember: (serverId: string, userId: string) => req<{ ok: true }>("POST", `/servers/${serverId}/bans/${userId}`, {}),
+  setNickname: (serverId: string, userId: string, nickname: string | null) => req<{ nickname: string | null }>("PATCH", `/servers/${serverId}/members/${userId}/nickname`, { nickname }),
+  moveVoice: (serverId: string, userId: string, channelId: string) => req<{ ok: true }>("POST", `/servers/${serverId}/voice/${userId}/move`, { channelId }),
+  disconnectVoice: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/voice/${userId}`),
   unban: (serverId: string, userId: string) => req<{ ok: true }>("DELETE", `/servers/${serverId}/bans/${userId}`),
   accounts: () => req<Account[]>("GET", "/admin/users"),
   setInviter: (userId: string, canInvite: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { canInvite }),
   setAccountDisabled: (userId: string, disabled: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { disabled }),
-  createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
+  /** Convite de conta de uso único; com `serverId`, a conta nova já entra nesse servidor. */
+  createAccountInvite: (serverId?: string) => req<{ code: string }>("POST", "/invites", serverId ? { serverId } : {}),
+  accountInvitePreview: (code: string) => req<AccountInvitePreview>("GET", `/account-invites/${encodeURIComponent(code)}`),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),
   joinInvite: (code: string) => req<Server>("POST", `/invites/${encodeURIComponent(code)}/join`, {}),

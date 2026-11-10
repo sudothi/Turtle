@@ -54,6 +54,13 @@ function audio() {
   return ctx;
 }
 
+/** O mesmo AudioContext dos sons do app (já na saída escolhida), para o soundboard. */
+export function sharedAudio(): AudioContext {
+  const c = audio();
+  if (sinkId) setSoundOutput(sinkId);
+  return c;
+}
+
 /** Toca pelo mesmo fone/caixa escolhido nas configurações de voz (quando o navegador deixa). */
 export function setSoundOutput(deviceId: string) {
   sinkId = deviceId;

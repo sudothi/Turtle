@@ -3,6 +3,7 @@
 export { LinoDefs } from "./LinoDefs";
 export { TurtleLogo, TurtleMark } from "./Logo";
 export { Icon, iconNames, type IconName } from "./Icon";
+export { SoundIcon, soundIconNames, type SoundIconName } from "./SoundIcon";
 export { Button, IconButton } from "./Button";
 export { TextField } from "./TextField";
 export { Avatar, avatarVariant } from "./Avatar";

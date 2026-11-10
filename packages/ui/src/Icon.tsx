@@ -23,6 +23,12 @@ const icons = {
       <path d="M15.5 8.6a4.8 4.8 0 0 1 0 6.8M18.2 5.8a8.7 8.7 0 0 1 0 12.4" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
     </>
   ),
+  "speaker-off": (
+    <>
+      <path d="M3 9.2h4.2L12.5 4.5v15l-5.3-4.7H3z" fill="currentColor" />
+      <path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    </>
+  ),
   mic: (
     <>
       <rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="currentColor" />
@@ -178,6 +184,14 @@ const icons = {
       <circle cx="19" cy="12" r="2.4" fill="currentColor" />
     </>
   ),
+  soundboard: (
+    <>
+      <rect x="2.5" y="2.5" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <rect x="13" y="2.5" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <rect x="2.5" y="13" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <path d="M14 18.5c0-1 .8-1.8 1.8-1.8.5 0 .9.2 1.2.4V12.5l4.5-1v6.3c0 1-.8 1.8-1.8 1.8s-1.8-.8-1.8-1.8.8-1.8 1.8-1.8c.3 0 .5 0 .7.1v-3.4l-2.4.5v5.3c0 1-.8 1.8-1.8 1.8S14 19.5 14 18.5z" fill="currentColor" />
+    </>
+  ),
   chat: <path d="M4 4.5h16a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H10l-5 4v-4H4A1.5 1.5 0 0 1 2.5 16V6A1.5 1.5 0 0 1 4 4.5z" fill="currentColor" />,
   profile: (
     <>
@@ -186,6 +200,16 @@ const icons = {
       <circle cx="18" cy="9" r="1.6" fill="currentColor" />
     </>
   ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.3" fill="none" stroke="currentColor" strokeWidth="2.6" />
+      <path d="M15.2 15.2 21 21" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" />
+    </>
+  ),
+  // Recortes vazados (evenodd): olhos e boca mostram o fundo do botão, qualquer que seja.
+  smile: <path fillRule="evenodd" fill="currentColor" d="M12 2.5a9.5 9.5 0 1 0 0 19a9.5 9.5 0 1 0 0-19zM8.8 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15.2 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM7.2 13.2h9.6a4.8 4.8 0 0 1-9.6 0z" />,
+  "arrow-left": <path d="M10.5 5 3.5 12l7 7M4.5 12h16" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />,
+  play: <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" strokeLinejoin="round" />,
 } as const;
 
 export type IconName = keyof typeof icons;

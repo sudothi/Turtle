@@ -8,7 +8,7 @@ import { stat, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, soundboardSounds, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -42,11 +42,16 @@ import {
   clientEvent,
   createChannelBody,
   createInviteBody,
+  createAccountInviteBody,
+  type AccountInvitePreview,
   createServerBody,
   deleteServerBody,
   loginBody,
   registerBody,
   renameServerBody,
+  NICKNAME_MAX,
+  nicknameBody,
+  moveVoiceBody,
   roleBody,
   transferBody,
   updateProfileBody,
@@ -60,14 +65,20 @@ import {
   type User,
   type VoiceState,
   type VoiceToken,
+  MAX_CONCURRENT_SOUNDS, MAX_SOUNDS_PER_SERVER, SOUND_COOLDOWN_MS, SOUND_MAX_BYTES, SOUNDS_PER_MINUTE,
+  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound,
+  type Sound, type SoundIcon,
 } from "@turtle/protocol";
+import { processSound } from "./sound.js";
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
 import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
+import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
 
 export interface AppOptions {
   db: Db;
+  waitlistNotify?: WaitlistNotice;
   /** Convite inicial criado se ainda não existe nenhum usuário (primeiro usuário vira admin). */
   bootstrapInvite?: string;
   /** Sem isso, o endpoint de token de voz responde 503. */
@@ -155,9 +166,10 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate,
+  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, waitlistNotify,
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
+  registerWaitlist(app, db, waitlistNotify);
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);
@@ -294,6 +306,9 @@ export async function buildApp({
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Soundboard: quando cada conta tocou sons (último minuto) e até quando os sons de cada chamada tocam.
+  const soundPlays = new Map<string, number[]>();
+  const soundsPlaying = new Map<string, number[]>();
   // Toque de chamada em DM/grupo: um por canal; para quando alguém atende, quem ligou sai, recusam todos ou passam 30 s.
   const RING_MS = 30_000;
   const rings = new Map<string, { callerId: string; targets: Set<string>; timer: ReturnType<typeof setTimeout> }>();
@@ -354,7 +369,7 @@ export async function buildApp({
         { id: newId(), serverId: id, name: "geral", kind: "text" },
         { id: newId(), serverId: id, name: "Sala", kind: "voice" },
       ]);
-      return { id, name, ownerId: owner.id, role: "owner", icon: null } satisfies Server;
+      return { id, name, ownerId: owner.id, role: "owner", icon: null, soundboardAdminsOnly: false } satisfies Server;
     });
   }
 
@@ -445,6 +460,11 @@ export async function buildApp({
     const row = (await db.select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId)).where(eq(messages.id, id)).limit(1))[0];
     return row ? (await toMessages([row]))[0] : undefined;
   };
+  const soundCols = {
+    id: soundboardSounds.id, serverId: soundboardSounds.serverId, userId: soundboardSounds.userId, name: soundboardSounds.name,
+    icon: soundboardSounds.icon, volume: soundboardSounds.volume, durationMs: soundboardSounds.durationMs, key: soundboardSounds.fileKey,
+  };
+  const toSound = (r: { icon: string } & Omit<Sound, "icon">): Sound => ({ ...r, icon: r.icon as SoundIcon });
   /** Apaga do disco os anexos dos canais (antes de apagar os canais, que leva as linhas junto). */
   const fileKeysOf = async (channelIds: string[]) =>
     channelIds.length ? (await db.select({ key: attachments.fileKey }).from(attachments).where(inArray(attachments.channelId, channelIds))).map((r) => r.key) : [];
@@ -601,10 +621,16 @@ export async function buildApp({
     }
     // Convite de conta cria só a conta: a pessoa começa sem nenhum servidor.
     // Marca o convite numa única operação: se dois cadastros usarem o mesmo código ao mesmo tempo, só um vence.
-    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code });
+    const claimed = await db.update(invites).set({ usedBy: id }).where(and(eq(invites.code, inviteCode), isNull(invites.usedBy))).returning({ code: invites.code, serverId: invites.serverId });
     if (!claimed.length) {
       await db.delete(users).where(eq(users.id, id));
       return reply.code(403).send({ error: "convite inválido" });
+    }
+    // Convite de conta com servidor: a pessoa já começa dentro dele (se o servidor ainda existir).
+    const serverId = claimed[0]!.serverId;
+    if (serverId && (await findServer(serverId))) {
+      await db.insert(serverMembers).values({ serverId, userId: id, role: "member" }).onConflictDoNothing();
+      toServer(serverId, { t: "sync" });
     }
     return { token: await startSession(id, req), user };
   });
@@ -630,6 +656,20 @@ export async function buildApp({
     return { token: await startSession(row.id, req), user: toUser(row) };
   });
 
+  // Prévia de um convite de conta na tela de cadastro: diz em qual servidor a pessoa vai entrar.
+  // Usa o mesmo limite por IP do cadastro, para não virar um jeito de testar códigos.
+  app.get<{ Params: { code: string } }>("/account-invites/:code", async (req, reply) => {
+    const wait = byIp.blockedFor(req.ip);
+    if (wait) return tooMany(reply, wait);
+    const inv = (await db.select().from(invites).where(eq(invites.code, req.params.code)).limit(1))[0];
+    if (!inv || inv.usedBy) {
+      byIp.hit(req.ip);
+      return reply.code(404).send({ error: "convite inválido" });
+    }
+    const server = inv.serverId ? await findServer(inv.serverId) : undefined;
+    return { serverName: server?.name ?? null } satisfies AccountInvitePreview;
+  });
+
   // Prévia pública de um convite de servidor (para a tela "entrar com convite").
   app.get<{ Params: { code: string } }>("/invites/:code", async (req, reply) => {
     const inv = await usableServerInvite(req.params.code);
@@ -646,6 +686,17 @@ export async function buildApp({
     if (!isFileKey(key)) return reply.code(404).send({ error: "não encontrado" });
     const path = join(files.dir, key);
     if (!(await stat(path).catch(() => null))) return reply.code(404).send({ error: "não encontrado" });
+    if (key.endsWith(".wav")) {
+      // Som do soundboard (só existe enquanto a linha existir).
+      const snd = (await db.select({ id: soundboardSounds.id }).from(soundboardSounds).where(eq(soundboardSounds.fileKey, key)).limit(1))[0];
+      if (!snd) return reply.code(404).send({ error: "não encontrado" });
+      reply
+        .header("content-type", "audio/wav")
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .header("x-content-type-options", "nosniff")
+        .header("content-security-policy", "default-src 'none'; sandbox");
+      return reply.send(createReadStream(path));
+    }
     const att = key.endsWith(".webp") ? undefined : (await db.select({ name: attachments.name, mime: attachments.mime }).from(attachments).where(eq(attachments.fileKey, key)).limit(1))[0];
     if (!key.endsWith(".webp") && !att) return reply.code(404).send({ error: "não encontrado" });
     const image = !att || /^image\/(png|jpeg|gif|webp)$/.test(att.mime);
@@ -862,7 +913,7 @@ export async function buildApp({
     authed.get("/servers", async (req) =>
       (
         await db
-          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role, icon: servers.iconKey })
+          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role, icon: servers.iconKey, soundboardAdminsOnly: servers.soundboardAdminsOnly })
           .from(serverMembers)
           .innerJoin(servers, eq(servers.id, serverMembers.serverId))
           .where(eq(serverMembers.userId, me(req).id))
@@ -906,8 +957,9 @@ export async function buildApp({
       await dropFromCalls(server.id);
       const chans = (await db.select({ id: channels.id }).from(channels).where(eq(channels.serverId, server.id))).map((c) => c.id);
       const keys = await fileKeysOf(chans);
+      const soundKeys = (await db.select({ key: soundboardSounds.fileKey }).from(soundboardSounds).where(eq(soundboardSounds.serverId, server.id))).map((r) => r.key);
       await db.delete(servers).where(eq(servers.id, server.id));
-      await removeFiles([...keys, server.iconKey]);
+      await removeFiles([...keys, ...soundKeys, server.iconKey]);
       for (const id of ids) await refreshMemberships(id);
       toUsers(ids, { t: "sync" });
       return { ok: true };
@@ -1011,7 +1063,7 @@ export async function buildApp({
     authed.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const rows = await db
-        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, role: serverMembers.role })
+        .select({ userId: users.id, username: users.username, displayName: users.displayName, avatar: users.avatarKey, isAdmin: users.isAdmin, canInvite: users.canInvite, role: serverMembers.role, nickname: serverMembers.nickname })
         .from(serverMembers)
         .innerJoin(users, eq(users.id, serverMembers.userId))
         .where(eq(serverMembers.serverId, req.params.id));
@@ -1080,6 +1132,56 @@ export async function buildApp({
       return { ok: true };
     });
 
+    // Apelido no servidor: cada um muda o seu; dono e admin mudam o de quem podem moderar.
+    authed.patch<{ Params: { id: string; user: string } }>("/servers/:id/members/:user/nickname", async (req, reply) => {
+      const role = await member(req, reply, req.params.id);
+      if (!role) return;
+      const body = nicknameBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: `o apelido pode ter até ${NICKNAME_MAX} letras` });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (!target) return reply.code(404).send({ error: "essa pessoa não está no servidor" });
+      if (req.params.user !== me(req).id && (target === "owner" || !canModerate(role, target))) return reply.code(403).send({ error: "sem permissão" });
+      const nickname = body.data.nickname || null;
+      await db.update(serverMembers).set({ nickname }).where(and(eq(serverMembers.serverId, req.params.id), eq(serverMembers.userId, req.params.user)));
+      toServer(req.params.id, { t: "sync" });
+      return { nickname };
+    });
+
+    // Mover ou desconectar alguém de uma chamada do servidor (mesmas regras de expulsar).
+    const callOf = (serverId: string, userId: string) => [...voice.entries()].find(([, v]) => v.serverId === serverId && v.userId === userId);
+    const voiceModerator = async (req: FastifyRequest<{ Params: { id: string; user: string } }>, reply: FastifyReply) => {
+      const role = await member(req, reply, req.params.id, (r) => r === "owner" || r === "admin");
+      if (!role) return;
+      if (req.params.user === me(req).id) return void reply.code(400).send({ error: "use os controles da chamada" });
+      const target = await roleIn(req.params.id, req.params.user);
+      if (!canModerate(role, target)) return void reply.code(403).send({ error: "sem permissão" });
+      const call = callOf(req.params.id, req.params.user);
+      if (!call) return void reply.code(404).send({ error: "essa pessoa não está numa chamada deste servidor" });
+      return call;
+    };
+    authed.post<{ Params: { id: string; user: string } }>("/servers/:id/voice/:user/move", async (req, reply) => {
+      const body = moveVoiceBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const call = await voiceModerator(req, reply);
+      if (!call) return;
+      const channel = await findChannel(body.data.channelId);
+      if (!channel || channel.kind !== "voice" || channel.serverId !== req.params.id) return reply.code(404).send({ error: "canal de voz não existe" });
+      if (call[1].channelId === channel.id) return { ok: true };
+      // Quem se move é o próprio aplicativo da pessoa: ele sai da sala atual e entra na nova.
+      call[0].send(JSON.stringify({ t: "voiceMoved", channelId: channel.id, by: me(req).id } satisfies ServerEvent));
+      return { ok: true };
+    });
+    authed.delete<{ Params: { id: string; user: string } }>("/servers/:id/voice/:user", async (req, reply) => {
+      const call = await voiceModerator(req, reply);
+      if (!call) return;
+      const [sock, v] = call;
+      sock.send(JSON.stringify({ t: "voiceMoved", channelId: null, by: me(req).id } satisfies ServerEvent));
+      voice.delete(sock);
+      broadcastVoice();
+      if (room) await room.removeParticipant(voiceRoomName(v.channelId), v.userId).catch(() => {});
+      return { ok: true };
+    });
+
     authed.post<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
       if (!(await member(req, reply, req.params.id))) return;
       const body = createInviteBody.safeParse(req.body ?? {});
@@ -1103,7 +1205,7 @@ export async function buildApp({
         toServer(inv.serverId, { t: "sync" });
       }
       const role = (await roleIn(inv.serverId, me(req).id))!;
-      return { id: server.id, name: server.name, ownerId: server.ownerId, role, icon: server.iconKey } satisfies Server;
+      return { id: server.id, name: server.name, ownerId: server.ownerId, role, icon: server.iconKey, soundboardAdminsOnly: server.soundboardAdminsOnly } satisfies Server;
     });
 
     // ---- Amigos ----
@@ -1330,11 +1432,16 @@ export async function buildApp({
       return { url: livekit.url, token: await at.toJwt() } satisfies VoiceToken;
     });
 
-    // Convites de conta (admin do app ou cargo Convidador): criam uma conta que entra no servidor mais antigo.
+    // Convites de conta (admin do app ou cargo Convidador), de uso único. Com `serverId`, a conta nova já entra
+    // nesse servidor; quem convida precisa ser membro dele (não dá para mandar gente para servidor alheio).
     authed.post("/invites", async (req, reply) => {
       if (!canInviteAccounts(me(req))) return reply.code(403).send({ error: "só admin ou convidador" });
+      const body = createAccountInviteBody.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const serverId = body.data.serverId ?? null;
+      if (serverId && !(await member(req, reply, serverId))) return;
       const code = newInviteCode();
-      await db.insert(invites).values({ code, createdBy: me(req).id });
+      await db.insert(invites).values({ code, createdBy: me(req).id, serverId });
       return { code };
     });
 
@@ -1562,6 +1669,72 @@ export async function buildApp({
       await db.delete(messages).where(eq(messages.id, req.params.id));
       await removeFiles(keys);
       await toChannel(channel, { t: "messageDelete", channelId: channel.id, id: req.params.id });
+      return { ok: true };
+    });
+
+    // ---- Soundboard ----
+    // Sons curtos por servidor. Tocar é pelo WebSocket (evento soundboardPlay); aqui fica só a lista e a edição.
+    authed.get<{ Params: { id: string } }>("/servers/:id/sounds", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id))) return;
+      return (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.serverId, req.params.id)).orderBy(asc(soundboardSounds.createdAt))).map(toSound);
+    });
+    authed.post<{ Params: { id: string }; Querystring: Record<string, string> }>("/servers/:id/sounds", async (req, reply) => {
+      const role = await member(req, reply, req.params.id);
+      if (!role) return;
+      const server = (await findServer(req.params.id))!;
+      if (server.soundboardAdminsOnly && !canManage(role)) return reply.code(403).send({ error: "só admins podem adicionar sons neste servidor" });
+      const meta = createSoundQuery.safeParse(req.query);
+      if (!meta.success) return reply.code(400).send({ error: "dê um nome de 1 a 32 letras ao som" });
+      const n = (await db.select({ n: count() }).from(soundboardSounds).where(eq(soundboardSounds.serverId, server.id)))[0]!.n;
+      if (n >= MAX_SOUNDS_PER_SERVER) return reply.code(409).send({ error: `o servidor já tem ${MAX_SOUNDS_PER_SERVER} sons; apague algum antes` });
+      if (!attachmentAllowed(me(req).id)) return reply.code(429).send({ error: "muitos arquivos seguidos; espere alguns minutos" });
+      const disk = await statfs(files.dir).catch(() => undefined);
+      if (disk && disk.blocks > 0 && (disk.blocks - disk.bavail) / disk.blocks >= maxDiskUsageRatio)
+        return reply.code(507).send({ error: "disco do servidor quase cheio; tente mais tarde" });
+      const part = await req.file({ limits: { fileSize: SOUND_MAX_BYTES, files: 1 } }).catch(() => undefined);
+      if (!part) return reply.code(400).send({ error: "envie um áudio" });
+      const raw = await part.toBuffer().catch(() => undefined);
+      if (!raw || part.file.truncated || raw.length > SOUND_MAX_BYTES) return reply.code(413).send({ error: `áudio grande demais (máximo ${SOUND_MAX_BYTES / 1024} KB)` });
+      const out = processSound(raw);
+      if ("error" in out) return reply.code(415).send({ error: out.error });
+      const key = await files.save(out.data, "wav");
+      const sound: Sound = { id: newId(), serverId: server.id, userId: me(req).id, name: meta.data.name, icon: meta.data.icon, volume: meta.data.volume, durationMs: out.durationMs, key };
+      await db.insert(soundboardSounds).values({ ...sound, fileKey: key, size: out.data.length });
+      toServer(server.id, { t: "sounds", serverId: server.id });
+      return sound;
+    });
+    /** Som que quem pede pode editar (quem enviou, ou dono/admin). */
+    async function editableSound(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+      const row = (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.id, req.params.id)).limit(1))[0];
+      const role = row ? await roleIn(row.serverId, me(req).id) : undefined;
+      if (!row || !role) return void reply.code(404).send({ error: "som não existe" });
+      if (!canEditSound(row, me(req).id, role)) return void reply.code(403).send({ error: "sem permissão" });
+      return toSound(row);
+    }
+    authed.patch<{ Params: { id: string } }>("/sounds/:id", async (req, reply) => {
+      const sound = await editableSound(req, reply);
+      if (!sound) return;
+      const body = updateSoundBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const next = { ...sound, ...body.data };
+      await db.update(soundboardSounds).set({ name: next.name, icon: next.icon, volume: next.volume }).where(eq(soundboardSounds.id, sound.id));
+      toServer(sound.serverId, { t: "sounds", serverId: sound.serverId });
+      return next;
+    });
+    authed.delete<{ Params: { id: string } }>("/sounds/:id", async (req, reply) => {
+      const sound = await editableSound(req, reply);
+      if (!sound) return;
+      await db.delete(soundboardSounds).where(eq(soundboardSounds.id, sound.id));
+      await files.remove(sound.key).catch(() => {});
+      toServer(sound.serverId, { t: "sounds", serverId: sound.serverId });
+      return { ok: true };
+    });
+    authed.put<{ Params: { id: string } }>("/servers/:id/soundboard", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, canManage))) return;
+      const body = soundboardSettingsBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      await db.update(servers).set({ soundboardAdminsOnly: body.data.adminsOnly }).where(eq(servers.id, req.params.id));
+      toServer(req.params.id, { t: "sync" });
       return { ok: true };
     });
 
@@ -1812,6 +1985,28 @@ export async function buildApp({
             toUsers([r.callerId], { t: "ringDeclined", channelId: evt.channelId, by: user.id });
             endRing(evt.channelId, user.id);
           }
+          return;
+        }
+        if (evt.t === "soundboardPlay") {
+          const fail = (error: string) => socket.send(JSON.stringify({ t: "error", error } satisfies ServerEvent));
+          const v = voice.get(socket);
+          if (!v || !v.serverId) return fail("entre numa chamada de servidor para tocar sons");
+          if (v.deafened) return fail("tire o ensurdecer para tocar sons");
+          const row = (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.id, evt.soundId)).limit(1))[0];
+          if (!row || row.serverId !== v.serverId) return fail("som não existe");
+          const now = Date.now();
+          const mine = (soundPlays.get(user.id) ?? []).filter((t) => now - t < 60_000);
+          const last = mine[mine.length - 1];
+          if (last !== undefined && now - last < SOUND_COOLDOWN_MS) return fail("espere um pouco para tocar outro som");
+          if (mine.length >= SOUNDS_PER_MINUTE) return fail("sons demais em pouco tempo; espere um minuto");
+          const playing = (soundsPlaying.get(v.channelId) ?? []).filter((end) => end > now);
+          if (playing.length >= MAX_CONCURRENT_SOUNDS) return fail("já tem sons tocando; espere acabar");
+          mine.push(now);
+          soundPlays.set(user.id, mine);
+          playing.push(now + row.durationMs);
+          soundsPlaying.set(v.channelId, playing);
+          const out = JSON.stringify({ t: "soundboardPlay", channelId: v.channelId, userId: user.id, sound: toSound(row) } satisfies ServerEvent);
+          for (const [s, state] of voice) if (state.channelId === v.channelId) s.send(out);
           return;
         }
         if (evt.t === "voice") {

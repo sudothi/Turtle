@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, real, text, timestamp, uniqueIndex, type AnyPgColumn } from "drizzle-orm/pg-core";
+
+export const waitlistEntries = pgTable("waitlist_entries", {
+  email: text("email").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  notificationAttemptedAt: timestamp("notification_attempted_at", { withTimezone: true }),
+  notificationSentAt: timestamp("notification_sent_at", { withTimezone: true }),
+});
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -38,6 +45,8 @@ export const invites = pgTable("invites", {
   code: text("code").primaryKey(),
   createdBy: text("created_by"),
   usedBy: text("used_by"),
+  /** Servidor em que a conta nova já entra ao se cadastrar (null = começa sem servidor). */
+  serverId: text("server_id").references((): AnyPgColumn => servers.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -46,6 +55,8 @@ export const servers = pgTable("servers", {
   name: text("name").notNull(),
   ownerId: text("owner_id").notNull().references(() => users.id),
   iconKey: text("icon_key"),
+  /** Só dono e admins adicionam sons ao soundboard. */
+  soundboardAdminsOnly: boolean("soundboard_admins_only").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -55,6 +66,8 @@ export const serverMembers = pgTable(
     serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["owner", "admin", "member"] }).notNull().default("member"),
+    /** Apelido só neste servidor (null = usa o nome da conta). */
+    nickname: text("nickname"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.serverId, t.userId] }), index("server_members_user_idx").on(t.userId)],
@@ -197,4 +210,23 @@ export const reactions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.userId, t.emoji] })],
+);
+
+/** Sons do soundboard de cada servidor (o arquivo WAV fica na pasta de uploads). */
+export const soundboardSounds = pgTable(
+  "soundboard_sounds",
+  {
+    id: text("id").primaryKey(),
+    serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    icon: text("icon").notNull(),
+    /** 0 a 1. */
+    volume: real("volume").notNull().default(1),
+    durationMs: integer("duration_ms").notNull(),
+    size: integer("size").notNull(),
+    fileKey: text("file_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("soundboard_sounds_server_idx").on(t.serverId), uniqueIndex("soundboard_sounds_key_idx").on(t.fileKey)],
 );

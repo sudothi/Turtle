@@ -69,7 +69,7 @@ Sem prova da extensão após reassinatura, a versão atual **não oferece botão
 
 ## Build e entrega (#58)
 
-O build 6 inclui a correção de invalidação de sessão durante recuperação da chamada (#191). A PR de distribuição parte da branch dessa correção; o manifesto deve identificar o commit usado, e o aceite físico continua pendente. O build 5 é a entrega anterior documentada na #58; não reutilizar seu número para um binário diferente.
+O build 6 inclui a correção de invalidação de sessão durante recuperação da chamada (#191). A correção #191 já está integrada à main; a entrega do build 6 também deve apontar diretamente para main. O manifesto identifica o commit usado, e o aceite físico continua pendente. O build 5 é a entrega anterior documentada na #58; não reutilizar seu número para um binário diferente.
 
 Em macOS com Xcode/SDK compatíveis e CocoaPods, após `pnpm install`:
 

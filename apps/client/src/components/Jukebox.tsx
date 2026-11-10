@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { JUKEBOX_MAX_MS, JUKEBOX_MAX_QUEUE, type JukeboxItem, type JukeboxState, type MusicTrack } from "@turtle/protocol";
-import { Icon, IconButton } from "@turtle/ui";
-import { api } from "../api";
+import { JUKEBOX_MAX_MS, JUKEBOX_MAX_QUEUE, type JukeboxItem, type JukeboxState, type MusicTrack, type VoiceState } from "@turtle/protocol";
+import { Avatar, Icon, IconButton } from "@turtle/ui";
+import { api, fileUrl } from "../api";
 import { jukebox, looksLikeLink, useJukebox, useJukeboxPosition, withScheme } from "../jukebox";
 import { clock, coverTint, musicCover } from "../music";
 import { Vinyl } from "./MusicCard";
@@ -57,6 +57,75 @@ export function JukeboxNowPlaying({ channelId, nameOf }: { channelId: string; na
         <button className="jb-unlock" onClick={() => jukebox.unlock()}>
           <Icon name="speaker" size={14} /> Ativar som
         </button>
+      )}
+    </div>
+  );
+}
+
+/** O que o convite no chat precisa da tela: quem está nas chamadas, como entrar e como enviar o convite. */
+export interface DiscoActions {
+  voiceStates: VoiceState[];
+  meId: string;
+  nameOf: NameOf;
+  /** Entra na chamada (e abre ela). */
+  join: (channelId: string) => void;
+  /** Manda o convite da discoteca dessa chamada para o chat de texto do servidor. */
+  invite: (channelId: string) => void;
+}
+export const DiscoContext = createContext<DiscoActions | null>(null);
+
+/**
+ * Convite no chat: "@fulano está te convidando para uma discoteca!", com a música que toca agora e quem está na
+ * chamada (só a foto; o nome aparece ao passar o mouse). Atualiza ao vivo.
+ */
+export function DiscoInviteCard({ channelId, author }: { channelId: string; author: string }) {
+  const ctx = useContext(DiscoContext);
+  const s = useJukebox().states[channelId];
+  const pos = useJukeboxPosition(channelId);
+  const cur = s?.current;
+  const style = useTint(cur?.cover ?? null);
+  const people = ctx?.voiceStates.filter((v) => v.channelId === channelId) ?? [];
+  const inCall = !!ctx && people.some((v) => v.userId === ctx.meId);
+  const playing = !!s && s.startedAt !== null && s.pausedAt === null;
+  const over = !cur && people.length === 0;
+  const nameOf = ctx?.nameOf ?? (() => "alguém");
+  return (
+    <div className={`jb-invite lino${playing ? " is-playing" : ""}`}>
+      <div className="jb-invite-head">
+        <Icon name="disco" size={18} />
+        <span><span className="jb-invite-who">@{author}</span> está te convidando para uma discoteca!</span>
+      </div>
+      {cur ? (
+        <div className="jb-now">
+          <div className="jb-now-art">
+            <div className="jb-now-vinyl music-vinyl" style={style}><Vinyl cover={cur.cover} /></div>
+            <div className="jb-now-cover"><Cover src={cur.cover} size={72} /></div>
+          </div>
+          <div className="jb-now-text">
+            <b title={cur.title}>{cur.title}</b>
+            {cur.artist && <span className="jb-now-artist">{cur.artist}</span>}
+            <span className="jb-now-by">colocada por {nameOf(cur.addedBy)}{s.pausedAt !== null ? " · pausada" : ""}</span>
+            <span className="jb-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, (pos / cur.durationMs) * 100)}%` }} /></span>
+          </div>
+        </div>
+      ) : (
+        <div className="jb-invite-empty t-muted">{over ? "A discoteca acabou." : "Nada tocando agora."}</div>
+      )}
+      {!over && (
+        <div className="jb-invite-foot">
+          <div className="jb-faces" role="list" aria-label="Quem está na chamada">
+            {people.map((v) => {
+              const name = v.displayName ?? v.username;
+              return (
+                <span key={v.userId} className="jb-face" role="listitem" tabIndex={0} data-name={name} aria-label={name}>
+                  <Avatar name={name} src={fileUrl(v.avatar)} size={28} />
+                </span>
+              );
+            })}
+            {people.length === 0 && <span className="t-muted jb-invite-empty">Ninguém na chamada</span>}
+          </div>
+          {ctx && !inCall && <button type="button" className="jb-invite-join" onClick={() => ctx.join(channelId)}>Entrar</button>}
+        </div>
       )}
     </div>
   );
@@ -192,6 +261,7 @@ export function JukeboxButton({ channelId, nameOf, deafened, compact }: { channe
 function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: string; nameOf: NameOf; deafened: boolean; place?: { left: number; bottom: number } }) {
   const s = useJukebox().states[channelId];
   const pos = useJukeboxPosition(channelId);
+  const disco = useContext(DiscoContext);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<MusicTrack[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -254,6 +324,11 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
     <div className="sb-panel jb-panel lino lino-lg" role="dialog" aria-label="Discoteca" style={place}>
       <div className="sb-head">
         <b className="t-display">Discoteca</b>
+        {disco && (
+          <IconButton label="Convidar no chat" className="jb-invite-btn" onClick={() => { disco.invite(channelId); setAdded("Convite enviado no chat"); }}>
+            <Icon name="user-plus" size={18} />
+          </IconButton>
+        )}
         <JukeboxVolume />
       </div>
 

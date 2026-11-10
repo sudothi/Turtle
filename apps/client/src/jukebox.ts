@@ -183,3 +183,7 @@ export function useJukeboxPosition(channelId: string | undefined) {
 /** Parece um link (o campo da discoteca aceita link ou texto para buscar). */
 export const looksLikeLink = (q: string) => /^https?:\/\/\S+$/i.test(q.trim()) || /^(www\.)?(youtube\.com|youtu\.be|soundcloud\.com|open\.spotify\.com|deezer\.com)\//i.test(q.trim());
 export const withScheme = (q: string) => (/^https?:\/\//i.test(q.trim()) ? q.trim() : `https://${q.trim()}`);
+
+/** Convite para a discoteca no chat: a mensagem é só este endereço e o cliente mostra o cartão (ao vivo). */
+export const discoInviteLink = (channelId: string) => `turtle://discoteca/${channelId}`;
+export const parseDiscoInvite = (content: string) => /^turtle:\/\/discoteca\/([\w-]{1,64})$/.exec(content.trim())?.[1] ?? null;

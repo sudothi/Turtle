@@ -1173,3 +1173,23 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
   .call-dock > .jb-now .jb-now-text { align-items: stretch; }
   .call-dock > .jb-now .jb-bar { margin-left: 0; }
 }
+
+/* Convite da discoteca no chat */
+.jb-invite { --lino-bg: var(--ink-1); --lino-radius: 10px; display: flex; flex-direction: column; gap: 12px; max-width: 380px; margin-top: 6px; padding: 12px 14px; }
+.jb-invite-head { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--paper); line-height: 1.35; }
+.jb-invite-head > svg { flex: none; margin-top: 1px; }
+.jb-invite-who { font-weight: 700; }
+.jb-invite .jb-now { max-width: 100%; }
+.jb-invite-empty { font-size: 13px; }
+.jb-invite-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.jb-faces { display: flex; align-items: center; min-width: 0; padding-left: 6px; }
+.jb-face { position: relative; display: grid; margin-left: -6px; border-radius: 50%; outline-offset: 2px; }
+.jb-face > * { box-shadow: 0 0 0 2px var(--ink-1); border-radius: 50%; }
+.jb-face::after { content: attr(data-name); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: var(--paper); color: var(--ink-0); font-size: 12px; font-weight: 600; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.1s; z-index: 3; }
+.jb-face:hover { z-index: 2; }
+.jb-face:hover::after, .jb-face:focus-visible::after { opacity: 1; }
+.jb-invite-join { flex: none; padding: 6px 14px; border: 0; border-radius: 8px; background: var(--paper); color: var(--ink-0); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.jb-invite-join:hover { filter: brightness(0.92); }
+.jb-invite.is-playing .music-vinyl-disc { animation-play-state: running; }
+.jb-invite-btn { margin-left: auto; }
+.jb-invite-btn + .sb-volume { margin-left: 0; }

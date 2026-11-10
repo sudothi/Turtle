@@ -123,20 +123,24 @@ export function ytdlp(run: YtdlpRun, log: (msg: string) => void = () => {}) {
    * Acha no YouTube a mesma faixa de uma busca do Deezer: entre os 5 primeiros resultados, o de duração mais
    * próxima (até 20 s de diferença), para não tocar clipe com introdução longa nem versão ao vivo.
    */
-  async function find(artist: string | null, title: string, durationMs: number | null): Promise<MediaInfo | null> {
+  async function findAll(artist: string | null, title: string, durationMs: number | null): Promise<MediaInfo[]> {
     const q = [artist, title].filter(Boolean).join(" - ").replace(/[\r\n]/g, " ").slice(0, 200);
     let j: RawInfo;
     try {
       j = JSON.parse(await run(["-J", "--flat-playlist", "--", `ytsearch5:${q}`], 45_000)) as RawInfo;
     } catch (e) {
       log(`yt-dlp busca: ${(e as Error).message}`);
-      return null;
+      return [];
     }
     const hits = (j.entries ?? []).filter((e) => e.id && /^[A-Za-z0-9_-]{11}$/.test(e.id) && e.duration && e.duration * 1000 <= JUKEBOX_MAX_MS && e.live_status !== "is_live");
-    const best = durationMs
-      ? hits.map((e) => ({ e, d: Math.abs(e.duration! * 1000 - durationMs) })).filter((x) => x.d <= 20_000).sort((a, b) => a.d - b.d)[0]?.e
-      : hits[0];
-    return best ? toInfo({ ...best, webpage_url: `https://www.youtube.com/watch?v=${best.id}` }, "") : null;
+    const ranked = durationMs
+      ? hits.map((e) => ({ e, d: Math.abs(e.duration! * 1000 - durationMs) })).filter((x) => x.d <= 20_000).sort((a, b) => a.d - b.d).map((x) => x.e)
+      : hits;
+    // Até 3 candidatos: se o YouTube barrar um vídeo, o próximo ainda pode baixar.
+    return ranked.slice(0, 3).map((e) => toInfo({ ...e, webpage_url: `https://www.youtube.com/watch?v=${e.id}` }, "")).filter((x): x is MediaInfo => !!x);
+  }
+  async function find(artist: string | null, title: string, durationMs: number | null): Promise<MediaInfo | null> {
+    return (await findAll(artist, title, durationMs))[0] ?? null;
   }
 
   /** Baixa só o áudio para `outBase` + extensão; devolve o caminho do arquivo. */
@@ -152,5 +156,5 @@ export function ytdlp(run: YtdlpRun, log: (msg: string) => void = () => {}) {
     return path;
   }
 
-  return { info, find, download };
+  return { info, find, findAll, download };
 }

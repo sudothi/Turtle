@@ -197,6 +197,23 @@ describe("fila e relógio", () => {
     jb.close();
   });
 
+  it("busca do Deezer: se o YouTube barra o 1º vídeo, toca o próximo; se barra todos, cai na prévia de 30 s", async () => {
+    const two = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Liberado", duration: 214 } }, fail: new Set(["aaaaaaaaaaa"]) });
+    await two.jb.add("c1", "s1", "u1", { trackId: "dz1" });
+    await until(() => two.last()?.startedAt != null);
+    expect(two.last()!.audio).toMatch(/yt-bbbbbbbbbbb\.webm$/);
+    expect(two.last()!.current).toMatchObject({ source: "youtube", preview: false });
+    two.jb.close();
+
+    const none = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Barrado 2", duration: 214 } }, fail: new Set(["aaaaaaaaaaa", "bbbbbbbbbbb"]) });
+    await none.jb.add("c1", "s1", "u1", { trackId: "dz1" });
+    await until(() => none.last()?.startedAt != null);
+    expect(none.last()!.audio).toMatch(/dz-dz1-preview\.mp3$/);
+    expect(none.last()!.current).toMatchObject({ source: "deezer", preview: true, durationMs: 30_000 });
+    expect(none.last()!.notice).toMatch(/prévia/);
+    none.jb.close();
+  });
+
   it("limite por pessoa", async () => {
     const videos = Object.fromEntries(Array.from({ length: JUKEBOX_MAX_PER_USER + 1 }, (_, i) => [`v${String(i).padStart(10, "0")}`, { title: `M${i}`, duration: 100 }]));
     const { jb } = setup({ videos });

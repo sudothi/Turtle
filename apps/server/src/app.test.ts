@@ -33,7 +33,7 @@ beforeAll(async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 }, musicFetch: fakeMusic });
+  app = await buildApp({ db: handle.db, bootstrapInvite: "boot", livekit: LK, uploadDir: mkdtempSync(join(tmpdir(), "turtle-up-")), authLimit: { perIp: 100_000, perName: 8 }, maxDiskUsageRatio: 1.01, musicFetch: fakeMusic, roomService: { removeParticipant: async () => {}, getParticipant: async () => { throw Object.assign(new Error("not found"), { code: "not_found" }); } } });
   base = await app.listen({ port: 0, host: "127.0.0.1" });
 });
 afterAll(async () => {
@@ -1434,7 +1434,7 @@ describe("conexão do WebSocket", () => {
 describe("cota de anexos", () => {
   it("recusa com 413 quando passa da cota e mostra o uso em /me/storage", async () => {
     const h = await createDb();
-    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150 });
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-cota", attachmentQuotaBytes: 150, maxDiskUsageRatio: 1.01 });
     const url = await a.listen({ port: 0, host: "127.0.0.1" });
     const json = async (path: string, body: unknown, token?: string) =>
       (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;
@@ -1459,7 +1459,7 @@ describe("cota de anexos", () => {
 
   it("expira anexos antigos mantendo as mensagens e liberando a cota; bloqueia upload se o disco encher", async () => {
     const h = await createDb();
-    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30 });
+    const a = await buildApp({ db: h.db, bootstrapInvite: "boot-exp", attachmentRetentionMs: 60, sweepIntervalMs: 30, maxDiskUsageRatio: 1.01 });
     const url = await a.listen({ port: 0, host: "127.0.0.1" });
     const json = async (path: string, body: unknown, token?: string) =>
       (await (await fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })).json()) as any;

@@ -69,24 +69,29 @@ const BASE_ARGS = [
 ];
 
 /**
- * `cookies`: arquivo cookies.txt (formato Netscape) de uma conta Google descartável, para o YouTube não pedir login.
- * O yt-dlp reescreve o arquivo que recebe, então cada execução usa uma cópia temporária (o original fica só leitura).
+ * Cópia temporária do cookies.txt: o yt-dlp reescreve o arquivo que recebe, então o original fica só leitura.
+ * Devolve os argumentos extras (`--cookies <cópia>`) e a função que apaga a cópia; sem arquivo, não passa nada.
  */
+export function cookieJar(cookies?: string): { args: string[]; cleanup: () => void } {
+  if (cookies && existsSync(cookies)) {
+    const jar = join(tmpdir(), `ytc-${randomBytes(6).toString("hex")}.txt`);
+    try {
+      copyFileSync(cookies, jar);
+      return { args: ["--cookies", jar], cleanup: () => rmSync(jar, { force: true }) };
+    } catch {
+      // sem acesso ao arquivo: segue sem cookies
+    }
+  }
+  return { args: [], cleanup: () => {} };
+}
+
+/** `cookies`: cookies.txt (formato Netscape) de uma conta Google descartável, para o YouTube não pedir login. */
 export function ytdlpRunner(bin: string, extra: string[] = [], cookies?: string): YtdlpRun {
   return (args, timeoutMs) =>
     new Promise((resolve, reject) => {
-      let jar: string | null = null;
-      if (cookies && existsSync(cookies)) {
-        jar = join(tmpdir(), `ytc-${randomBytes(6).toString("hex")}.txt`);
-        try {
-          copyFileSync(cookies, jar);
-        } catch {
-          jar = null;
-        }
-      }
-      const cleanup = () => { if (jar) rmSync(jar, { force: true }); };
-      const child = execFile(bin, [...BASE_ARGS, ...extra, ...(jar ? ["--cookies", jar] : []), ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, killSignal: "SIGKILL" }, (err, stdout, stderr) => {
-        cleanup();
+      const jar = cookieJar(cookies);
+      const child = execFile(bin, [...BASE_ARGS, ...extra, ...jar.args, ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, killSignal: "SIGKILL" }, (err, stdout, stderr) => {
+        jar.cleanup();
         if (err) return reject(new Error(String(stderr || err.message).trim().split("\n").pop()?.slice(0, 300) ?? "yt-dlp falhou"));
         resolve(stdout);
       });

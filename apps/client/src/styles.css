@@ -593,7 +593,7 @@
 .dm-group-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--ink-4); color: var(--paper); flex: none; }
 .channel.dm .live-badge { margin-left: auto; }
 .dm-call { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.dm-call-back { padding: 6px 16px; text-align: left; color: var(--text-muted); }
+.dm-call-back { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; text-align: left; color: var(--text-muted); }
 .dm-call .call { flex: 1; min-height: 0; }
 .new-group { display: flex; flex-direction: column; gap: 12px; }
 .new-group-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }

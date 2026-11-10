@@ -180,8 +180,8 @@ function Spoiler({ children }: { children: React.ReactNode }) {
 }
 
 /** Texto da mensagem com as menções `<@id>` trocadas pelo nome de exibição atual. */
-function MessageText({ content, names, onProfile, edited, pinned }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null; pinned?: boolean }) {
-  if (!content && !edited && !pinned) return null;
+function MessageText({ content, names, onProfile, edited }: { content: string; names: Map<string, string>; onProfile: (id: string) => void; edited?: string | null }) {
+  if (!content && !edited) return null;
   return (
     <div className="msg-text">
       {splitMentions(content).map((p, i) =>
@@ -193,7 +193,6 @@ function MessageText({ content, names, onProfile, edited, pinned }: { content: s
           </button>
         ),
       )}
-      {pinned && <span className="msg-edited" title="Mensagem fixada"> 📌</span>}
       {edited && <span className="msg-edited" title={`Editada: ${stamp(edited)}`}> (editado)</span>}
     </div>
   );
@@ -731,7 +730,7 @@ export function ChatView({
         </button>
         <span className="react-pick-wrap">
           <button type="button" title="Reagir" aria-label="Reagir" aria-expanded={picking === m.id} onClick={() => setPicking(picking === m.id ? undefined : m.id)}>
-            <span aria-hidden="true">🙂</span>
+            <Icon name="smile" size={18} />
           </button>
           {picking === m.id && (
             <div className="react-picker lino" role="menu" aria-label="Escolher reação">
@@ -764,7 +763,12 @@ export function ChatView({
       <EditBox initial={decodeMentions(m.content, names)} onSave={(v) => void saveEdit(m, v)} onCancel={() => { setEditing(undefined); input.current?.focus(); }} />
     ) : (
       <>
-        <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} pinned={m.pinned} />
+        {m.pinned && (
+          <div className="msg-pin-tag">
+            <Icon name="pin" size={13} /> Fixada
+          </div>
+        )}
+        <MessageText content={m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
         {m.content && <LinkCard content={m.content} />}
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
         {m.reactions.length > 0 && (
@@ -793,7 +797,7 @@ export function ChatView({
       <ChannelHeader icon={dm ? "users" : "hash"} name={channel.name}>
         {headerExtra}
         <IconButton label="Buscar mensagens" active={searching} onClick={() => setSearching((v) => !v)}>
-          <span aria-hidden="true">🔍</span>
+          <Icon name="search" />
         </IconButton>
         <IconButton label="Mensagens fixadas" active={pinsOpen} onClick={() => setPinsOpen((v) => !v)}>
           <Icon name="pin" />
@@ -831,7 +835,7 @@ export function ChatView({
               <span>{r.label}</span>
             </div>
           ) : r.head ? (
-            <article key={r.key} data-mid={r.message.id} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
+            <article key={r.key} data-mid={r.message.id} className={`msg head${mentionsMe(r.message) ? " mentioned" : ""}${r.message.pinned ? " pinned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
               <ReplyLine message={r.message} names={names} onJump={(id) => void jumpTo(id)} />
               <button type="button" className="plain-btn" aria-label={`Perfil de ${shownName(r.message)}`} onClick={() => onProfile(r.message.userId)}>
                 <Avatar name={shownName(r.message)} src={fileUrl(r.message.avatar)} size={40} />
@@ -849,7 +853,7 @@ export function ChatView({
               {editing !== r.message.id && !mobile && actions(r.message)}
             </article>
           ) : (
-            <article key={r.key} data-mid={r.message.id} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
+            <article key={r.key} data-mid={r.message.id} className={`msg${mentionsMe(r.message) ? " mentioned" : ""}${r.message.pinned ? " pinned" : ""}${replying?.id === r.message.id ? " replying" : ""}${editing === r.message.id ? " editing" : ""}${sheet?.id === r.message.id ? " pressed" : ""}`} {...pressHandlers(r.message)}>
               <time className="msg-gutter" dateTime={r.message.createdAt}>
                 {shortTime(r.message.createdAt)}
               </time>

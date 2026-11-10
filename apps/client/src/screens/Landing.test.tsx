@@ -9,12 +9,13 @@ describe("public landing", () => {
     expect(html).toContain('type="email"');
     expect(html).toContain("Entrar na lista");
     expect(html).not.toContain('href="/login"');
+    expect(html).not.toContain('href="/entrar"');
     expect(html).not.toContain('href="/download"');
   });
-  it("preserves both entry actions on the original page now at /entrar", () => {
+  it("keeps the public entry page at /inicio and its login action at the original /entrar", () => {
     const html = renderToStaticMarkup(<Landing tab="home" loggedIn={false} go={vi.fn()} />);
+    expect(html).toContain('href="/inicio"');
     expect(html).toContain('href="/entrar"');
-    expect(html).toContain('href="/login"');
     expect(html).toContain('href="/download"');
     expect(html).not.toContain('type="email"');
   });

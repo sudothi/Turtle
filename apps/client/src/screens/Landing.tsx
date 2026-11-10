@@ -6,9 +6,9 @@ import { WaitlistForm } from "./WaitlistForm";
 
 export type LandingTab = "waitlist" | "home" | "download";
 
-/** Shared public design: waiting list at /, existing entry page at /entrar. */
+/** Shared public design: waiting list at /, entry page at /inicio. */
 export function Landing({ tab, loggedIn, go }: { tab: LandingTab; loggedIn: boolean; go: (path: string) => void }) {
-  const home = tab === "waitlist" ? "/" : "/entrar";
+  const home = tab === "waitlist" ? "/" : "/inicio";
   const link = (path: string) => (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
@@ -25,7 +25,7 @@ export function Landing({ tab, loggedIn, go }: { tab: LandingTab; loggedIn: bool
           <a href="/download" className={`landing-tab${tab === "download" ? " active" : ""}`} aria-current={tab === "download" ? "page" : undefined} onClick={link("/download")}>
             Download
           </a>
-          <a href={loggedIn ? "/app" : "/login"} className="t-btn lino sm landing-login" onClick={link(loggedIn ? "/app" : "/login")}>
+          <a href={loggedIn ? "/app" : "/entrar"} className="t-btn lino sm landing-login" onClick={link(loggedIn ? "/app" : "/entrar")}>
             {loggedIn ? "Abrir o app" : "Entrar"}
           </a>
         </nav>}

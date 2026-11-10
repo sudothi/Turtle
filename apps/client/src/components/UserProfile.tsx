@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { shownName, type Person, type ProfileView, type ServerRole } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { copyText } from "../clipboard";
 import { ActivityLine, usePresence } from "../presence";
 
 /*
@@ -112,7 +113,7 @@ function MoreMenu({ profile, act, align = "right" }: { profile: ProfileView; act
       </IconButton>
       {open && (
         <div className={`menu up-menu lino up-menu-${align}`} role="menu">
-          <button role="menuitem" className="menu-item" onClick={() => { setOpen(false); void navigator.clipboard?.writeText(profile.username); }}>
+          <button role="menuitem" className="menu-item" onClick={() => { setOpen(false); void copyText(profile.username); }}>
             <span>Copiar nome de usuário</span>
             <Icon name="copy" size={16} />
           </button>

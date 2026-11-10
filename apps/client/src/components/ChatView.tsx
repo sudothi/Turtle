@@ -6,6 +6,7 @@ import {
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
+import { copyText } from "../clipboard";
 import { useMobile, useMobileBack } from "../mobile";
 
 /** Mensagem enviada que o servidor ainda não confirmou (ou que falhou). */
@@ -317,7 +318,7 @@ function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (text
 function MessageSheet({ message, text, canEdit, canDelete, canPin, onPin, onReply, onEdit, onDelete, onProfile, onClose }: { message: Message; text: string; canEdit: boolean; canDelete: boolean; canPin: boolean; onPin: () => void; onReply: () => void; onEdit: () => void; onDelete: () => void; onProfile: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(onClose, 600); }).catch(() => {});
+    void copyText(text).then((ok) => { if (!ok) return; setCopied(true); setTimeout(onClose, 600); });
   };
   return (
     <div className="m-sheet-wrap" role="presentation" onClick={onClose}>

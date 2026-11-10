@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, session, shell, type WebContents } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, session, shell, type WebContents } from "electron";
 import { appIcon } from "./paths.js";
 import { Splash } from "./splash.js";
 import { createTray } from "./tray.js";
@@ -76,8 +76,9 @@ function installCapture() {
 }
 
 function installPermissions() {
-  // Só o nosso app pode usar microfone, câmera e captura de tela.
-  const allowed = new Set(["media", "display-capture", "fullscreen"]);
+  // Só o nosso app pode usar microfone, câmera, captura de tela e escrever na área de transferência
+  // ("clipboard-sanitized-write" é o navigator.clipboard.writeText dos botões Copiar).
+  const allowed = new Set(["media", "display-capture", "fullscreen", "clipboard-sanitized-write"]);
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
     callback(allowed.has(permission) && new URL(details.requestingUrl).origin === clientOrigin && fromApp(wc));
   });
@@ -116,6 +117,21 @@ function createWindow(splash?: Splash) {
     },
   });
   win.setMenuBarVisibility(false);
+  // O Electron não tem menu de clique direito: sem isto não dá para copiar/colar texto com o mouse.
+  win.webContents.on("context-menu", (_e, params) => {
+    const { editFlags, isEditable, selectionText } = params;
+    if (!isEditable && !selectionText.trim()) return;
+    const items: Electron.MenuItemConstructorOptions[] = isEditable
+      ? [
+          { role: "cut", label: "Recortar", enabled: editFlags.canCut },
+          { role: "copy", label: "Copiar", enabled: editFlags.canCopy },
+          { role: "paste", label: "Colar", enabled: editFlags.canPaste },
+          { type: "separator" },
+          { role: "selectAll", label: "Selecionar tudo" },
+        ]
+      : [{ role: "copy", label: "Copiar" }];
+    Menu.buildFromTemplate(items).popup({ window: win ?? undefined });
+  });
   win.on("focus", () => win?.flashFrame(false));
 
   // Links externos abrem no navegador; o app nunca navega para fora de si.

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { shownName, type Account, type Channel, type ChannelKind } from "@turtle/protocol";
 import { Avatar, Button, Icon, Modal, TextField } from "@turtle/ui";
 import { api, fileUrl } from "../api";
+import { copyText } from "../clipboard";
 
 export function CreateChannelModal({ serverId, initialKind, onClose }: { serverId: string; initialKind: ChannelKind; onClose: () => void }) {
   const [kind, setKind] = useState<ChannelKind>(initialKind);
@@ -77,7 +78,7 @@ export function InviteModal({ serverId, serverName, onClose }: { serverId: strin
   const link = code ?? "";
   const copy = async () => {
     if (!code) return;
-    await navigator.clipboard.writeText(link).catch(() => {});
+    if (!(await copyText(link))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
@@ -117,7 +118,7 @@ export function AppInvitePanel() {
   };
   const link = code ? `${location.origin}/convite/${code}` : "";
   const copy = async () => {
-    await navigator.clipboard.writeText(link).catch(() => {});
+    if (!(await copyText(link))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };

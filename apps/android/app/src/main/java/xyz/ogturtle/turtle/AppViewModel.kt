@@ -74,6 +74,9 @@ internal const val MAX_FILES = 10
 internal fun inviteCode(text: String): String = text.trim().trimEnd('/').substringAfterLast('/').trim()
 
 /** Anexa uma mensagem sem duplicar (o servidor pode reenviar após reconectar). */
+/** Envio esperando a confirmação do servidor (reenviado com o mesmo nonce se a conexão cair). */
+internal data class PendingSend(val channelId: String, val content: String, val attachments: List<String>, val replyTo: String?)
+
 internal fun List<Message>.withMessage(m: Message): List<Message> = if (any { it.id == m.id }) this else this + m
 
 /**
@@ -95,6 +98,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val api = Api(BuildConfig.SERVER_URL, onUnauthorized = ::clearSession) { session.token }
 
     private val _state = MutableStateFlow(UiState())
+    private val pending = LinkedHashMap<String, PendingSend>()
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val realtime = Realtime(
@@ -105,6 +109,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         onOpen = {
             _state.update { it.copy(connected = true) }
             pushVoice() // o servidor esquece a chamada se a conexão cai; avisa de novo
+            // Reenvia o que não foi confirmado (o servidor ignora nonce repetido).
+            synchronized(pending) { pending.toMap() }.forEach { (nonce, p) -> realtime.send(p.channelId, p.content, p.attachments, p.replyTo, nonce) }
             // Reabriu a conexão (ou abriu agora): pode ter perdido mensagens enquanto estava fora.
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
@@ -116,6 +122,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         CallService.onHangUp = { leaveCall() }
+        voice.onDropped = ::rejoinCall
         // Toda mudança na minha chamada (entrar, sair, mudo, fone, câmera) vai para o servidor e para a tela.
         viewModelScope.launch {
             var last: List<Any?>? = null
@@ -193,7 +200,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A chamada caiu sem a pessoa sair: tenta voltar com espera crescente (pouco mais de 2 min no total, igual ao web). */
+    private var rejoin: kotlinx.coroutines.Job? = null
+    private fun rejoinCall(channelId: String) {
+        rejoin?.cancel()
+        rejoin = viewModelScope.launch {
+            for (wait in listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 30_000L, 30_000L)) {
+                kotlinx.coroutines.delay(wait)
+                if (_state.value.user == null || _state.value.call != null) return@launch
+                try {
+                    val t = api.voiceToken(channelId)
+                    voice.join(channelId, t.url, t.token)
+                    return@launch
+                } catch (e: ApiException) {
+                    if (e.status in 400..499) break // sem permissão ou canal apagado: não adianta insistir
+                } catch (_: Exception) {
+                }
+            }
+            CallService.stop(getApplication())
+            _state.update { it.copy(error = "A chamada caiu e não deu para voltar.") }
+        }
+    }
+
     fun leaveCall() {
+        rejoin?.cancel()
         voice.leave()
         CallService.stop(getApplication())
     }
@@ -282,11 +312,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(channelId: String, text: String, files: List<Uri> = emptyList()) {
+    /** Guarda o envio até o servidor confirmar; sem conexão, sai quando o socket voltar. */
+    private fun queueSend(channelId: String, content: String, attachments: List<String>, replyTo: String?) {
+        val nonce = java.util.UUID.randomUUID().toString()
+        synchronized(pending) { pending[nonce] = PendingSend(channelId, content, attachments, replyTo) }
+        if (!realtime.send(channelId, content, attachments, replyTo, nonce)) {
+            _state.update { it.copy(error = "Sem conexão. A mensagem sai quando a conexão voltar.") }
+        }
+    }
+
+    fun send(channelId: String, text: String, files: List<Uri> = emptyList(), replyTo: String? = null) {
         val content = text.trim()
         if (files.isEmpty()) {
             if (content.isEmpty()) return
-            if (!realtime.send(channelId, content)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+            queueSend(channelId, content, emptyList(), replyTo)
             return
         }
         if (files.size > MAX_FILES) {
@@ -317,7 +356,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     ids += api.uploadAttachment(channelId, name, mime, bytes).id
                 }
-                if (!realtime.send(channelId, content, ids)) _state.update { it.copy(error = "Sem conexão. Tente de novo em instantes.") }
+                queueSend(channelId, content, ids, replyTo)
             } catch (e: ApiException) {
                 _state.update { it.copy(error = e.message) }
             } finally {
@@ -375,6 +414,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun onEvent(e: ServerEvent) {
         when (e) {
             is ServerEvent.NewMessage -> {
+                e.nonce?.let { synchronized(pending) { pending.remove(it) } }
                 val m = e.message
                 val st = _state.value
                 val known = st.channels.values.any { list -> list.any { it.id == m.channelId } } || st.dms.any { it.channelId == m.channelId }
@@ -402,15 +442,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             is ServerEvent.RingDeclined -> _state.update { it.copy(error = "Chamada recusada") }
             is ServerEvent.Presence -> _state.update { it.copy(online = e.online, dnd = e.busy, activities = e.activities) }
             ServerEvent.Refresh -> refresh()
-            is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
+            is ServerEvent.Error -> {
+                e.nonce?.let { synchronized(pending) { pending.remove(it) } }
+                _state.update { it.copy(error = e.text) }
+            }
         }
     }
 
     private fun bump(cur: UiState, m: Message): List<Unread> {
         val existing = cur.unread.firstOrNull { it.channelId == m.channelId }
-        if (existing != null) return cur.unread.map { if (it.channelId == m.channelId) it.copy(count = it.count + 1) else it }
+        // Resposta a uma mensagem minha conta como menção.
+        val mention = if (m.replyTo != null && m.replyTo.userId == cur.user?.id) 1 else 0
+        if (existing != null) return cur.unread.map { if (it.channelId == m.channelId) it.copy(count = it.count + 1, mentions = it.mentions + mention) else it }
         val serverId = cur.channels.entries.firstOrNull { (_, list) -> list.any { it.id == m.channelId } }?.key
-        return cur.unread + Unread(m.channelId, serverId, 1, 0)
+        return cur.unread + Unread(m.channelId, serverId, 1, mention)
     }
 
     // ---- Membros e perfis ----

@@ -46,6 +46,8 @@ data class CallUi(
  * Chamada de voz/vídeo pelo LiveKit. Entra sem assinar nada automaticamente: áudio e câmera são
  * assinados na hora; a tela compartilhada só quando a pessoa toca em "Assistir" (como no desktop).
  */
+private val NO_RETRY = setOf("CLIENT_INITIATED", "DUPLICATE_IDENTITY", "PARTICIPANT_REMOVED", "ROOM_DELETED", "ROOM_CLOSED")
+
 class VoiceController(private val app: Context, private val scope: CoroutineScope) {
     private val _call = MutableStateFlow<CallUi?>(null)
     val call: StateFlow<CallUi?> = _call.asStateFlow()
@@ -58,6 +60,9 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     /** Até quando ignorar entradas e saídas dos outros (ao reconectar o LiveKit reanuncia todo mundo). */
     private var presenceQuietUntil = 0L
     private var lastPresenceSound = 0L
+
+    /** A chamada caiu por um motivo de que dá para voltar (rede, servidor reiniciando). Recebe o canal. */
+    var onDropped: ((String) -> Unit)? = null
 
     /** Liga um renderizador de vídeo à sala atual (necessário antes de mostrar vídeo). */
     fun initRenderer(renderer: TextureViewRenderer) {
@@ -101,7 +106,13 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     private fun onEvent(r: Room, e: RoomEvent) {
         if (room !== r) return
         when (e) {
-            is RoomEvent.Disconnected -> leave()
+            is RoomEvent.Disconnected -> {
+                val channelId = _call.value?.channelId
+                // Igual ao NO_RETRY do web (apps/client/src/voice/client.ts): sair, ser removido ou entrar em outro lugar não volta.
+                val retry = joined && channelId != null && e.reason?.name !in NO_RETRY
+                leave()
+                if (retry) onDropped?.invoke(channelId!!)
+            }
             is RoomEvent.ParticipantConnected -> { subscribeDefaults(e.participant); presenceSound(r, CallSound.UserJoin); refresh() }
             is RoomEvent.ParticipantDisconnected -> { presenceSound(r, CallSound.UserLeave); refresh() }
             is RoomEvent.Reconnected -> { presenceQuietUntil = System.currentTimeMillis() + 2000; refresh() }

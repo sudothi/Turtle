@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -8,7 +8,7 @@ import { createDb, type DbHandle } from "@turtle/db";
 import { JUKEBOX_MAX_PER_USER, type JukeboxState, type MusicTrack } from "@turtle/protocol";
 import { buildApp } from "./app.js";
 import { jukeboxService } from "./jukebox.js";
-import { mediaLink, ytdlp, type YtdlpRun } from "./ytdlp.js";
+import { mediaLink, ytdlp, ytdlpRunner, type YtdlpRun } from "./ytdlp.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (ok: () => boolean, ms = 3000) => {
@@ -100,6 +100,24 @@ describe("yt-dlp", () => {
     const args = fake.calls[0]!;
     expect(args.slice(-2)).toEqual(["--", "https://www.youtube.com/watch?v=ddddddddddd"]);
     expect(args).toContain("--max-filesize");
+  });
+});
+
+describe("cookies do yt-dlp", () => {
+  // O yt-dlp falso é um script sh; o servidor roda em Linux, então no Windows o teste não se aplica.
+  it.skipIf(process.platform === "win32")("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "turtle-ck-"));
+    const bin = join(dir, "fake-yt");
+    writeFileSync(bin, "#!/bin/sh\necho \"$@\"\n", { mode: 0o755 });
+    const jar = join(dir, "cookies.txt");
+    writeFileSync(jar, "# Netscape HTTP Cookie File\n");
+    const out = await ytdlpRunner(bin, [], jar)(["--version"], 5000);
+    const used = /--cookies (\S+)/.exec(out)?.[1];
+    expect(used).toBeTruthy();
+    expect(used).not.toBe(jar);
+    expect(existsSync(used!)).toBe(false);
+    expect(existsSync(jar)).toBe(true);
+    expect(await ytdlpRunner(bin, [], join(dir, "nao-existe.txt"))(["--version"], 5000)).not.toMatch(/--cookies/);
   });
 });
 
@@ -195,6 +213,22 @@ describe("fila e relógio", () => {
     expect(yt.calls.filter((a) => a.includes("--print") && a.at(-1)!.includes("bbbbbbbbbbb")).length).toBe(1);
     expect(last()).toBeTruthy();
     jb.close();
+  });
+
+  it("busca do Deezer: se o YouTube barra o 1º vídeo, toca o próximo; se barra todos, avisa e pula (sem prévia)", async () => {
+    const two = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Liberado", duration: 214 } }, fail: new Set(["aaaaaaaaaaa"]) });
+    await two.jb.add("c1", "s1", "u1", { trackId: "dz1" });
+    await until(() => two.last()?.startedAt != null);
+    expect(two.last()!.audio).toMatch(/yt-bbbbbbbbbbb\.webm$/);
+    expect(two.last()!.current).toMatchObject({ source: "youtube", preview: false });
+    two.jb.close();
+
+    const none = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Barrado 2", duration: 214 } }, fail: new Set(["aaaaaaaaaaa", "bbbbbbbbbbb"]) });
+    await none.jb.add("c1", "s1", "u1", { trackId: "dz1" });
+    await until(() => none.jb.state("c1")?.notice != null);
+    expect(none.jb.state("c1")!.notice).toMatch(/Música/);
+    expect(none.jb.state("c1")!.current).toBeNull();
+    none.jb.close();
   });
 
   it("limite por pessoa", async () => {

@@ -30,6 +30,8 @@ interface Track {
   /** Id do cartão de música (Spotify ou `dz...`): capa e prévia vêm do serviço de música. */
   musicId: string | null;
   thumbnail: string | null;
+  /** Outros vídeos do YouTube da mesma música, para quando o primeiro for barrado. */
+  alts?: { key: string; url: string; durationMs: number }[];
 }
 interface Item extends Track { id: string; addedBy: string; status: "loading" | "ready"; file: string | null }
 interface Box {
@@ -229,9 +231,11 @@ export function jukeboxService(opts: JukeboxOptions) {
     const m = await music.resolve(raw);
     if (!m) return { error: "não achei essa música" };
     const durationMs = m.durationMs ?? 0;
-    const hit = yt ? await yt.find(m.artist, m.title, m.durationMs) : null;
+    const hits = yt ? await yt.findAll(m.artist, m.title, m.durationMs) : [];
+    const hit = hits[0];
     if (hit) {
       return {
+        alts: hits.slice(1).map((h) => ({ key: `yt-${h.id}`, url: h.url, durationMs: h.durationMs })),
         key: `yt-${hit.id}`, title: m.title, artist: m.artist, durationMs: hit.durationMs || durationMs, source: "youtube", preview: false,
         link: hit.url, fetchUrl: hit.url, musicId: m.hasCover ? m.id : null, thumbnail: m.hasCover ? null : hit.thumbnail,
       };
@@ -288,15 +292,41 @@ export function jukeboxService(opts: JukeboxOptions) {
     b.timer.unref?.();
   }
 
+  /** Baixa a faixa; se o YouTube barrar, tenta os outros vídeos da mesma música. Sem prévia: ou toca inteira ou avisa. */
+  async function load(b: Box, item: Item): Promise<string> {
+    try {
+      return await ensureAudio(item);
+    } catch (e) {
+      opts.log?.(`discoteca: não baixou ${item.key}: ${(e as Error).message}`);
+      const alts = item.alts ?? [];
+      item.alts = [];
+      for (const alt of alts) {
+        if (b.current !== item) break;
+        Object.assign(item, { key: alt.key, fetchUrl: alt.url, link: alt.url, durationMs: alt.durationMs || item.durationMs });
+        try {
+          const file = await ensureAudio(item);
+          emit(b);
+          return file;
+        } catch (e2) {
+          opts.log?.(`discoteca: não baixou ${alt.key}: ${(e2 as Error).message}`);
+        }
+      }
+      throw e;
+    }
+  }
+
   async function begin(b: Box, item: Item) {
     emit(b);
     let file: string;
     try {
-      file = await ensureAudio(item);
+      file = await load(b, item);
     } catch (e) {
       opts.log?.(`discoteca: não baixou ${item.key}: ${(e as Error).message}`);
       if (b.current !== item) return;
-      say(b, `Não deu para tocar “${item.title}”; pulei para a próxima.`);
+      const login = /sign in to confirm|not a bot|cookies/i.test((e as Error).message);
+      say(b, login
+        ? `O YouTube pediu login para “${item.title}” (cookies ausentes ou vencidos); pulei para a próxima.`
+        : `Não deu para tocar “${item.title}”; pulei para a próxima.`);
       return advance(b);
     }
     if (b.current !== item || boxes.get(b.channelId) !== b) return;

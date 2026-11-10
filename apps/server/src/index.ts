@@ -29,6 +29,8 @@ if (!ytdlpPath) console.warn("YTDLP_PATH ausente: a discoteca toca só prévias 
 const jukebox = {
   ytdlp: ytdlpPath,
   ytdlpArgs: (process.env.YTDLP_ARGS || "--js-runtimes node").split(/\s+/).filter(Boolean),
+  // YTDLP_COOKIES: cookies.txt de uma conta Google descartável (o YouTube barra IP de datacenter sem login). Fica só na VPS.
+  ytdlpCookies: process.env.YTDLP_COOKIES || undefined,
   cacheDir: process.env.MUSIC_CACHE_DIR || undefined,
   cacheMb: Number(process.env.MUSIC_CACHE_MB) || undefined,
 };

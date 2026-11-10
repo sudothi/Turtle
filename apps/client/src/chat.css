@@ -215,3 +215,17 @@
 .music-pick-play { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin-right: 4px; border: 1px solid var(--line-strong); border-radius: 50%; background: transparent; color: var(--paper); cursor: pointer; }
 .music-pick-play:hover { background: var(--bg-active); }
 .music-picker-foot { margin: 6px 4px 0; font-size: 11px; }
+
+/* Convite para a discoteca */
+.dc-invite { display: grid; gap: 10px; max-width: 360px; margin: 6px 0; padding: 12px 14px; background: var(--ink-2); border-left: 3px solid var(--paper-dim); }
+.dc-invite-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
+.dc-invite-now { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dc-invite-cover { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 4px; object-fit: cover; background: var(--ink-4); color: var(--text-muted); }
+.dc-invite-text { display: grid; min-width: 0; font-size: 13px; }
+.dc-invite-text b, .dc-invite-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-invite-people { display: flex; flex-wrap: wrap; padding-left: 8px; }
+.dc-invite-person { display: inline-flex; margin-left: -8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--ink-2); }
+.dc-invite-person:focus-visible { outline: 2px solid var(--paper); z-index: 1; }
+.dc-invite-empty { margin-left: -8px; font-size: 12px; }
+.jb-invite { margin-left: auto; margin-right: 8px; padding: 3px 10px; font: inherit; font-size: 12px; color: var(--paper); background: var(--ink-3); border: 1px solid var(--ink-4); border-radius: 999px; cursor: pointer; }
+.jb-invite:hover { background: var(--ink-4); }

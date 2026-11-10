@@ -7,6 +7,7 @@ import { desktop, loadShortcuts, loadShowGame } from "../desktop";
 import { isMuted } from "../muted";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
+import { DiscotecaContext, inviteContent } from "../discoteca";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
 import { VoiceClient } from "../voice/client";
 import { ServerRail } from "../components/ServerRail";
@@ -750,6 +751,17 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
+  /** Convite da discoteca: vai para o canal de texto aberto (se for do mesmo servidor da chamada) ou para o primeiro canal de texto dele. */
+  const inviteToDiscoteca = useCallback((voiceChannelId: string) => {
+    const vc = allKnown.find((c) => c.id === voiceChannelId);
+    if (!vc) return;
+    const open = allKnown.find((c) => c.id === activeId);
+    const target = open && open.kind === "text" && open.serverId === vc.serverId ? open : allKnown.find((c) => c.serverId === vc.serverId && c.kind === "text");
+    if (!target) return;
+    const o: Outgoing = { nonce: crypto.randomUUID(), channelId: target.id, content: inviteContent(voiceChannelId), attachments: [], status: "sending", at: Date.now() };
+    setOutbox((l) => [...l, o]);
+    transmit(o);
+  }, [allKnown, activeId, transmit]);
   const dmUnread = new Set(Object.values(unread).filter((u) => u.serverId === null).map((u) => u.channelId));
   const serverUnread: Record<string, { mentions: number }> = {};
   for (const u of Object.values(unread)) {
@@ -840,6 +852,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
 
   return (
     <PresenceContext.Provider value={presence}>
+    <DiscotecaContext.Provider value={{ voiceStates: named.voiceStates, nameOf: whoIs, invite: inviteToDiscoteca }}>
     <MobileBack.Provider value={mobile ? back : undefined}>
     <div
       className={mobile ? `app m m-${pane}` : `app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}
@@ -1066,6 +1079,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       )}
     </div>
     </MobileBack.Provider>
+    </DiscotecaContext.Provider>
     </PresenceContext.Provider>
   );
 }

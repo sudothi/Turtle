@@ -8,6 +8,8 @@ import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
 import { deezerLink, isSoloMusicLink, isMusicLink } from "../music";
 import { MusicCard } from "./MusicCard";
+import { DiscotecaInvite } from "./DiscotecaInvite";
+import { parseInvite } from "../discoteca";
 import { MusicPicker } from "./MusicPicker";
 import { copyText } from "../clipboard";
 import { useMobile, useMobileBack } from "../mobile";
@@ -792,8 +794,14 @@ export function ChatView({
             <Icon name="pin" size={13} /> Fixada
           </div>
         )}
-        <MessageText content={isSoloMusicLink(m.content) ? "" : m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
-        {m.content && <LinkCard content={m.content} />}
+        {parseInvite(m.content) ? (
+          <DiscotecaInvite channelId={parseInvite(m.content)!} from={shownName(m)} />
+        ) : (
+          <>
+            <MessageText content={isSoloMusicLink(m.content) ? "" : m.content} names={names} onProfile={onProfile} edited={m.editedAt} />
+            {m.content && <LinkCard content={m.content} />}
+          </>
+        )}
         <Attachments items={m.attachments} onOpen={setViewing} onLoad={onMediaLoad} />
         {m.reactions.length > 0 && (
           <div className="reactions">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useContext, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { JUKEBOX_MAX_MS, JUKEBOX_MAX_QUEUE, type JukeboxItem, type JukeboxState, type MusicTrack } from "@turtle/protocol";
 import { Icon, IconButton } from "@turtle/ui";
@@ -6,6 +6,7 @@ import { api } from "../api";
 import { jukebox, looksLikeLink, useJukebox, useJukeboxPosition, withScheme } from "../jukebox";
 import { clock, coverTint, musicCover } from "../music";
 import { Vinyl } from "./MusicCard";
+import { DiscotecaContext } from "../discoteca";
 
 /** Nome de quem colocou a música (apelido no servidor, se tiver). */
 export type NameOf = (userId: string) => string;
@@ -200,6 +201,8 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
   const [added, setAdded] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const isLink = looksLikeLink(q);
+  const { invite } = useContext(DiscotecaContext);
+  const [invited, setInvited] = useState(false);
 
   useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => {
@@ -254,6 +257,7 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
     <div className="sb-panel jb-panel lino lino-lg" role="dialog" aria-label="Discoteca" style={place}>
       <div className="sb-head">
         <b className="t-display">Discoteca</b>
+        {invite && <button type="button" className="jb-invite" onClick={() => { invite(channelId); setInvited(true); }} title="Manda um convite com a música e quem está na chamada para o chat do servidor">{invited ? "Convite enviado" : "Convidar"}</button>}
         <JukeboxVolume />
       </div>
 

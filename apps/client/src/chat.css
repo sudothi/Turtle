@@ -11,6 +11,10 @@
   border: none; border-radius: 4px; background: transparent; color: var(--text-muted); opacity: 0;
 }
 .channel-row:hover .channel-edit, .channel-edit:focus-visible { opacity: 1; }
+.channel-mute { right: 28px; }
+.channel-mute.solo { right: 4px; }
+.channel-mute.on { opacity: 1; }
+.channel-row:hover .channel .dm-badge { margin-right: 52px; }
 .channel-row:hover .channel .dm-badge { margin-right: 26px; }
 .channel-edit:hover { color: var(--paper); }
 .rail-item.has-unread:not(.active) .rail-pill { height: 8px; }

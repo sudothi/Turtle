@@ -1,6 +1,7 @@
 /**
  * Sons do app, gerados na hora com Web Audio (sem arquivos): bolhas e ondas do mar, curtos e baixinhos.
- * - mensagem: uma gota caindo na água ("ploc" com uma bolhinha depois)
+ * - mensagem de servidor: uma gota caindo na água ("ploc" com uma bolhinha depois)
+ * - mensagem direta (DM/grupo): duas gotas mais graves e cheias, "plon-plin", para distinguir sem olhar
  * - mutar / desmutar: bolha que desce / que sobe
  * - ensurdecer: duas bolhas descendo; voltar o som: duas subindo
  * - transmissão: uma onda chegando (e indo embora, ao parar)
@@ -8,7 +9,7 @@
  * - alguém entra na chamada: duas bolhinhas agudas subindo; alguém sai: as mesmas descendo
  */
 export type SoundName =
-  | "message" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff" | "ring"
+  | "message" | "dmMessage" | "mute" | "unmute" | "deafen" | "undeafen" | "screenOn" | "screenOff" | "ring"
   | "callJoin" | "callLeave" | "userJoin" | "userLeave";
 
 const KEY = "turtle.sounds";
@@ -16,12 +17,16 @@ export interface SoundPrefs {
   enabled: boolean;
   /** 0 a 1. */
   volume: number;
-  /** Avisar de toda mensagem nos servidores (por padrão, só menções e conversas diretas). */
+  /** Avisar de toda mensagem nos servidores não silenciados (desligado: só menções e conversas diretas). */
   allServerMessages: boolean;
+  /** Sons de mensagem nova (servidor e conversas diretas). */
+  messages: boolean;
+  /** 0 a 1, multiplica o volume geral só para os sons de mensagem. */
+  messageVolume: number;
   /** Sons de entrar e sair da chamada (você e os outros). */
   callPresence: boolean;
 }
-const defaults: SoundPrefs = { enabled: true, volume: 0.6, allServerMessages: false, callPresence: true };
+const defaults: SoundPrefs = { enabled: true, volume: 0.6, allServerMessages: true, messages: true, messageVolume: 1, callPresence: true };
 
 export function loadSoundPrefs(): SoundPrefs {
   try {
@@ -101,9 +106,27 @@ function wave(c: AudioContext, out: AudioNode, at: number, from: number, to: num
   src.stop(at + dur + 0.05);
 }
 
+const MESSAGE_SOUNDS: SoundName[] = ["message", "dmMessage"];
+const MESSAGE_COOLDOWN_MS = 800;
+const lastMessage: Partial<Record<SoundName, number>> = {};
+
+/** Para o botão "ouvir" das configurações: ignora o cooldown. */
+export function previewSound(name: SoundName) {
+  delete lastMessage[name];
+  playSound(name);
+}
+
 export function playSound(name: SoundName) {
   const prefs = loadSoundPrefs();
+  const isMessage = MESSAGE_SOUNDS.includes(name);
   if (!prefs.enabled || prefs.volume <= 0) return;
+  if (isMessage) {
+    // Rajada de mensagens (ou alguém digitando rápido) toca um som só; os botões de teste usam `force`.
+    if (!prefs.messages || prefs.messageVolume <= 0) return;
+    const now = Date.now();
+    if (now - (lastMessage[name] ?? 0) < MESSAGE_COOLDOWN_MS) return;
+    lastMessage[name] = now;
+  }
   let c: AudioContext;
   try {
     c = audio();
@@ -112,13 +135,17 @@ export function playSound(name: SoundName) {
   }
   if (sinkId) setSoundOutput(sinkId);
   const out = c.createGain();
-  out.gain.value = prefs.volume * 0.5;
+  out.gain.value = prefs.volume * (isMessage ? prefs.messageVolume : 1) * 0.5;
   out.connect(c.destination);
   const t = c.currentTime + 0.01;
   switch (name) {
     case "message":
       bubble(c, out, t, 520, 1300, 0.11, 0.55);
       bubble(c, out, t + 0.09, 900, 1700, 0.07, 0.25);
+      break;
+    case "dmMessage":
+      bubble(c, out, t, 380, 760, 0.13, 0.6);
+      bubble(c, out, t + 0.12, 560, 1100, 0.16, 0.5);
       break;
     case "mute":
       bubble(c, out, t, 820, 360, 0.15, 0.5);

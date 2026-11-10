@@ -4,6 +4,7 @@ import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
 import { desktop, loadShortcuts, loadShowGame } from "../desktop";
+import { isMuted } from "../muted";
 import { appFocused, askNotificationsOnFirstClick, showNotification } from "../notify";
 import { PresenceContext } from "../presence";
 import { MobileBack, trackVisualViewport, useMobile } from "../mobile";
@@ -647,7 +648,8 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     if (user.status === "busy") return;
     const direct = !ch;
     if (!(direct || mention || loadSoundPrefs().allServerMessages)) return;
-    playSound("message");
+    if (isMuted(m.channelId, ch?.serverId)) return;
+    playSound(direct ? "dmMessage" : "message");
     if (appFocused()) return;
     const names = new Map<string, string>([[user.id, shownName(user)], ...members.map((x) => [x.userId, shownName(x)] as [string, string]), ...dms.flatMap((d) => d.users.map((p) => [p.id, shownName(p)] as [string, string]))]);
     const text = m.content.replace(MENTION_RE, (_, id: string) => `@${names.get(id) ?? "alguém"}`);
@@ -889,6 +891,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           footer={footer}
           unread={unread}
           onEdit={setEditingChannel}
+          serverId={server.id}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">

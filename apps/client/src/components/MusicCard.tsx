@@ -1,8 +1,8 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import type { MusicTrack } from "@turtle/protocol";
 import { Icon } from "@turtle/ui";
 import { api } from "../api";
-import { clock, musicCover, stopMusic, toggleMusic, useMusicPlayback } from "../music";
+import { clock, coverTint, musicCover, stopMusic, toggleMusic, useMusicPlayback } from "../music";
 
 const tracks = new Map<string, Promise<MusicTrack | null>>();
 
@@ -11,14 +11,14 @@ function Vinyl({ cover }: { cover: string | null }) {
   const clip = `music-label-${useId().replace(/:/g, "")}`;
   return (
     <svg className="music-vinyl-disc" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-      <circle cx="50" cy="50" r="49" fill="var(--ink-0)" />
+      <circle cx="50" cy="50" r="49" fill="var(--disc, var(--ink-0))" />
       {[45, 41, 37, 33.5].map((r, i) => (
-        <circle key={r} cx="50" cy="50" r={r} fill="none" stroke="var(--paper)" strokeOpacity={0.16 + (i % 2) * 0.08} strokeWidth="0.9"
+        <circle key={r} cx="50" cy="50" r={r} fill="none" stroke="var(--groove, var(--paper))" strokeOpacity={0.28 + (i % 2) * 0.12} strokeWidth="0.9"
           strokeDasharray={i % 2 ? "22 3 9 4 30 2" : "14 4 26 3 8 5"} strokeLinecap="round" />
       ))}
       {/* reflexos cortados na goiva */}
-      <path d="M20 31 Q28 18 42 13" fill="none" stroke="var(--paper)" strokeOpacity="0.55" strokeWidth="2" strokeLinecap="round" />
-      <path d="M80 69 Q73 81 61 86" fill="none" stroke="var(--paper)" strokeOpacity="0.35" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M20 31 Q28 18 42 13" fill="none" stroke="var(--groove, var(--paper))" strokeOpacity="0.75" strokeWidth="2" strokeLinecap="round" />
+      <path d="M80 69 Q73 81 61 86" fill="none" stroke="var(--groove, var(--paper))" strokeOpacity="0.5" strokeWidth="1.6" strokeLinecap="round" />
       <defs><clipPath id={clip}><circle cx="50" cy="50" r="22" /></clipPath></defs>
       <circle cx="50" cy="50" r="22" fill="var(--paper)" />
       {cover ? (
@@ -36,6 +36,13 @@ export function MusicCard({ url, fallback }: { url: string; fallback: ReactNode 
   const [track, setTrack] = useState<MusicTrack | null | undefined>(undefined);
   const [cover, setCover] = useState<string | null>(null);
   const playback = useMusicPlayback();
+  const [tint, setTint] = useState<{ disc: string; groove: string } | null>(null);
+  useEffect(() => {
+    if (!cover) return;
+    let alive = true;
+    void coverTint(cover).then((t) => alive && setTint(t));
+    return () => { alive = false; };
+  }, [cover]);
   const owner = useId();
 
   useEffect(() => {
@@ -83,7 +90,7 @@ export function MusicCard({ url, fallback }: { url: string; fallback: ReactNode 
 
   return (
     <div className={`music-card${playing ? " is-playing" : ""}${loading ? " is-loading" : ""}`} role="group" aria-label={`Música: ${label}`}>
-      <div className="music-vinyl"><Vinyl cover={cover} /></div>
+      <div className="music-vinyl" style={tint ? ({ "--disc": tint.disc, "--groove": tint.groove } as CSSProperties) : undefined}><Vinyl cover={cover} /></div>
       {canPlay ? (
         <button type="button" className="music-cover lino" onClick={() => void toggleMusic(owner, track.id)}
           aria-label={playing ? `Pausar prévia de ${label}` : `Tocar prévia de ${label}`}

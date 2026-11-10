@@ -104,3 +104,52 @@ export const clock = (secs: number) => {
   const s = Math.max(0, Math.floor(secs));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
+
+/** Cor que mais marca a capa (matiz mais frequente entre os pixels com cor), para tingir o vinil. */
+export interface CoverTint { disc: string; groove: string }
+const tints = new Map<string, Promise<CoverTint | null>>();
+export function coverTint(src: string): Promise<CoverTint | null> {
+  let job = tints.get(src);
+  if (!job) {
+    job = new Promise<CoverTint | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const N = 32;
+          const c = document.createElement("canvas");
+          c.width = c.height = N;
+          const ctx = c.getContext("2d", { willReadFrequently: true });
+          if (!ctx) return resolve(null);
+          ctx.drawImage(img, 0, 0, N, N);
+          const px = ctx.getImageData(0, 0, N, N).data;
+          // 24 faixas de matiz; cada pixel vale pela saturação (cinza quase não conta).
+          const bins = Array.from({ length: 24 }, () => ({ w: 0, s: 0 }));
+          for (let i = 0; i < px.length; i += 4) {
+            const r = px[i]! / 255, g = px[i + 1]! / 255, b = px[i + 2]! / 255;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+            if (d < 0.08 || l < 0.1 || l > 0.92) continue;
+            const s = d / (1 - Math.abs(2 * l - 1));
+            let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+            h = (h * 60 + 360) % 360;
+            const bin = bins[Math.floor(h / 15)]!;
+            bin.w += s;
+            bin.s += s * s;
+          }
+          let best = -1;
+          for (let i = 0; i < 24; i++) if (best < 0 || bins[i]!.w > bins[best]!.w) best = i;
+          const top = bins[best]!;
+          if (!top || top.w < 20) return resolve(null); // capa praticamente sem cor: vinil preto
+          const hue = best * 15 + 7.5;
+          const sat = Math.round(Math.min(90, Math.max(45, (top.s / top.w) * 100)));
+          resolve({ disc: `hsl(${hue} ${Math.min(sat, 60)}% 13%)`, groove: `hsl(${hue} ${sat}% 62%)` });
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    tints.set(src, job);
+  }
+  return job;
+}

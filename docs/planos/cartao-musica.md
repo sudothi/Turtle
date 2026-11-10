@@ -20,7 +20,7 @@ Colar um link de faixa do Spotify (`open.spotify.com/track/...`, com ou sem `int
 
 ## Cliente
 - `apps/client/src/music.ts`: um `<audio>` só para o app todo; tocar em outro cartão para o anterior; o cartão que some da tela para a música.
-- `components/MusicCard.tsx` e `chat.css` (`.music-*`): sem caixa, como no Instagram. A capa grande (190 px, 160 no celular) tem nome e artista por cima, e o vinil sai pela metade à direita, com a capa no selo. Tocar/pausar é clicar na capa, e a barra fina embaixo mostra o progresso. Tudo em preto e branco (filtro na capa).
+- `components/MusicCard.tsx` e `chat.css` (`.music-*`): sem caixa, como no Instagram. A capa grande (190 px, 160 no celular) tem nome e artista por cima, e o vinil sai pela metade à direita, com a capa no selo. Tocar/pausar é clicar na capa, e a barra fina embaixo mostra o progresso. Capas coloridas; o vinil é tingido com a cor que mais marca a capa (`coverTint` em `music.ts`).
 - `components/MusicPicker.tsx`: busca do botão de música. Com `prefers-reduced-motion` o vinil não gira nem desliza.
 
 ## Próximos passos

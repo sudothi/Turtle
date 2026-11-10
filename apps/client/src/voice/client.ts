@@ -22,6 +22,7 @@ import { preloadNoiseWasm, publishAsMono, RnnoiseProcessor } from "./rnnoise";
 import { loadSoundPrefs, playSound, type SoundName } from "../sounds";
 import { desktop } from "../desktop";
 import { DesktopShareAudio, desktopShareAudioSupported } from "./screen-audio";
+import { SpeakingDetector } from "./speaking";
 
 export interface CallParticipant {
   id: string;
@@ -141,6 +142,8 @@ export class VoiceClient {
   private joinSeq = 0;
   /** Quem você escolheu assistir (transmissões de tela só chegam a quem pede). */
   private watching = new Set<string>();
+  /** Anel de quem fala medido aqui (rápido); o do servidor fica de reserva. */
+  private speakingDetector = new SpeakingDetector(() => this.micTracks(), () => this.refresh());
   /** Publicações remotas para as quais já pedimos (ou cancelamos) a assinatura. */
   private asked = new Set<string>();
   private statsTimer?: ReturnType<typeof setInterval>;
@@ -212,12 +215,15 @@ export class VoiceClient {
       adaptiveStream: true,
       dynacast: true,
       disconnectOnPageLeave: true,
+      // Áudio das pessoas passa por um GainNode do Web Audio: só assim o volume por pessoa passa de 100% (até 200%).
+      webAudioMix: true,
       audioCaptureDefaults: micConstraints(prefs),
       audioOutput: { deviceId: prefs.outputId },
       publishDefaults: { audioPreset: { maxBitrate: 64_000 }, dtx: true, red: true, forceStereo: false },
     });
     this.room = room;
     this.wire(room);
+    this.speakingDetector.start();
 
     try {
       // Token + conexão e microfone em paralelo: entrar fica abaixo de ~1 s numa rede boa.
@@ -234,6 +240,8 @@ export class VoiceClient {
         this.applyVolume(p);
         this.syncSubscriptions(p);
       }
+      // Com webAudioMix a saída escolhida vai para o AudioContext, que só existe depois de conectar.
+      if (prefs.outputId && prefs.outputId !== "default") void room.switchActiveDevice("audiooutput", prefs.outputId).catch(() => {});
       this.rejoin = undefined;
       this.set({ status: "connected" });
       this.presenceQuietUntil = Date.now() + 1500;
@@ -341,6 +349,7 @@ export class VoiceClient {
 
   /** Volta ao estado "fora da chamada", mantendo mudo/ensurdecer e as preferências. */
   private resetCall(extra: Partial<VoiceSnapshot>) {
+    this.speakingDetector.stop();
     this.stopStats();
     this.stopShareAudio();
     this.watching.clear();
@@ -596,6 +605,7 @@ export class VoiceClient {
   }
 
   async unlockAudio() {
+    this.speakingDetector.resume();
     await this.room?.startAudio();
   }
 
@@ -799,6 +809,22 @@ export class VoiceClient {
       });
   }
 
+  /** Track de microfone de cada pessoa da sala (a minha e as que já chegaram aqui). */
+  private micTracks() {
+    const out = new Map<string, MediaStreamTrack>();
+    const room = this.room;
+    if (!room) return out;
+    for (const p of [room.localParticipant, ...room.remoteParticipants.values()]) {
+      const t = p.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+      if (t) out.set(p.identity, t);
+    }
+    return out;
+  }
+
+  private speakingOf(p: Participant) {
+    return this.speakingDetector.isSpeaking(p.identity) ?? p.isSpeaking;
+  }
+
   private refresh() {
     const room = this.room;
     if (!room) return;
@@ -806,14 +832,14 @@ export class VoiceClient {
       id: p.identity,
       name: p.name || p.identity,
       isLocal,
-      speaking: p.isSpeaking,
+      speaking: this.speakingOf(p),
       muted: isLocal ? this.snap.muted : (p.getTrackPublication(Track.Source.Microphone)?.isMuted ?? true),
       quality: qualityName(p.connectionQuality),
     });
     const everyone: [Participant, boolean][] = [[room.localParticipant, true], ...[...room.remoteParticipants.values()].map((p): [Participant, boolean] => [p, false])];
     const videos: VideoTile[] = [];
     for (const [p, isLocal] of everyone) {
-      const base = { userId: p.identity, name: p.name || p.identity, isLocal, speaking: p.isSpeaking };
+      const base = { userId: p.identity, name: p.name || p.identity, isLocal, speaking: this.speakingOf(p) };
       const cam = p.getTrackPublication(Track.Source.Camera);
       if (cam && !cam.isMuted) videos.push({ ...base, key: `${p.identity}:camera`, source: "camera", track: cam.track, watching: true });
       const scr = p.getTrackPublication(Track.Source.ScreenShare);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@turtle/ui";
+import { Button, Icon } from "@turtle/ui";
 import { loadSoundPrefs, playSound, saveSoundPrefs, type SoundName, type SoundPrefs } from "../sounds";
 
 const samples: { name: SoundName; label: string }[] = [
@@ -45,7 +45,7 @@ export function NotificationSettings() {
       <div className="sound-samples">
         {samples.map((s) => (
           <Button key={s.name} size="sm" variant="ghost" disabled={!prefs.enabled} onClick={() => playSound(s.name)}>
-            ▶ {s.label}
+            <Icon name="play" size={14} /> {s.label}
           </Button>
         ))}
       </div>

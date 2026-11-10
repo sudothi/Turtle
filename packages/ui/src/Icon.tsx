@@ -200,6 +200,16 @@ const icons = {
       <circle cx="18" cy="9" r="1.6" fill="currentColor" />
     </>
   ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.3" fill="none" stroke="currentColor" strokeWidth="2.6" />
+      <path d="M15.2 15.2 21 21" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" />
+    </>
+  ),
+  // Recortes vazados (evenodd): olhos e boca mostram o fundo do botão, qualquer que seja.
+  smile: <path fillRule="evenodd" fill="currentColor" d="M12 2.5a9.5 9.5 0 1 0 0 19a9.5 9.5 0 1 0 0-19zM8.8 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15.2 8.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM7.2 13.2h9.6a4.8 4.8 0 0 1-9.6 0z" />,
+  "arrow-left": <path d="M10.5 5 3.5 12l7 7M4.5 12h16" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />,
+  play: <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" strokeLinejoin="round" />,
 } as const;
 
 export type IconName = keyof typeof icons;

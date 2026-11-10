@@ -11,11 +11,11 @@ export interface AudioPrefs {
   gateThreshold: number;
   /** Ganho do microfone (0.25 a 2.5, onde 1 = 100%). */
   inputGain: number;
-  /** Volume da voz por pessoa (userId -> 0..1). */
+  /** Volume da voz por pessoa (userId -> 0..MAX_VOLUME, onde 1 = 100%). */
   volumes: Record<string, number>;
   /** Pessoas silenciadas só para mim (a voz delas some daqui, o volume guardado não muda). */
   localMutes: Record<string, boolean>;
-  /** Volume do áudio das transmissões de tela por pessoa (userId -> 0..1). */
+  /** Volume do áudio das transmissões de tela por pessoa (userId -> 0..MAX_VOLUME). */
   streamVolumes: Record<string, number>;
   cameraId: string;
   screenProfile: ScreenProfileId;
@@ -52,6 +52,9 @@ const defaults: AudioPrefs = {
   inputId: "default", outputId: "default", noise: "gtcrn", noiseGate: true, gateThreshold: -50, inputGain: 1,
   volumes: {}, localMutes: {}, streamVolumes: {}, cameraId: "default", screenProfile: "1080p30", screenAudio: false, screenSimulcast: false,
 };
+
+/** Volume máximo de uma pessoa ou transmissão: 2 = 200% (GainNode do Web Audio). */
+export const MAX_VOLUME = 2;
 
 export function loadPrefs(): AudioPrefs {
   try {

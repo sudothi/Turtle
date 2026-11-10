@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { NICKNAME_MAX, memberName, type Channel, type Member, type Server, type VoiceState } from "@turtle/protocol";
 import { Button, Icon, Modal, TextField, type IconName } from "@turtle/ui";
 import { api } from "../api";
+import { MAX_VOLUME } from "../voice/prefs";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 import { useSoundboard } from "./Soundboard";
 import { soundboard } from "../soundboard";
@@ -149,7 +150,7 @@ export function PersonMenu({
               <label className="person-menu-volume">
                 <span>Volume do usuário <b>{Math.round(mutedForMe ? 0 : volume * 100)}%</b></span>
                 <input
-                  type="range" min={0} max={1} step={0.05}
+                  type="range" min={0} max={MAX_VOLUME} step={0.05}
                   aria-label={`Volume de ${name}`}
                   value={mutedForMe ? 0 : volume}
                   onChange={(e) => {

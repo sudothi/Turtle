@@ -8,7 +8,7 @@ import { stat, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import {
-  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, sql, users, type Db,
+  and, asc, attachments, blocks, channels, count, desc, dmMembers, eq, friendships, gt, inArray, invites, isNotNull, isNull, lt, messages, messageReceipts, ne, or, reactions, readStates, serverInvites, serverBans, serverMembers, servers, sessions, soundboardSounds, sql, users, type Db,
 } from "@turtle/db";
 import {
   ATTACHMENT_MAX_BYTES,
@@ -63,7 +63,11 @@ import {
   type User,
   type VoiceState,
   type VoiceToken,
+  MAX_CONCURRENT_SOUNDS, MAX_SOUNDS_PER_SERVER, SOUND_COOLDOWN_MS, SOUND_MAX_BYTES, SOUNDS_PER_MINUTE,
+  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound,
+  type Sound, type SoundIcon,
 } from "@turtle/protocol";
+import { processSound } from "./sound.js";
 import { fileStore, isFileKey, processAttachment, processImage, type ImageKind } from "./profile.js";
 import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, verifyPassword } from "./auth.js";
 import { attemptLimiter } from "./limiter.js";
@@ -300,6 +304,9 @@ export async function buildApp({
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Soundboard: quando cada conta tocou sons (último minuto) e até quando os sons de cada chamada tocam.
+  const soundPlays = new Map<string, number[]>();
+  const soundsPlaying = new Map<string, number[]>();
   // Toque de chamada em DM/grupo: um por canal; para quando alguém atende, quem ligou sai, recusam todos ou passam 30 s.
   const RING_MS = 30_000;
   const rings = new Map<string, { callerId: string; targets: Set<string>; timer: ReturnType<typeof setTimeout> }>();
@@ -360,7 +367,7 @@ export async function buildApp({
         { id: newId(), serverId: id, name: "geral", kind: "text" },
         { id: newId(), serverId: id, name: "Sala", kind: "voice" },
       ]);
-      return { id, name, ownerId: owner.id, role: "owner", icon: null } satisfies Server;
+      return { id, name, ownerId: owner.id, role: "owner", icon: null, soundboardAdminsOnly: false } satisfies Server;
     });
   }
 
@@ -451,6 +458,11 @@ export async function buildApp({
     const row = (await db.select(messageCols).from(messages).innerJoin(users, eq(users.id, messages.userId)).where(eq(messages.id, id)).limit(1))[0];
     return row ? (await toMessages([row]))[0] : undefined;
   };
+  const soundCols = {
+    id: soundboardSounds.id, serverId: soundboardSounds.serverId, userId: soundboardSounds.userId, name: soundboardSounds.name,
+    icon: soundboardSounds.icon, volume: soundboardSounds.volume, durationMs: soundboardSounds.durationMs, key: soundboardSounds.fileKey,
+  };
+  const toSound = (r: { icon: string } & Omit<Sound, "icon">): Sound => ({ ...r, icon: r.icon as SoundIcon });
   /** Apaga do disco os anexos dos canais (antes de apagar os canais, que leva as linhas junto). */
   const fileKeysOf = async (channelIds: string[]) =>
     channelIds.length ? (await db.select({ key: attachments.fileKey }).from(attachments).where(inArray(attachments.channelId, channelIds))).map((r) => r.key) : [];
@@ -652,6 +664,17 @@ export async function buildApp({
     if (!isFileKey(key)) return reply.code(404).send({ error: "não encontrado" });
     const path = join(files.dir, key);
     if (!(await stat(path).catch(() => null))) return reply.code(404).send({ error: "não encontrado" });
+    if (key.endsWith(".wav")) {
+      // Som do soundboard (só existe enquanto a linha existir).
+      const snd = (await db.select({ id: soundboardSounds.id }).from(soundboardSounds).where(eq(soundboardSounds.fileKey, key)).limit(1))[0];
+      if (!snd) return reply.code(404).send({ error: "não encontrado" });
+      reply
+        .header("content-type", "audio/wav")
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .header("x-content-type-options", "nosniff")
+        .header("content-security-policy", "default-src 'none'; sandbox");
+      return reply.send(createReadStream(path));
+    }
     const att = key.endsWith(".webp") ? undefined : (await db.select({ name: attachments.name, mime: attachments.mime }).from(attachments).where(eq(attachments.fileKey, key)).limit(1))[0];
     if (!key.endsWith(".webp") && !att) return reply.code(404).send({ error: "não encontrado" });
     const image = !att || /^image\/(png|jpeg|gif|webp)$/.test(att.mime);
@@ -868,7 +891,7 @@ export async function buildApp({
     authed.get("/servers", async (req) =>
       (
         await db
-          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role, icon: servers.iconKey })
+          .select({ id: servers.id, name: servers.name, ownerId: servers.ownerId, role: serverMembers.role, icon: servers.iconKey, soundboardAdminsOnly: servers.soundboardAdminsOnly })
           .from(serverMembers)
           .innerJoin(servers, eq(servers.id, serverMembers.serverId))
           .where(eq(serverMembers.userId, me(req).id))
@@ -912,8 +935,9 @@ export async function buildApp({
       await dropFromCalls(server.id);
       const chans = (await db.select({ id: channels.id }).from(channels).where(eq(channels.serverId, server.id))).map((c) => c.id);
       const keys = await fileKeysOf(chans);
+      const soundKeys = (await db.select({ key: soundboardSounds.fileKey }).from(soundboardSounds).where(eq(soundboardSounds.serverId, server.id))).map((r) => r.key);
       await db.delete(servers).where(eq(servers.id, server.id));
-      await removeFiles([...keys, server.iconKey]);
+      await removeFiles([...keys, ...soundKeys, server.iconKey]);
       for (const id of ids) await refreshMemberships(id);
       toUsers(ids, { t: "sync" });
       return { ok: true };
@@ -1159,7 +1183,7 @@ export async function buildApp({
         toServer(inv.serverId, { t: "sync" });
       }
       const role = (await roleIn(inv.serverId, me(req).id))!;
-      return { id: server.id, name: server.name, ownerId: server.ownerId, role, icon: server.iconKey } satisfies Server;
+      return { id: server.id, name: server.name, ownerId: server.ownerId, role, icon: server.iconKey, soundboardAdminsOnly: server.soundboardAdminsOnly } satisfies Server;
     });
 
     // ---- Amigos ----
@@ -1621,6 +1645,72 @@ export async function buildApp({
       return { ok: true };
     });
 
+    // ---- Soundboard ----
+    // Sons curtos por servidor. Tocar é pelo WebSocket (evento soundboardPlay); aqui fica só a lista e a edição.
+    authed.get<{ Params: { id: string } }>("/servers/:id/sounds", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id))) return;
+      return (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.serverId, req.params.id)).orderBy(asc(soundboardSounds.createdAt))).map(toSound);
+    });
+    authed.post<{ Params: { id: string }; Querystring: Record<string, string> }>("/servers/:id/sounds", async (req, reply) => {
+      const role = await member(req, reply, req.params.id);
+      if (!role) return;
+      const server = (await findServer(req.params.id))!;
+      if (server.soundboardAdminsOnly && !canManage(role)) return reply.code(403).send({ error: "só admins podem adicionar sons neste servidor" });
+      const meta = createSoundQuery.safeParse(req.query);
+      if (!meta.success) return reply.code(400).send({ error: "dê um nome de 1 a 32 letras ao som" });
+      const n = (await db.select({ n: count() }).from(soundboardSounds).where(eq(soundboardSounds.serverId, server.id)))[0]!.n;
+      if (n >= MAX_SOUNDS_PER_SERVER) return reply.code(409).send({ error: `o servidor já tem ${MAX_SOUNDS_PER_SERVER} sons; apague algum antes` });
+      if (!attachmentAllowed(me(req).id)) return reply.code(429).send({ error: "muitos arquivos seguidos; espere alguns minutos" });
+      const disk = await statfs(files.dir).catch(() => undefined);
+      if (disk && disk.blocks > 0 && (disk.blocks - disk.bavail) / disk.blocks >= maxDiskUsageRatio)
+        return reply.code(507).send({ error: "disco do servidor quase cheio; tente mais tarde" });
+      const part = await req.file({ limits: { fileSize: SOUND_MAX_BYTES, files: 1 } }).catch(() => undefined);
+      if (!part) return reply.code(400).send({ error: "envie um áudio" });
+      const raw = await part.toBuffer().catch(() => undefined);
+      if (!raw || part.file.truncated || raw.length > SOUND_MAX_BYTES) return reply.code(413).send({ error: `áudio grande demais (máximo ${SOUND_MAX_BYTES / 1024} KB)` });
+      const out = processSound(raw);
+      if ("error" in out) return reply.code(415).send({ error: out.error });
+      const key = await files.save(out.data, "wav");
+      const sound: Sound = { id: newId(), serverId: server.id, userId: me(req).id, name: meta.data.name, icon: meta.data.icon, volume: meta.data.volume, durationMs: out.durationMs, key };
+      await db.insert(soundboardSounds).values({ ...sound, fileKey: key, size: out.data.length });
+      toServer(server.id, { t: "sounds", serverId: server.id });
+      return sound;
+    });
+    /** Som que quem pede pode editar (quem enviou, ou dono/admin). */
+    async function editableSound(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+      const row = (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.id, req.params.id)).limit(1))[0];
+      const role = row ? await roleIn(row.serverId, me(req).id) : undefined;
+      if (!row || !role) return void reply.code(404).send({ error: "som não existe" });
+      if (!canEditSound(row, me(req).id, role)) return void reply.code(403).send({ error: "sem permissão" });
+      return toSound(row);
+    }
+    authed.patch<{ Params: { id: string } }>("/sounds/:id", async (req, reply) => {
+      const sound = await editableSound(req, reply);
+      if (!sound) return;
+      const body = updateSoundBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      const next = { ...sound, ...body.data };
+      await db.update(soundboardSounds).set({ name: next.name, icon: next.icon, volume: next.volume }).where(eq(soundboardSounds.id, sound.id));
+      toServer(sound.serverId, { t: "sounds", serverId: sound.serverId });
+      return next;
+    });
+    authed.delete<{ Params: { id: string } }>("/sounds/:id", async (req, reply) => {
+      const sound = await editableSound(req, reply);
+      if (!sound) return;
+      await db.delete(soundboardSounds).where(eq(soundboardSounds.id, sound.id));
+      await files.remove(sound.key).catch(() => {});
+      toServer(sound.serverId, { t: "sounds", serverId: sound.serverId });
+      return { ok: true };
+    });
+    authed.put<{ Params: { id: string } }>("/servers/:id/soundboard", async (req, reply) => {
+      if (!(await member(req, reply, req.params.id, canManage))) return;
+      const body = soundboardSettingsBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "dados inválidos" });
+      await db.update(servers).set({ soundboardAdminsOnly: body.data.adminsOnly }).where(eq(servers.id, req.params.id));
+      toServer(req.params.id, { t: "sync" });
+      return { ok: true };
+    });
+
     // ---- Anexos ----
     // Limite próprio, mais folgado que o de fotos de perfil: 40 arquivos a cada 10 minutos.
     const attachmentsBy = new Map<string, number[]>();
@@ -1868,6 +1958,28 @@ export async function buildApp({
             toUsers([r.callerId], { t: "ringDeclined", channelId: evt.channelId, by: user.id });
             endRing(evt.channelId, user.id);
           }
+          return;
+        }
+        if (evt.t === "soundboardPlay") {
+          const fail = (error: string) => socket.send(JSON.stringify({ t: "error", error } satisfies ServerEvent));
+          const v = voice.get(socket);
+          if (!v || !v.serverId) return fail("entre numa chamada de servidor para tocar sons");
+          if (v.deafened) return fail("tire o ensurdecer para tocar sons");
+          const row = (await db.select(soundCols).from(soundboardSounds).where(eq(soundboardSounds.id, evt.soundId)).limit(1))[0];
+          if (!row || row.serverId !== v.serverId) return fail("som não existe");
+          const now = Date.now();
+          const mine = (soundPlays.get(user.id) ?? []).filter((t) => now - t < 60_000);
+          const last = mine[mine.length - 1];
+          if (last !== undefined && now - last < SOUND_COOLDOWN_MS) return fail("espere um pouco para tocar outro som");
+          if (mine.length >= SOUNDS_PER_MINUTE) return fail("sons demais em pouco tempo; espere um minuto");
+          const playing = (soundsPlaying.get(v.channelId) ?? []).filter((end) => end > now);
+          if (playing.length >= MAX_CONCURRENT_SOUNDS) return fail("já tem sons tocando; espere acabar");
+          mine.push(now);
+          soundPlays.set(user.id, mine);
+          playing.push(now + row.durationMs);
+          soundsPlaying.set(v.channelId, playing);
+          const out = JSON.stringify({ t: "soundboardPlay", channelId: v.channelId, userId: user.id, sound: toSound(row) } satisfies ServerEvent);
+          for (const [s, state] of voice) if (state.channelId === v.channelId) s.send(out);
           return;
         }
         if (evt.t === "voice") {

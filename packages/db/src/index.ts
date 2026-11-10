@@ -182,6 +182,18 @@ CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 
 -- Apelido por servidor (menu de clique direito na pessoa).
 ALTER TABLE server_members ADD COLUMN IF NOT EXISTS nickname text;
+
+-- Soundboard: sons curtos por servidor, tocados na chamada.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS soundboard_admins_only boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS soundboard_sounds (
+  id text PRIMARY KEY,
+  server_id text NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
+  name text NOT NULL, icon text NOT NULL, volume real NOT NULL DEFAULT 1,
+  duration_ms integer NOT NULL, size integer NOT NULL, file_key text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS soundboard_sounds_server_idx ON soundboard_sounds (server_id);
+CREATE UNIQUE INDEX IF NOT EXISTS soundboard_sounds_key_idx ON soundboard_sounds (file_key);
 `;
 
 export interface DbHandle {

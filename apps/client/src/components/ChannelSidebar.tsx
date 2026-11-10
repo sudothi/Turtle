@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { shownName, type Channel, type ChannelKind, type VoiceState } from "@turtle/protocol";
 import { fileUrl } from "../api";
+import { toggleChannelMuted, toggleServerMuted, useMuted } from "../muted";
 import { Avatar, Icon, StaffTag, type IconName } from "@turtle/ui";
 import { useJukebox } from "../jukebox";
 import { JukeboxChannelBadge } from "./Jukebox";
@@ -25,7 +26,7 @@ function Category({ title, onAdd, children }: { title: string; onAdd?: () => voi
   );
 }
 
-function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLeave }: { name: string; canManage: boolean; onCreate: (k: ChannelKind) => void; onInvite: () => void; onSettings: () => void; onLeave?: () => void }) {
+function HeaderMenu({ name, serverId, canManage, onCreate, onInvite, onSettings, onLeave }: { name: string; serverId: string; canManage: boolean; onCreate: (k: ChannelKind) => void; onInvite: () => void; onSettings: () => void; onLeave?: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -34,6 +35,7 @@ function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLeave }
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
+  const serverMuted = useMuted().servers.includes(serverId);
   const item = (icon: IconName, label: string, fn: () => void) => (
     <button role="menuitem" className="menu-item" onClick={() => { setOpen(false); fn(); }}>
       <span>{label}</span>
@@ -55,6 +57,7 @@ function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLeave }
               {item("speaker", "Criar canal de voz", () => onCreate("voice"))}
             </>
           )}
+          {item(serverMuted ? "speaker" : "speaker-off", serverMuted ? "Ativar notificações do servidor" : "Silenciar notificações do servidor", () => toggleServerMuted(serverId))}
           {item("settings", "Configurações do servidor", onSettings)}
           {onLeave && (
             <>
@@ -69,6 +72,7 @@ function HeaderMenu({ name, canManage, onCreate, onInvite, onSettings, onLeave }
 }
 
 export function ChannelSidebar({
+  serverId,
   serverName,
   canManage,
   channels,
@@ -96,6 +100,7 @@ export function ChannelSidebar({
   unread: Record<string, { count: number; mentions: number }>;
   /** Abre a edição do canal (só para quem gere o servidor). */
   onEdit: (channel: Channel) => void;
+  serverId: string;
   serverName: string;
   /** Dono ou admin do servidor: cria canais. */
   canManage: boolean;
@@ -119,12 +124,13 @@ export function ChannelSidebar({
   onMenu?: (userId: string, e: ReactMouseEvent) => void;
   footer: ReactNode;
 }) {
+  const mutedChannels = useMuted().channels;
   const text = channels.filter((c) => c.kind === "text");
   const voice = channels.filter((c) => c.kind === "voice");
   const jukeboxStates = useJukebox().states;
   return (
     <aside className="sidebar" aria-label="Canais">
-      <HeaderMenu name={serverName} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLeave={onLeave} />
+      <HeaderMenu name={serverName} serverId={serverId} canManage={canManage} onCreate={onCreate} onInvite={onInvite} onSettings={onSettings} onLeave={onLeave} />
       <div className="channels">
         <Category title="Canais de texto" onAdd={canManage ? () => onCreate("text") : undefined}>
           {text.map((c) => {
@@ -137,6 +143,9 @@ export function ChannelSidebar({
                   <Icon name="hash" size={20} />
                   <span className="channel-name">{c.name}</span>
                   {!!u?.mentions && <span className="dm-badge" aria-label={`${u.mentions} menções`}>{u.mentions}</span>}
+                </button>
+                <button className={`channel-edit channel-mute ${canManage ? "" : "solo"} ${mutedChannels.includes(c.id) ? "on" : ""}`} title={mutedChannels.includes(c.id) ? "Ativar notificações do canal" : "Silenciar canal"} aria-label={mutedChannels.includes(c.id) ? `Ativar notificações de ${c.name}` : `Silenciar ${c.name}`} aria-pressed={mutedChannels.includes(c.id)} onClick={() => toggleChannelMuted(c.id)}>
+                  <Icon name={mutedChannels.includes(c.id) ? "speaker-off" : "speaker"} size={16} />
                 </button>
                 {canManage && (
                   <button className="channel-edit" title="Editar canal" aria-label={`Editar canal ${c.name}`} onClick={() => onEdit(c)}>

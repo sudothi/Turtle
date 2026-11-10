@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Button, Icon } from "@turtle/ui";
-import { loadSoundPrefs, playSound, saveSoundPrefs, type SoundName, type SoundPrefs } from "../sounds";
+import { loadSoundPrefs, previewSound, saveSoundPrefs, type SoundName, type SoundPrefs } from "../sounds";
 
 const samples: { name: SoundName; label: string }[] = [
-  { name: "message", label: "Mensagem" },
+  { name: "message", label: "Mensagem no servidor" },
+  { name: "dmMessage", label: "Mensagem direta" },
   { name: "mute", label: "Mutar" },
   { name: "unmute", label: "Desmutar" },
   { name: "deafen", label: "Ensurdecer" },
@@ -44,11 +45,21 @@ export function NotificationSettings() {
       <input id="sound-volume" type="range" min={0} max={1} step={0.05} value={prefs.volume} disabled={!prefs.enabled} onChange={(e) => set({ volume: Number(e.target.value) })} />
       <div className="sound-samples">
         {samples.map((s) => (
-          <Button key={s.name} size="sm" variant="ghost" disabled={!prefs.enabled} onClick={() => playSound(s.name)}>
+          <Button key={s.name} size="sm" variant="ghost" disabled={!prefs.enabled} onClick={() => previewSound(s.name)}>
             <Icon name="play" size={14} /> {s.label}
           </Button>
         ))}
       </div>
+
+      <label className="toggle-row">
+        <input type="checkbox" checked={prefs.messages} disabled={!prefs.enabled} onChange={(e) => set({ messages: e.target.checked })} />
+        <span>
+          <b>Som de mensagem nova</b>
+          <span className="t-muted">Um som para conversas diretas e outro para servidores. Servidores e canais silenciados não tocam.</span>
+        </span>
+      </label>
+      <label className="t-field-label" htmlFor="message-volume">Volume das mensagens — {Math.round(prefs.messageVolume * 100)}%</label>
+      <input id="message-volume" type="range" min={0} max={1} step={0.05} value={prefs.messageVolume} disabled={!prefs.enabled || !prefs.messages} onChange={(e) => set({ messageVolume: Number(e.target.value) })} />
 
       <label className="toggle-row">
         <input type="checkbox" checked={prefs.callPresence} disabled={!prefs.enabled} onChange={(e) => set({ callPresence: e.target.checked })} />
@@ -63,7 +74,7 @@ export function NotificationSettings() {
         <input type="checkbox" checked={prefs.allServerMessages} onChange={(e) => set({ allServerMessages: e.target.checked })} />
         <span>
           <b>Avisar de toda mensagem nos servidores</b>
-          <span className="t-muted">Desligado: só conversas diretas, grupos e quando alguém menciona você.</span>
+          <span className="t-muted">Desligado: só conversas diretas, grupos e quando alguém menciona você. Para calar um servidor ou canal, use o menu do servidor ou o alto-falante ao lado do canal.</span>
         </span>
       </label>
       <div className="notify-permission">

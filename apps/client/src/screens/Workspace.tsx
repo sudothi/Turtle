@@ -744,6 +744,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     const m = named.members.find((x) => x.userId === id);
     return m ? shownName(m) : undefined;
   }, [named.members]);
+  const whoIs = useCallback((id: string) => nameOf(id) ?? named.voiceStates.find((v) => v.userId === id)?.displayName ?? named.voiceStates.find((v) => v.userId === id)?.username ?? "alguém", [nameOf, named.voiceStates]);
   const ownedCount = servers.filter((s) => s.ownerId === user.id).length;
   const callServer = servers.find((s) => s.id === known[snap.channelId ?? ""]?.serverId);
   const allKnown = [...Object.values(known), ...dms.map(asChannel)];
@@ -790,7 +791,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       })();
     },
   };
-  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} callServer={callServer} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} callServer={callServer} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} nameOf={whoIs} />;
 
   // Celular: barra da chamada ativa quando se está em outra tela (chat, outro servidor, Amigos).
   const callChannel = snap.channelId ? known[snap.channelId] ?? (dms.find((d) => d.channelId === snap.channelId) && asChannel(dms.find((d) => d.channelId === snap.channelId)!)) : undefined;
@@ -902,6 +903,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           footer={footer}
           unread={unread}
           onEdit={setEditingChannel}
+          nameOf={whoIs}
         />
       ) : (
         <aside className="sidebar" aria-label="Canais">

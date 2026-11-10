@@ -62,15 +62,60 @@ export function JukeboxNowPlaying({ channelId, nameOf }: { channelId: string; na
   );
 }
 
-/** Linha "tocando agora" embaixo do canal de voz na barra lateral (para quem está fora da chamada). */
-export function JukeboxChannelLine({ state }: { state: JukeboxState | undefined }) {
+/**
+ * Disco no canto do canal de voz da barra lateral (para quem está fora da chamada ver que tem música).
+ * Passar o mouse (ou focar) abre um cartão ao lado com o que está tocando.
+ */
+export function JukeboxChannelBadge({ state, nameOf, shift }: { state: JukeboxState | undefined; nameOf: NameOf; /** Abre espaço para a engrenagem de editar o canal. */ shift?: boolean }) {
+  const [at, setAt] = useState<{ left: number; top: number }>();
+  const ref = useRef<HTMLSpanElement>(null);
+  const hide = useRef<ReturnType<typeof setTimeout>>(undefined);
   const cur = state?.current;
-  if (!cur) return null;
+  useEffect(() => () => clearTimeout(hide.current), []);
+  if (!cur || !state) return null;
+  const playing = state.startedAt !== null && state.pausedAt === null;
+  const show = () => {
+    clearTimeout(hide.current);
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setAt({ left: Math.min(r.right + 14, innerWidth - 300), top: r.top + r.height / 2 });
+  };
+  const leave = () => {
+    clearTimeout(hide.current);
+    hide.current = setTimeout(() => setAt(undefined), 120);
+  };
+  const label = `Tocando na discoteca: ${cur.title}${cur.artist ? ` de ${cur.artist}` : ""}${playing ? "" : " (pausada)"}`;
+  return (
+    <span
+      ref={ref} className={`jb-badge${playing ? " is-playing" : ""}${shift ? " shift" : ""}`} tabIndex={0} role="img" aria-label={label}
+      onMouseEnter={show} onMouseLeave={leave} onFocus={show} onBlur={leave}
+    >
+      <Vinyl cover={cur.cover} />
+      {at && createPortal(<JukeboxPopout state={state} nameOf={nameOf} at={at} />, document.body)}
+    </span>
+  );
+}
+
+function JukeboxPopout({ state, nameOf, at }: { state: JukeboxState; nameOf: NameOf; at: { left: number; top: number } }) {
+  const cur = state.current!;
+  const pos = useJukeboxPosition(state.channelId);
+  const style = useTint(cur.cover);
   const playing = state.startedAt !== null && state.pausedAt === null;
   return (
-    <div className={`jb-line${playing ? " is-playing" : ""}`} title={`Discoteca: ${cur.title}${cur.artist ? ` · ${cur.artist}` : ""}${playing ? "" : " (pausada)"}`}>
-      <span className="jb-line-disc" aria-hidden="true"><Vinyl cover={cur.cover} /></span>
-      <span className="jb-line-text"><span className="sr">Tocando na discoteca: </span>{cur.title}{cur.artist && <span className="t-muted"> · {cur.artist}</span>}</span>
+    <div className={`jb-pop lino${playing ? " is-playing" : ""}`} role="tooltip" style={{ left: at.left, top: at.top }}>
+      <div className="jb-pop-head t-muted"><Icon name="disco" size={14} /> Tocando na discoteca{playing ? "" : " · pausada"}</div>
+      <div className="jb-now">
+        <div className="jb-now-art">
+          <div className="jb-now-vinyl music-vinyl" style={style}><Vinyl cover={cur.cover} /></div>
+          <div className="jb-now-cover"><Cover src={cur.cover} size={72} /></div>
+        </div>
+        <div className="jb-now-text">
+          <b title={cur.title}>{cur.title}</b>
+          {cur.artist && <span className="jb-now-artist">{cur.artist}</span>}
+          <span className="jb-now-by">colocada por {nameOf(cur.addedBy)}</span>
+          <span className="jb-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, (pos / cur.durationMs) * 100)}%` }} /></span>
+        </div>
+      </div>
+      {state.queue.length > 0 && <div className="jb-pop-next t-muted">A seguir: {state.queue[0]!.title}{state.queue.length > 1 ? ` e mais ${state.queue.length - 1}` : ""}</div>}
     </div>
   );
 }
@@ -105,7 +150,7 @@ function SearchThumb({ track }: { track: MusicTrack }) {
 }
 
 /** Botão da discoteca nos controles da chamada (ao lado do soundboard). */
-export function JukeboxButton({ channelId, nameOf, deafened }: { channelId: string; nameOf: NameOf; deafened: boolean }) {
+export function JukeboxButton({ channelId, nameOf, deafened, compact }: { channelId: string; nameOf: NameOf; deafened: boolean; /** Versão pequena do painel "Voz conectada" (o painel abre para cima, alinhado à esquerda). */ compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ left: number; bottom: number }>();
   const box = useRef<HTMLDivElement>(null);
@@ -115,7 +160,8 @@ export function JukeboxButton({ channelId, nameOf, deafened }: { channelId: stri
     const r = box.current?.getBoundingClientRect();
     if (r) {
       const w = Math.min(420, innerWidth - 32);
-      setPlace({ left: Math.max(16, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 16)), bottom: innerHeight - r.top + 10 });
+      const want = compact ? r.left : r.left + r.width / 2 - w / 2;
+      setPlace({ left: Math.max(16, Math.min(want, innerWidth - w - 16)), bottom: innerHeight - r.top + 10 });
     }
     setOpen(true);
   };
@@ -134,9 +180,9 @@ export function JukeboxButton({ channelId, nameOf, deafened }: { channelId: stri
     };
   }, [open]);
   return (
-    <div className="sb-anchor" ref={box}>
-      <IconButton label="Discoteca" aria-expanded={open} aria-pressed={open} className={`big ${open ? "is-on" : ""} ${live ? "jb-live" : ""}`} onClick={toggle}>
-        <Icon name="disco" size={24} />
+    <div className={`sb-anchor ${compact ? "side" : ""}`} ref={box}>
+      <IconButton label="Discoteca" aria-expanded={open} aria-pressed={open} className={`${compact ? "" : "big"} ${open ? "is-on" : ""} ${live ? "jb-live" : ""}`} onClick={toggle}>
+        <Icon name="disco" size={compact ? 20 : 24} />
       </IconButton>
       {open && createPortal(<JukeboxPanel channelId={channelId} nameOf={nameOf} deafened={deafened} place={place} />, document.body)}
     </div>

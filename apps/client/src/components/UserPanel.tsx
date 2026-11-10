@@ -6,6 +6,7 @@ import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 import { desktop } from "../desktop";
 import { SoundboardButton } from "./Soundboard";
+import { JukeboxButton } from "./Jukebox";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
   idle: "",
@@ -28,6 +29,7 @@ export function UserPanel({
   onDownload,
   onLogout,
   onStatus,
+  nameOf,
 }: {
   user: User;
   snap: VoiceSnapshot;
@@ -46,6 +48,8 @@ export function UserPanel({
   onLogout: () => void;
   /** Troca entre Online e Não perturbe. */
   onStatus: (s: UserStatus) => void;
+  /** Nome de alguém do servidor (quem colocou a música da discoteca). */
+  nameOf?: (userId: string) => string;
 }) {
   const channel = channels.find((c) => c.id === snap.channelId);
   const [menu, setMenu] = useState(false);
@@ -86,6 +90,7 @@ export function UserPanel({
                 <Icon name={snap.screen ? "screen-off" : "screen"} />
               </IconButton>
               {callServer && <SoundboardButton server={callServer} meId={user.id} deafened={snap.deafened} compact />}
+              {callServer && snap.channelId && <JukeboxButton channelId={snap.channelId} nameOf={nameOf ?? (() => "alguém")} deafened={snap.deafened} compact />}
             </div>
           )}
           {snap.needsAudioUnlock && (

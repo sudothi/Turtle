@@ -1,6 +1,6 @@
 # Discoteca (bot de música da chamada)
 
-Na chamada de um servidor, o botão de discoteca (globo, ao lado do soundboard) abre um painel onde quem está na chamada busca músicas (mesma busca do cartão de música do chat) ou cola links (YouTube, SoundCloud, Bandcamp, Spotify, Deezer) e todo mundo ouve junto: fila, pausar, continuar, pular, tirar da fila e volume de cada pessoa. Quem está na chamada vê no canto inferior esquerdo o cartão com a capa, o vinil girando (tingido com a cor da capa), o nome da música e quem colocou. Quem está no servidor, mas fora da chamada, vê na barra lateral, embaixo do canal de voz, um vinil pequeno girando e "Música · Artista".
+Na chamada de um servidor, o botão de discoteca (globo, ao lado do soundboard) abre um painel onde quem está na chamada busca músicas (mesma busca do cartão de música do chat) ou cola links (YouTube, SoundCloud, Bandcamp, Spotify, Deezer) e todo mundo ouve junto: fila, pausar, continuar, pular, tirar da fila e volume de cada pessoa. Quem está na chamada vê no canto inferior esquerdo o cartão com a capa, o vinil girando (tingido com a cor da capa), o nome da música e quem colocou. O botão também fica no painel de voz (embaixo da lista de canais, ao lado de "Compartilhar tela"). Na barra lateral, o canal de voz com música mostra um disquinho girando no canto direito; passando o mouse (ou focando com o teclado) abre um popout com capa, música, quem colocou, progresso e a próxima da fila.
 
 ![painel](discoteca/04-painel-fila.png)
 
@@ -47,10 +47,12 @@ Por que não publicar o áudio no LiveKit como um participante "bot":
 
 ## Código
 - Servidor: `apps/server/src/jukebox.ts` (fila, relógio, cache), `apps/server/src/ytdlp.ts` (links aceitos e yt-dlp), rotas em `app.ts`, testes em `jukebox.test.ts`.
-- Cliente: `apps/client/src/jukebox.ts` (estado e player sincronizado) e `components/Jukebox.tsx` (botão, painel, cartão e linha da barra lateral). O cartão reaproveita o vinil do cartão de música do chat (`Vinyl` em `MusicCard.tsx`).
+- Cliente: `apps/client/src/jukebox.ts` (estado e player sincronizado) e `components/Jukebox.tsx` (botão, painel, cartão, disco da barra lateral e popout). O cartão reaproveita o vinil do cartão de música do chat (`Vinyl` em `MusicCard.tsx`).
 - Protocolo: `JukeboxState`, `JukeboxItem`, limites `JUKEBOX_*` em `packages/protocol`.
 
 ## Capturas (servidor de teste com músicas e capas de mentira)
 | Chamada | Fora da chamada | Celular |
 |---|---|---|
-| ![](discoteca/05-chamada-cartao.png) | ![](discoteca/07-fora-da-chamada.png) | ![](discoteca/11-celular-chamada.png) |
+| ![](discoteca/05-chamada-cartao.png) | ![](discoteca/08-popout.png) | ![](discoteca/11-celular-chamada.png) |
+
+Botão no painel de voz: ![](discoteca/14-botao-painel-voz.png)

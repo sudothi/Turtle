@@ -3,7 +3,7 @@ import { shownName, type Channel, type ChannelKind, type VoiceState } from "@tur
 import { fileUrl } from "../api";
 import { Avatar, Icon, StaffTag, type IconName } from "@turtle/ui";
 import { useJukebox } from "../jukebox";
-import { JukeboxChannelLine } from "./Jukebox";
+import { JukeboxChannelBadge } from "./Jukebox";
 
 function Category({ title, onAdd, children }: { title: string; onAdd?: () => void; children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -88,7 +88,10 @@ export function ChannelSidebar({
   footer,
   unread,
   onEdit,
+  nameOf,
 }: {
+  /** Nome de alguém do servidor (quem colocou a música da discoteca). */
+  nameOf?: (userId: string) => string;
   /** Não lidas por canal (count = mensagens, mentions = menções a você). */
   unread: Record<string, { count: number; mentions: number }>;
   /** Abre a edição do canal (só para quem gere o servidor). */
@@ -155,13 +158,13 @@ export function ChannelSidebar({
                     <Icon name="speaker" size={20} />
                     <span className="channel-name">{c.name}</span>
                   </button>
+                  <JukeboxChannelBadge state={jukeboxStates[c.id]} nameOf={nameOf ?? (() => "alguém")} shift={canManage} />
                   {canManage && (
                     <button className="channel-edit" title="Editar canal" aria-label={`Editar canal ${c.name}`} onClick={() => onEdit(c)}>
                       <Icon name="settings" size={16} />
                     </button>
                   )}
                 </div>
-                <JukeboxChannelLine state={jukeboxStates[c.id]} />
                 {members.length > 0 && (
                   <ul className="voice-members">
                     {members.map((v) => (

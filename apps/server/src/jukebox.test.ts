@@ -197,7 +197,7 @@ describe("fila e relógio", () => {
     jb.close();
   });
 
-  it("busca do Deezer: se o YouTube barra o 1º vídeo, toca o próximo; se barra todos, cai na prévia de 30 s", async () => {
+  it("busca do Deezer: se o YouTube barra o 1º vídeo, toca o próximo; se barra todos, avisa e pula (sem prévia)", async () => {
     const two = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Liberado", duration: 214 } }, fail: new Set(["aaaaaaaaaaa"]) });
     await two.jb.add("c1", "s1", "u1", { trackId: "dz1" });
     await until(() => two.last()?.startedAt != null);
@@ -207,10 +207,9 @@ describe("fila e relógio", () => {
 
     const none = setup({ videos: { aaaaaaaaaaa: { title: "Barrado", duration: 213 }, bbbbbbbbbbb: { title: "Barrado 2", duration: 214 } }, fail: new Set(["aaaaaaaaaaa", "bbbbbbbbbbb"]) });
     await none.jb.add("c1", "s1", "u1", { trackId: "dz1" });
-    await until(() => none.last()?.startedAt != null);
-    expect(none.last()!.audio).toMatch(/dz-dz1-preview\.mp3$/);
-    expect(none.last()!.current).toMatchObject({ source: "deezer", preview: true, durationMs: 30_000 });
-    expect(none.last()!.notice).toMatch(/prévia/);
+    await until(() => none.jb.state("c1")?.notice != null);
+    expect(none.jb.state("c1")!.notice).toMatch(/Música/);
+    expect(none.jb.state("c1")!.current).toBeNull();
     none.jb.close();
   });
 

@@ -32,8 +32,6 @@ interface Track {
   thumbnail: string | null;
   /** Outros vídeos do YouTube da mesma música, para quando o primeiro for barrado. */
   alts?: { key: string; url: string; durationMs: number }[];
-  /** Id da música no Deezer, para cair na prévia de 30 s se nenhum vídeo baixar. */
-  previewId?: string | null;
 }
 interface Item extends Track { id: string; addedBy: string; status: "loading" | "ready"; file: string | null }
 interface Box {
@@ -238,7 +236,6 @@ export function jukeboxService(opts: JukeboxOptions) {
     if (hit) {
       return {
         alts: hits.slice(1).map((h) => ({ key: `yt-${h.id}`, url: h.url, durationMs: h.durationMs })),
-        previewId: m.previewSource ? m.id : null,
         key: `yt-${hit.id}`, title: m.title, artist: m.artist, durationMs: hit.durationMs || durationMs, source: "youtube", preview: false,
         link: hit.url, fetchUrl: hit.url, musicId: m.hasCover ? m.id : null, thumbnail: m.hasCover ? null : hit.thumbnail,
       };
@@ -295,7 +292,7 @@ export function jukeboxService(opts: JukeboxOptions) {
     b.timer.unref?.();
   }
 
-  /** Baixa a faixa; se o YouTube barrar, tenta os outros vídeos da mesma música e por fim a prévia de 30 s. */
+  /** Baixa a faixa; se o YouTube barrar, tenta os outros vídeos da mesma música. Sem prévia: ou toca inteira ou avisa. */
   async function load(b: Box, item: Item): Promise<string> {
     try {
       return await ensureAudio(item);
@@ -313,12 +310,6 @@ export function jukeboxService(opts: JukeboxOptions) {
         } catch (e2) {
           opts.log?.(`discoteca: não baixou ${alt.key}: ${(e2 as Error).message}`);
         }
-      }
-      if (item.previewId && item.fetchUrl && b.current === item) {
-        Object.assign(item, { key: `dz-${item.previewId}-preview`, fetchUrl: null, musicId: item.previewId, source: "deezer", preview: true, durationMs: PREVIEW_MS, link: item.link });
-        const file = await ensureAudio(item);
-        say(b, `O YouTube barrou o download; toco a prévia de 30 s de “${item.title}”.`);
-        return file;
       }
       throw e;
     }

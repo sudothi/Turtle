@@ -4,6 +4,12 @@ Na chamada de um servidor, o botão de discoteca (globo, ao lado do soundboard) 
 
 ![painel](discoteca/04-painel-fila.png)
 
+## Convite no chat
+No painel da discoteca, o botão de convidar (ícone de pessoa com +) manda uma mensagem no chat de texto do servidor: "@fulano está te convidando para uma discoteca!", com a música que toca agora e as fotos de quem está na chamada (o nome aparece ao passar o mouse) e o botão "Entrar". O cartão é ao vivo: muda a música, quem entra e sai e, quando a chamada acaba, mostra "A discoteca acabou". A mensagem guarda só `turtle://discoteca/<canal de voz>`; o cliente desenha o cartão. Vai para o canal de texto que está aberto (se for do mesmo servidor da chamada) ou para o primeiro canal de texto do servidor. No Android (#186) o cartão ainda não existe e a mensagem aparece como o endereço.
+
+![convite](discoteca/21-convite-chat.png)
+![convite, vista de quem está fora](discoteca/22-convite-fora.png)
+
 ## Decisões
 
 ### Sincronia: estado no servidor, cada aparelho toca o próprio áudio (não passa pelo LiveKit)

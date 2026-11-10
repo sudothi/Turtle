@@ -219,6 +219,16 @@ const icons = {
   ),
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />,
   pause: <path d="M6 4.5h4.2v15H6zM13.8 4.5H18v15h-4.2z" fill="currentColor" />,
+  /** Próxima faixa. */
+  skip: <path d="M4.5 4.5v15L15 12zM16.3 4.5H19.5v15h-3.2z" fill="currentColor" />,
+  /** Globo de discoteca (o bot de música da chamada). */
+  disco: (
+    <>
+      <path d="M12 1.5v3.2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="13.3" r="8.2" fill="none" stroke="currentColor" strokeWidth="2.3" />
+      <path d="M4.3 10.6h15.4M4.3 16h15.4M12 5.1v16.4M8.4 5.9c-1.7 2.1-2.5 4.6-2.5 7.4s.8 5.3 2.5 7.4M15.6 5.9c1.7 2.1 2.5 4.6 2.5 7.4s-.8 5.3-2.5 7.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof icons;

@@ -6,6 +6,8 @@ import {
 import { Avatar, Icon, IconButton, StaffTag } from "@turtle/ui";
 import { shortTime, stamp, toRows } from "../format";
 import { api, fileUrl } from "../api";
+import { isSpotifyTrackLink } from "../music";
+import { MusicCard } from "./MusicCard";
 import { copyText } from "../clipboard";
 import { useMobile, useMobileBack } from "../mobile";
 
@@ -101,6 +103,10 @@ function firstLink(content: string): string | undefined {
 /** Cartão com título e descrição do link; o servidor busca a página, então o site de fora não vê quem leu. */
 function LinkCard({ content }: { content: string }) {
   const url = firstLink(content);
+  if (!url) return null;
+  return isSpotifyTrackLink(url) ? <MusicCard url={url} fallback={<LinkPreviewCard url={url} />} /> : <LinkPreviewCard url={url} />;
+}
+function LinkPreviewCard({ url }: { url: string }) {
   const [p, setP] = useState<Preview>(null);
   useEffect(() => {
     if (!url) return;

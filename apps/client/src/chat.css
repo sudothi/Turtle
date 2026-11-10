@@ -157,3 +157,33 @@
 .search-results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; display: grid; gap: 8px; }
 .search-text { color: var(--paper-dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 .search-scope { display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+
+/* Cartão de música (link do Spotify): capa com o vinil atrás; tocando, o vinil sai para o lado e gira. */
+.music-card { display: flex; align-items: center; gap: 14px; max-width: 420px; margin: 4px 0; padding: 10px 14px 10px 10px; background: var(--ink-2); }
+.music-art { position: relative; flex: none; width: 134px; height: 80px; }
+.music-cover { position: relative; z-index: 1; width: 80px; height: 80px; display: grid; place-items: center; background: var(--ink-4); border: 2px solid var(--paper); overflow: hidden; color: var(--text-muted); }
+.music-cover img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.15); }
+.music-vinyl { position: absolute; top: 5px; left: 26px; width: 70px; height: 70px; transition: transform 0.45s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.music-vinyl-disc { width: 100%; height: 100%; display: block; animation: music-spin 2.4s linear infinite; animation-play-state: paused; }
+.music-card.is-out .music-vinyl { transform: translateX(36px); }
+.music-card.is-playing .music-vinyl-disc { animation-play-state: running; }
+@keyframes music-spin { to { transform: rotate(360deg); } }
+.music-play { position: absolute; inset: 0; display: grid; place-items: center; border: 0; padding: 0; background: rgba(0, 0, 0, 0.35); color: var(--paper); cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.music-play svg { filter: drop-shadow(0 1px 2px #000); }
+.music-card:hover .music-play, .music-play:focus-visible, .music-card.is-playing .music-play { opacity: 1; }
+.music-card.is-playing .music-play { background: rgba(0, 0, 0, 0.5); }
+.music-play:focus-visible { outline: 2px solid var(--paper); outline-offset: -4px; }
+.music-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.music-src { font-size: 12px; }
+.music-title { font-family: var(--font-display); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music-artist { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music-time { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.music-bar { flex: 1; max-width: 140px; height: 4px; background: var(--ink-5); overflow: hidden; }
+.music-bar > span { display: block; height: 100%; background: var(--paper); transition: width 0.25s linear; }
+.music-open { font-size: 12px; color: var(--text-muted); margin-top: 2px; align-self: flex-start; }
+.music-open:hover { color: var(--paper); }
+@media (hover: none) { .music-play { opacity: 1; background: rgba(0, 0, 0, 0.25); } }
+@media (prefers-reduced-motion: reduce) {
+  .music-vinyl { transition: none; }
+  .music-vinyl-disc { animation: none; }
+}

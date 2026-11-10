@@ -32,15 +32,15 @@ export function isPublicIp(ip: string): boolean {
   return !blocked.check(ip, kind === 4 ? "ipv4" : "ipv6");
 }
 
-const decode = (s: string) =>
+export const decode = (s: string) =>
   s
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Math.min(Number(n), 0x10ffff)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(Math.min(parseInt(n, 16), 0x10ffff)))
     .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     .replace(/\s+/g, " ").trim();
 
-/** Título e descrição da página (Open Graph, Twitter ou <title>/<meta description>). */
-export function parseMeta(html: string): { title: string | null; description: string | null } {
+/** Todas as tags <meta> (property ou name, em minúsculas) com o primeiro conteúdo de cada uma, sem decodificar. */
+export function metaTags(html: string): Map<string, string> {
   const head = html.slice(0, MAX_BYTES);
   const metas = new Map<string, string>();
   for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
@@ -52,6 +52,13 @@ export function parseMeta(html: string): { title: string | null; description: st
     const content = attr("content");
     if (key && content && !metas.has(key)) metas.set(key, content);
   }
+  return metas;
+}
+
+/** Título e descrição da página (Open Graph, Twitter ou <title>/<meta description>). */
+export function parseMeta(html: string): { title: string | null; description: string | null } {
+  const head = html.slice(0, MAX_BYTES);
+  const metas = metaTags(head);
   const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head)?.[1];
   const title = metas.get("og:title") ?? metas.get("twitter:title") ?? titleTag ?? null;
   const description = metas.get("og:description") ?? metas.get("twitter:description") ?? metas.get("description") ?? null;

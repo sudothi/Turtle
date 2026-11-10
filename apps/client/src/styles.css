@@ -1067,7 +1067,7 @@ a.auth-brand { text-decoration: none; }
 .call { container-type: inline-size; }
 .call-dock { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; column-gap: 16px; padding: 0 16px; }
 .call-dock > .call-controls { grid-column: 2; }
-.call-dock > .jb-now { grid-column: 1; grid-row: 1; justify-self: start; margin-bottom: 24px; }
+.call-dock > .jb-now { grid-column: 3; grid-row: 1; justify-self: end; margin-bottom: 24px; }
 @container (max-width: 980px) {
   .call-dock { grid-template-columns: minmax(0, 1fr); }
   .call-dock > .call-controls { grid-column: 1; grid-row: 2; justify-self: center; }
@@ -1158,4 +1158,18 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
   .call-dock .t-icon-btn.big { width: 42px; height: 42px; }
   .call-dock .t-icon-btn.big.hangup { width: 54px; }
   .jb-now { max-width: calc(100% - 32px); }
+}
+
+/* Cartão na chamada, à direita: capa encostada na borda, vinil saindo para a esquerda, texto à esquerda dos dois. */
+.call-dock > .jb-now { flex-direction: row-reverse; text-align: right; }
+.call-dock > .jb-now .jb-now-cover { margin-left: 32px; }
+.call-dock > .jb-now .jb-now-vinyl { left: 0; }
+.call-dock > .jb-now .jb-now-text { align-items: flex-end; }
+.call-dock > .jb-now .jb-bar { margin-left: auto; }
+@container (max-width: 980px) {
+  .call-dock > .jb-now { flex-direction: row; text-align: left; }
+  .call-dock > .jb-now .jb-now-cover { margin-left: 0; }
+  .call-dock > .jb-now .jb-now-vinyl { left: 36px; }
+  .call-dock > .jb-now .jb-now-text { align-items: stretch; }
+  .call-dock > .jb-now .jb-bar { margin-left: 0; }
 }

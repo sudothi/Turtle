@@ -66,7 +66,7 @@ import {
   type VoiceState,
   type VoiceToken,
   MAX_CONCURRENT_SOUNDS, MAX_SOUNDS_PER_SERVER, SOUND_COOLDOWN_MS, SOUND_MAX_BYTES, SOUNDS_PER_MINUTE,
-  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound,
+  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound, JUKEBOX_ADDS_PER_MINUTE, jukeboxAddBody,
   type Sound, type SoundIcon,
 } from "@turtle/protocol";
 import { processSound } from "./sound.js";
@@ -75,6 +75,8 @@ import { hashPassword, hashToken, newId, newInviteCode, newSessionId, newToken, 
 import { attemptLimiter } from "./limiter.js";
 import { fetchLinkPreview, type LinkPreview } from "./linkpreview.js";
 import { MUSIC_ID, musicService, type Fetcher } from "./music.js";
+import { audioType, jukeboxService } from "./jukebox.js";
+import { ytdlp, ytdlpRunner, type YtdlpRun } from "./ytdlp.js";
 import { registerWaitlist, type WaitlistNotice } from "./waitlist.js";
 
 export interface AppOptions {
@@ -111,6 +113,11 @@ export interface AppOptions {
   linkPreviewAllowPrivate?: boolean;
   /** Só para testes: substitui a busca HTTP do cartão de música (Spotify e Deezer). */
   musicFetch?: Fetcher;
+  /**
+   * Discoteca (bot de música da chamada). `ytdlp`: caminho do yt-dlp (liga links do YouTube, SoundCloud e Bandcamp
+   * e a música completa na busca); sem ele, a busca toca só a prévia de 30 s. `run` e `fetchImage` são para testes.
+   */
+  jukebox?: { cacheDir?: string; cacheMb?: number; ytdlp?: string; ytdlpArgs?: string[]; run?: YtdlpRun; fetchImage?: (url: string) => Promise<Buffer | null>; leadMs?: number; idleMs?: number };
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
   roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
   /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
@@ -151,6 +158,28 @@ export interface LiveKitConfig {
 }
 
 /** Nome da sala LiveKit de um canal de voz. */
+/** Arquivo do cache da discoteca, com suporte a Range (o <audio> pede pedaços ao pular para o meio). */
+async function sendCached(req: FastifyRequest, reply: FastifyReply, path: string, type: string) {
+  const st = await stat(path).catch(() => null);
+  if (!st?.isFile()) return reply.code(404).send({ error: "não encontrado" });
+  reply
+    .header("content-type", type)
+    .header("accept-ranges", "bytes")
+    .header("cache-control", "private, max-age=86400, immutable")
+    .header("x-content-type-options", "nosniff")
+    .header("content-security-policy", "default-src 'none'; sandbox");
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+  if (m && (m[1] || m[2])) {
+    let start = m[1] ? Number(m[1]) : Math.max(0, st.size - Number(m[2]));
+    let end = m[1] && m[2] ? Math.min(Number(m[2]), st.size - 1) : st.size - 1;
+    if (start >= st.size || start > end) return reply.code(416).header("content-range", `bytes */${st.size}`).send();
+    start = Math.max(0, start);
+    end = Math.max(start, end);
+    return reply.code(206).header("content-range", `bytes ${start}-${end}/${st.size}`).header("content-length", end - start + 1).send(createReadStream(path, { start, end }));
+  }
+  return reply.header("content-length", st.size).send(createReadStream(path));
+}
+
 export const voiceRoomName = (channelId: string) => `voice-${channelId}`;
 
 interface Socket {
@@ -169,7 +198,7 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify,
+  voiceGraceMs = 30_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify, jukebox: jukeboxOpts = {},
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
   registerWaitlist(app, db, waitlistNotify);
@@ -309,6 +338,17 @@ export async function buildApp({
     const states = [...voice.values()].filter((v) => (v.serverId ? mine?.has(v.serverId) : dmSets.get(socket)?.has(v.channelId)) && !seen.has(v.userId) && seen.add(v.userId));
     return { t: "voiceStates", states };
   };
+  // Discoteca: fila e relógio de cada chamada de servidor; quem está no servidor (mesmo fora da chamada) recebe o estado.
+  const music = musicService(musicFetch);
+  const ytdlpRun = jukeboxOpts.run ?? (jukeboxOpts.ytdlp ? ytdlpRunner(jukeboxOpts.ytdlp, jukeboxOpts.ytdlpArgs) : undefined);
+  const jukebox = jukeboxService({
+    cacheDir: jukeboxOpts.cacheDir ?? join(uploadDir, "..", "music-cache"),
+    cacheBytes: (jukeboxOpts.cacheMb ?? 1024) * 1024 * 1024,
+    yt: ytdlpRun ? ytdlp(ytdlpRun, (msg) => app.log.warn(msg)) : undefined, log: (msg) => app.log.warn(msg),
+    music, fetchImage: jukeboxOpts.fetchImage, leadMs: jukeboxOpts.leadMs, idleMs: jukeboxOpts.idleMs,
+    onChange: (channelId, serverId, state) => toServer(serverId, { t: "jukebox", channelId, state }),
+  });
+  const inCall = (channelId: string, userId: string) => [...voice.values()].some((v) => v.channelId === channelId && v.userId === userId);
   // Soundboard: quando cada conta tocou sons (último minuto) e até quando os sons de cada chamada tocam.
   const soundPlays = new Map<string, number[]>();
   const soundsPlaying = new Map<string, number[]>();
@@ -335,6 +375,8 @@ export async function buildApp({
   };
   const broadcastVoice = () => {
     syncRings();
+    // Discoteca: chamada que esvaziou pausa (e acaba depois de um tempo); alguém voltou, continua.
+    for (const id of jukebox.channels()) jukebox.occupancy(id, [...voice.values()].filter((v) => v.channelId === id).length);
     for (const s of online.keys()) s.send(JSON.stringify(voiceStatesFor(s)));
   };
   /** Tira da chamada quem deixou de ser membro (some das listas e perde a conexão de áudio). */
@@ -511,7 +553,7 @@ export async function buildApp({
   void sweepAttachments().catch(() => {});
   const sweeper = setInterval(() => void sweepAttachments().catch(() => {}), sweepIntervalMs);
   sweeper.unref();
-  app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); });
+  app.addHook("onClose", async () => { clearInterval(sweeper); for (const r of rings.values()) clearTimeout(r.timer); jukebox.close(); });
 
   const userCols = {
     id: users.id, username: users.username, isAdmin: users.isAdmin, canInvite: users.canInvite,
@@ -684,6 +726,15 @@ export async function buildApp({
 
   // Fotos e banners. Públicos de propósito (um <img> não manda token); a chave é aleatória e muda a cada troca.
   // Anexos do chat seguem a mesma ideia (chave aleatória); só imagens comuns abrem no navegador, o resto é baixado.
+  // Áudio e capa da discoteca: sem login (o <audio> não manda o token); a assinatura na URL é a permissão.
+  app.get<{ Params: { sig: string; file: string } }>("/jukebox/audio/:sig/:file", async (req, reply) => {
+    const path = jukebox.file("audio", req.params.sig, req.params.file);
+    return path ? sendCached(req, reply, path, audioType(req.params.file)!) : reply.code(404).send({ error: "não encontrado" });
+  });
+  app.get<{ Params: { sig: string; file: string } }>("/jukebox/cover/:sig/:file", async (req, reply) => {
+    const path = jukebox.file("cover", req.params.sig, req.params.file);
+    return path ? sendCached(req, reply, path, "image/webp") : reply.code(404).send({ error: "não encontrado" });
+  });
   app.get<{ Params: { key: string } }>("/files/:key", async (req, reply) => {
     const key = req.params.key;
     if (!isFileKey(key)) return reply.code(404).send({ error: "não encontrado" });
@@ -958,6 +1009,7 @@ export async function buildApp({
       if (!body.success || body.data.name !== server.name) return reply.code(400).send({ error: "digite o nome do servidor para apagar" });
       const ids = await memberIds(server.id);
       await dropFromCalls(server.id);
+      for (const st of jukebox.statesFor(new Set([server.id]))) jukebox.clear(st.channelId);
       const chans = (await db.select({ id: channels.id }).from(channels).where(eq(channels.serverId, server.id))).map((c) => c.id);
       const keys = await fileKeysOf(chans);
       const soundKeys = (await db.select({ key: soundboardSounds.fileKey }).from(soundboardSounds).where(eq(soundboardSounds.serverId, server.id))).map((r) => r.key);
@@ -1036,6 +1088,7 @@ export async function buildApp({
       const gone: VoiceState[] = [];
       for (const [sock, v] of voice) if (v.channelId === channel.id) { gone.push(v); voice.delete(sock); }
       if (gone.length) broadcastVoice();
+      jukebox.clear(channel.id);
       if (room) await Promise.all(gone.map((v) => room.removeParticipant(voiceRoomName(channel.id), v.userId).catch(() => {})));
       const keys = await fileKeysOf([channel.id]);
       await db.delete(channels).where(eq(channels.id, channel.id));
@@ -1777,7 +1830,6 @@ export async function buildApp({
 
     // ---- Cartão de música (link do Spotify) ----
     // Título, artista e capa da página pública do Spotify; prévia de 30 s do Deezer. Capa e áudio passam pelo servidor.
-    const music = musicService(musicFetch);
     const musicLimit = attemptLimiter({ max: 60, windowMs: 60_000 });
     authed.get<{ Querystring: { url?: string } }>("/music/spotify", async (req, reply) => {
       const url = String(req.query.url ?? "").slice(0, 500);
@@ -1805,6 +1857,56 @@ export async function buildApp({
       const audio = MUSIC_ID.test(req.params.id) ? await music.preview(req.params.id) : null;
       if (!audio) return reply.code(404).send({ error: "sem prévia" });
       return reply.header("cache-control", "private, max-age=3600").type("audio/mpeg").send(audio);
+    });
+
+    // ---- Discoteca ----
+    // Só quem está na chamada mexe na fila; quem está no servidor vê o estado pelo WebSocket (evento jukebox).
+    const jukeboxAdds = attemptLimiter({ max: JUKEBOX_ADDS_PER_MINUTE, windowMs: 60_000 });
+    const jukeboxActs = attemptLimiter({ max: 40, windowMs: 60_000 });
+    async function jukeboxCall(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+      const channel = await findChannel(req.params.id);
+      if (!channel || channel.kind !== "voice" || !channel.serverId || !(await roleIn(channel.serverId, me(req).id))) {
+        reply.code(404).send({ error: "canal de voz não existe" });
+        return null;
+      }
+      if (!inCall(channel.id, me(req).id)) {
+        reply.code(403).send({ error: "entre na chamada para usar a discoteca" });
+        return null;
+      }
+      return channel as typeof channel & { serverId: string };
+    }
+    authed.get<{ Params: { id: string } }>("/jukebox/:id", async (req, reply) => {
+      const channel = await findChannel(req.params.id);
+      if (!channel || channel.kind !== "voice" || !channel.serverId || !(await roleIn(channel.serverId, me(req).id))) return reply.code(404).send({ error: "canal de voz não existe" });
+      return { state: jukebox.state(channel.id) };
+    });
+    authed.post<{ Params: { id: string } }>("/jukebox/:id/queue", async (req, reply) => {
+      const body = jukeboxAddBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: "mande um link ou uma música da busca" });
+      const channel = await jukeboxCall(req, reply);
+      if (!channel) return;
+      const key = me(req).id;
+      if (jukeboxAdds.blockedFor(key)) return reply.code(429).send({ error: "muitas músicas em pouco tempo; espere um minuto" });
+      jukeboxAdds.hit(key);
+      const r = await jukebox.add(channel.id, channel.serverId, key, body.data);
+      if ("error" in r) return reply.code(r.code).send({ error: r.error });
+      return r.item;
+    });
+    for (const act of ["pause", "resume", "skip"] as const) {
+      authed.post<{ Params: { id: string }; Body: { itemId?: string } }>(`/jukebox/:id/${act}`, async (req, reply) => {
+        const channel = await jukeboxCall(req, reply);
+        if (!channel) return;
+        if (jukeboxActs.blockedFor(me(req).id)) return reply.code(429).send({ error: "calma; espere um pouco" });
+        jukeboxActs.hit(me(req).id);
+        const itemId = typeof req.body?.itemId === "string" ? req.body.itemId : undefined;
+        const ok = act === "pause" ? jukebox.pause(channel.id) : act === "resume" ? jukebox.resume(channel.id) : jukebox.skip(channel.id, itemId);
+        return { ok };
+      });
+    }
+    authed.delete<{ Params: { id: string; item: string } }>("/jukebox/:id/queue/:item", async (req, reply) => {
+      const channel = await jukeboxCall(req, reply);
+      if (!channel) return;
+      return { ok: jukebox.remove(channel.id, req.params.item) };
     });
 
     authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));
@@ -1963,6 +2065,7 @@ export async function buildApp({
       if (gone) return cleanup();
       presence();
       socket.send(JSON.stringify(voiceStatesFor(socket)));
+      for (const state of jukebox.statesFor(memberships.get(socket))) socket.send(JSON.stringify({ t: "jukebox", channelId: state.channelId, state } satisfies ServerEvent));
       deliver = (raw: Buffer) => {
         alive = true;
         // Um erro aqui (banco fora, por exemplo) não pode virar promessa rejeitada solta: isso derruba o processo.

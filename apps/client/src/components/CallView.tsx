@@ -3,6 +3,7 @@ import { shownName, type Channel, type Server, type VoiceState } from "@turtle/p
 import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton, SoundIcon, StaffTag } from "@turtle/ui";
 import { SoundboardButton, useSoundboard } from "./Soundboard";
+import { JukeboxButton, JukeboxNowPlaying, type NameOf } from "./Jukebox";
 import { MAX_VOLUME } from "../voice/prefs";
 import type { CallParticipant, ShareStats, VideoTile, VoiceClient, VoiceSnapshot } from "../voice/client";
 import { ChannelHeader } from "./ChatView";
@@ -235,7 +236,7 @@ function ScreenTile({ v, voice, snap, focused, onFocus, strip }: { v: VideoTile;
 export type PersonMenuHandler = (userId: string, e: MouseEvent) => void;
 
 /** Palco da chamada, no estilo do Discord: grade de cartões e barra de controles embaixo. */
-export function CallView({ channel, snap, voice, members = [], onProfile, onMenu, server, meId }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[]; onProfile?: (userId: string) => void; onMenu?: PersonMenuHandler; /** Servidor da chamada (liga o soundboard). */ server?: Server; meId?: string }) {
+export function CallView({ channel, snap, voice, members = [], onProfile, onMenu, server, meId, nameOf }: { channel?: Channel; snap: VoiceSnapshot; voice: VoiceClient; members?: VoiceState[]; onProfile?: (userId: string) => void; onMenu?: PersonMenuHandler; /** Servidor da chamada (liga o soundboard e a discoteca). */ server?: Server; meId?: string; /** Nome de alguém do servidor (quem colocou a música). */ nameOf?: (userId: string) => string | undefined }) {
   const [focus, setFocus] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const mobile = useMobile();
@@ -255,6 +256,10 @@ export function CallView({ channel, snap, voice, members = [], onProfile, onMenu
   }, [inThis]);
   if (!channel) return null;
   const here = members.filter((m) => m.channelId === channel.id);
+  const whoIs: NameOf = (id) => {
+    const v = members.find((m) => m.userId === id);
+    return nameOf?.(id) ?? (v ? shownName(v) : "alguém");
+  };
 
   const cameras = new Map(snap.videos.filter((v) => v.source === "camera").map((v) => [v.userId, v]));
   const screens = snap.videos.filter((v) => v.source === "screen");
@@ -305,6 +310,8 @@ export function CallView({ channel, snap, voice, members = [], onProfile, onMenu
               {snap.participants.map((p) => person(p))}
             </div>
           )}
+          <div className="call-dock">
+          {server && channel.serverId === server.id && <JukeboxNowPlaying channelId={channel.id} nameOf={whoIs} />}
           <div className="call-controls lino lino-lg">
             <IconButton label="Mudo" aria-pressed={snap.muted} className={`big ${snap.muted ? "is-off" : ""}`} onClick={() => void voice.toggleMute()}>
               <Icon name={snap.muted ? "mic-off" : "mic"} size={24} />
@@ -329,9 +336,11 @@ export function CallView({ channel, snap, voice, members = [], onProfile, onMenu
               <Icon name={snap.screen ? "screen-off" : "screen"} size={24} />
             </IconButton>}
             {server && meId && channel.serverId === server.id && <SoundboardButton server={server} meId={meId} deafened={snap.deafened} />}
+            {server && channel.serverId === server.id && <JukeboxButton channelId={channel.id} nameOf={whoIs} deafened={snap.deafened} />}
             <IconButton label="Sair da chamada" className="big hangup" onClick={() => void voice.leave()}>
               <Icon name="phone-off" size={26} />
             </IconButton>
+          </div>
           </div>
           {sharing && <ShareModal snap={snap} voice={voice} onClose={() => setSharing(false)} />}
         </>

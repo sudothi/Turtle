@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/auth": server, "/me": server, "/servers": server, "/channels": server, "/invites": server, "/account-invites": server, "/health": server, "/voice": server, "/users": server, "/files": server, "/friends": server, "/dms": server, "/blocks": server, "/admin": server, "/unread": server, "/messages": server, "/sounds": server, "/music": server, "/link-preview": server,
+      "/auth": server, "/me": server, "/servers": server, "/channels": server, "/invites": server, "/account-invites": server, "/health": server, "/voice": server, "/users": server, "/files": server, "/friends": server, "/dms": server, "/blocks": server, "/admin": server, "/unread": server, "/messages": server, "/sounds": server, "/music": server, "/jukebox": server, "/link-preview": server,
       "/waitlist": server,
       "/ws": { target: server, ws: true },
     },

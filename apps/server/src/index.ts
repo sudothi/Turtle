@@ -22,10 +22,20 @@ if (!livekit) console.warn("LIVEKIT_URL/API_KEY/API_SECRET ausentes: chamadas de
 const level = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === "production" ? "info" : "warn");
 const waitlistNotify = waitlistMailer(process.env);
 if (!waitlistNotify) console.warn("SMTP não configurado: cadastros da waiting list serão salvos; notificações por e-mail ficam pendentes.");
+// Discoteca: com YTDLP_PATH, toca links do YouTube/SoundCloud/Bandcamp e a música completa da busca; sem ele, só prévias de 30 s.
+// YTDLP_ARGS troca os argumentos extras (padrão: usar o Node do servidor para os desafios de JavaScript do YouTube).
+const ytdlpPath = process.env.YTDLP_PATH || undefined;
+if (!ytdlpPath) console.warn("YTDLP_PATH ausente: a discoteca toca só prévias de 30 s do Deezer");
+const jukebox = {
+  ytdlp: ytdlpPath,
+  ytdlpArgs: (process.env.YTDLP_ARGS || "--js-runtimes node").split(/\s+/).filter(Boolean),
+  cacheDir: process.env.MUSIC_CACHE_DIR || undefined,
+  cacheMb: Number(process.env.MUSIC_CACHE_MB) || undefined,
+};
 const app = await buildApp({
   db, bootstrapInvite: process.env.BOOTSTRAP_INVITE, livekit, clientDir: process.env.CLIENT_DIST, uploadDir: process.env.UPLOAD_DIR,
   logger: level === "silent" ? false : serverLogger(level),
-  waitlistNotify,
+  waitlistNotify, jukebox,
 });
 // Promessa rejeitada sem tratamento vira log, não queda do servidor (que derrubaria o chat de todo mundo).
 process.on("unhandledRejection", (err) => app.log.error({ err }, "promessa rejeitada sem tratamento"));

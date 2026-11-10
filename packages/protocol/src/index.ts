@@ -446,6 +446,8 @@ export const clientEvent = z.discriminatedUnion("t", [
   if (e.t === "send" && !e.content && !e.attachments.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "mensagem vazia" });
 });
 export const serverEvent = z.discriminatedUnion("t", [
+  /** Discoteca de uma chamada do servidor mudou (null = acabou). Vai para todos do servidor: quem está fora vê o que toca. */
+  z.object({ t: z.literal("jukebox"), channelId: z.string(), state: z.lazy(() => jukeboxStateSchema).nullable() }),
   z.object({ t: z.literal("pong") }),
   z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
@@ -523,3 +525,61 @@ export interface MusicTrack {
   /** `GET /music/<id>/preview` devolve a prévia de 30 s (MP3); null quando não achamos a faixa. */
   previewSource: "deezer" | null;
 }
+
+// ---- Discoteca (bot de música da chamada) ----
+/**
+ * O servidor guarda a fila e o relógio de cada chamada; cada pessoa toca o áudio no próprio aparelho
+ * (com o volume dela), sincronizada pelo `startedAt`. Nada passa pelo LiveKit.
+ */
+export const JUKEBOX_MAX_QUEUE = 50;
+/** Músicas na fila por pessoa (contando a que está tocando). */
+export const JUKEBOX_MAX_PER_USER = 10;
+/** Duração máxima de uma faixa (links mais longos são recusados). */
+export const JUKEBOX_MAX_MS = 15 * 60_000;
+/** Músicas que cada pessoa pode adicionar por minuto. */
+export const JUKEBOX_ADDS_PER_MINUTE = 8;
+export const jukeboxSource = z.enum(["youtube", "soundcloud", "bandcamp", "deezer"]);
+export type JukeboxSource = z.infer<typeof jukeboxSource>;
+export const jukeboxItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist: z.string().nullable(),
+  durationMs: z.number(),
+  /** Capa (WebP 320x320) servida pelo nosso servidor; null quando não há. */
+  cover: z.string().nullable(),
+  source: jukeboxSource,
+  /** Só a prévia de 30 s (faixa do Deezer sem fonte completa disponível). */
+  preview: z.boolean(),
+  /** Link para abrir a faixa no site de origem. */
+  link: z.string(),
+  /** Quem colocou na fila. */
+  addedBy: z.string(),
+  /** `loading`: baixando o áudio; `ready`: pronto para tocar. */
+  status: z.enum(["loading", "ready"]),
+});
+export type JukeboxItem = z.infer<typeof jukeboxItemSchema>;
+export const jukeboxStateSchema = z.object({
+  channelId: z.string(),
+  serverId: z.string(),
+  current: jukeboxItemSchema.nullable(),
+  /** Áudio da faixa atual (mesma origem; a URL já leva a assinatura). */
+  audio: z.string().nullable(),
+  /** Hora do servidor (ms) em que a faixa atual estaria no segundo 0; null enquanto prepara ou pausada. */
+  startedAt: z.number().nullable(),
+  /** Posição (ms) em que a faixa foi pausada; null se não está pausada. */
+  pausedAt: z.number().nullable(),
+  queue: z.array(jukeboxItemSchema),
+  /** Aviso curto para quem está na chamada (por exemplo, uma faixa que não deu para tocar). */
+  notice: z.string().nullable(),
+  /** Hora do servidor quando o estado foi enviado (para acertar o relógio do aparelho). */
+  now: z.number(),
+});
+export type JukeboxState = z.infer<typeof jukeboxStateSchema>;
+/** Adicionar à fila: link (YouTube, SoundCloud, Bandcamp, Spotify, Deezer) ou faixa da busca (`dz123`). */
+export const jukeboxAddBody = z.union([
+  z.object({ url: z.string().trim().min(8).max(500) }),
+  z.object({ trackId: z.string().regex(/^dz\d{1,15}$/) }),
+]);
+/** Posição atual (ms) de uma faixa, pela hora do servidor. */
+export const jukeboxPosition = (s: Pick<JukeboxState, "startedAt" | "pausedAt">, serverNow: number) =>
+  s.pausedAt ?? (s.startedAt === null ? 0 : Math.max(0, serverNow - s.startedAt));

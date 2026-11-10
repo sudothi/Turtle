@@ -1,4 +1,4 @@
-import type { AccountInvitePreview, Attachment, MusicTrack, SessionInfo, Sound, SoundIcon, Unread, UserStatus } from "@turtle/protocol";
+import type { AccountInvitePreview, Attachment, JukeboxItem, JukeboxState, MusicTrack, SessionInfo, Sound, SoundIcon, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
@@ -109,6 +109,10 @@ export const api = {
   setStatus: (status: UserStatus) => req<User>("PATCH", "/me", { status }),
   unread: () => req<Unread[]>("GET", "/unread"),
   markRead: (channelId: string) => req<{ ok: true }>("POST", `/channels/${channelId}/read`, {}),
+  jukeboxState: (channelId: string) => req<{ state: JukeboxState | null }>("GET", `/jukebox/${channelId}`),
+  jukeboxAdd: (channelId: string, body: { url: string } | { trackId: string }) => req<JukeboxItem>("POST", `/jukebox/${channelId}/queue`, body),
+  jukeboxAct: (channelId: string, act: "pause" | "resume" | "skip", itemId?: string) => req<{ ok: boolean }>("POST", `/jukebox/${channelId}/${act}`, { itemId }),
+  jukeboxRemove: (channelId: string, itemId: string) => req<{ ok: boolean }>("DELETE", `/jukebox/${channelId}/queue/${itemId}`),
   musicSearch: (q: string) => req<MusicTrack[]>("GET", `/music/search?q=${encodeURIComponent(q)}`),
   musicTrack: (url: string) => req<MusicTrack>("GET", `/music/spotify?url=${encodeURIComponent(url)}`),
   linkPreview: (url: string) => req<{ url: string; host: string; title: string | null; description: string | null }>("GET", `/link-preview?url=${encodeURIComponent(url)}`),

@@ -1,6 +1,20 @@
 # iOS: decisão de plataforma, distribuição e aceite
 
-Atualizado em 06/11/2026. Complementa as issues #45–#59; o estado de implementação fica nas PRs e o aceite físico nas issues. Código compilado não significa cenário aprovado em aparelho.
+Atualizado em 10/11/2026. Complementa as issues #45–#59; o estado de implementação fica nas PRs e o aceite físico nas issues. Código compilado não significa cenário aprovado em aparelho.
+
+## Ordem de trabalho por prioridade
+
+A consulta às issues abertas e à main em 10/11 mostra que a base iOS já existe. Manter React Native/Expo com LiveKit nativo; as caixas abertas do backlog inicial não significam que seja necessário recriar esses fluxos. O grupo confirmou uso de **contas Apple gratuitas** nesta revisão.
+
+| Ordem | Issues | Próxima entrega verificável |
+| --- | --- | --- |
+| 1 — P0: instalação e assinatura | #46, #58 | Importar o IPA pela Classic com conta gratuita; conferir perfil final, permissões, renovação e persistência da sessão |
+| 2 — P0: sessão, chat e voz | #47, #48, #49, #53, #54, #112 | Corrigir regressões reproduzíveis; exercitar login, envio e retomada entre iPhone e outro cliente, incluindo 401 durante recuperação da chamada |
+| 3 — P0: aceite da distribuição | #59 | Executar matriz física, incluindo 30 min de voz bloqueada, Bluetooth, interrupções e troca de rede; anexar resultados por build |
+| 4 — P1: paridade | #50, #51, #52, #55, #141 | Validar os fluxos já implementados de social, servidores, perfis, atividade, câmera e recepção de tela |
+| 5 — P2: capacidades adicionais | #56, #57 | Reavaliar push e publicação de tela somente com prova de assinatura/capacidades compatíveis |
+
+A prioridade define o foco, mas não impede corrigir uma falha P0 de código enquanto o aceite físico aguarda um aparelho. #59 depende também do exercício dos fluxos P1. Registrar pendências nas issues existentes para evitar duplicatas; nenhuma delas deve ser encerrada apenas por testes automatizados.
 
 ## Decisão de plataforma (#46/#47)
 
@@ -27,7 +41,7 @@ A migração de mensagens confirmadas da #113 precisa estar no backend antes de 
 
 ## Assinatura e capacidades (#46/#56/#57)
 
-Hipótese de distribuição: **AltStore Classic**, cada amigo usando sua própria conta Apple e AltServer. PAL é outro modelo e não foi validado para este grupo; não substituir automaticamente Classic por PAL. Uma conta paga pode habilitar outros recursos, mas não faz parte do requisito do núcleo inicial.
+Caminho a validar: **AltStore Classic com contas gratuitas**, cada amigo usando sua própria conta Apple. O roteiro inicial usa AltServer no computador. PAL instala apps notarizados, enquanto Classic permite importar o IPA; disponibilidade regional de PAL não comprova compatibilidade com este artefato ([comparação oficial](https://github.com/altstoreio/FAQ/blob/main/altstore-pal-v.-altstore-classic.md)). A documentação atual também oferece [Remote AltServers](https://faq.altstore.io/altstore-classic/remote-altservers), com pareamento e Wi-Fi/VPN; esse caminho ainda não foi exercitado pelo grupo. Uma conta paga fica fora do requisito do núcleo inicial. A escolha gratuita está confirmada; a instalação e as capacidades efetivas continuam pendentes.
 
 | Capacidade | Evidência no cliente/na documentação | Decisão do build atual | Validação que falta |
 | --- | --- | --- | --- |
@@ -100,6 +114,8 @@ Use o IPA importado pelo mesmo caminho dos amigos e outra conta no web/desktop. 
 Registrar por cenário: versão/build/commit do app, versão do backend, iPhone/iOS, assinatura/método de instalação, duração, resultado, bateria/temperatura e reprodução de falhas. Não incluir tokens, senhas ou URLs autenticadas. Resultados não executados continuam pendentes. As issues existentes #46/#54/#55/#56/#57/#58/#59 concentram esses pontos; não criar duplicatas.
 
 O servidor continua usando o gateway como fonte da verdade de voz e remove a presença quando o socket fecha. O cliente reenvia seu estado ao reconectar, mas a continuidade de presença durante suspensão ainda depende de validação e pode exigir trabalho de backend na #54. TURN e backups mantêm seu escopo nas issues próprias.
+
+Na recuperação automática da chamada, um 401 ao buscar novo token deve passar pelo encerramento de mídia e invalidação da sessão do workspace, assim como um 401 nas demais requisições autenticadas (#47/#54). Um 403/404 encerra somente a chamada; falhas temporárias mantêm a política de retentativa e a credencial salva. Esse comportamento tem cobertura automatizada; revogação durante chamada em aparelho continua no aceite físico.
 
 ## Fontes verificadas em 06/11/2026
 

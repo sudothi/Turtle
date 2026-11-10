@@ -26,6 +26,10 @@ import xyz.ogturtle.turtle.data.ServerEvent
 import xyz.ogturtle.turtle.data.Server
 import xyz.ogturtle.turtle.data.Session
 import xyz.ogturtle.turtle.data.CallUi
+import xyz.ogturtle.turtle.data.CallSound
+import xyz.ogturtle.turtle.data.CallSounds
+import xyz.ogturtle.turtle.data.SoundPrefs
+import xyz.ogturtle.turtle.data.SoundStore
 import xyz.ogturtle.turtle.data.Unread
 import xyz.ogturtle.turtle.data.User
 import xyz.ogturtle.turtle.data.VoiceController
@@ -64,7 +68,28 @@ data class UiState(
     val ringing: List<ServerEvent.Ring> = emptyList(),
     /** A chamada em que estou agora (null = fora de chamada). */
     val call: CallUi? = null,
+    val sounds: SoundPrefs = SoundPrefs(),
+    /** Servidores e canais silenciados neste aparelho: sem som, mas contam como não lidos. */
+    val mutedServers: Set<String> = emptySet(),
+    val mutedChannels: Set<String> = emptySet(),
 )
+
+/** Servidor do canal (null para DM/grupo). */
+internal fun UiState.serverOf(channelId: String): String? =
+    channels.entries.firstOrNull { (_, list) -> list.any { it.id == channelId } }?.key
+
+/**
+ * Som de mensagem nova: nada com Não perturbe, para mim mesmo, silenciado ou no canal aberto com o app na frente.
+ * Devolve o som a tocar, ou null.
+ */
+internal fun UiState.messageSound(m: Message, foreground: Boolean): CallSound? {
+    if (m.userId == user?.id || user?.status == "busy") return null
+    if (foreground && openChannelId == m.channelId) return null
+    if (m.channelId in mutedChannels) return null
+    val sid = serverOf(m.channelId)
+    if (sid != null && sid in mutedServers) return null
+    return if (sid == null) CallSound.DmMessage else CallSound.Message
+}
 
 /** Limites do servidor (packages/protocol): 25 MB por arquivo, 10 por mensagem. */
 internal const val MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -91,10 +116,16 @@ fun UiState.activityOf(userId: String, place: Boolean = false): String? {
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
+    companion object {
+        /** O app está na tela (ligado pela MainActivity em onStart/onStop). */
+        @Volatile var foreground = false
+    }
+
     private val session = Session(app)
+    private val soundStore = SoundStore(app)
     val api = Api(BuildConfig.SERVER_URL, onUnauthorized = ::clearSession) { session.token }
 
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(UiState(sounds = soundStore.load(), mutedServers = soundStore.mutedServers(), mutedChannels = soundStore.mutedChannels()))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val realtime = Realtime(
@@ -115,6 +146,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val voice = VoiceController(app, viewModelScope)
 
     init {
+        CallSounds.prefs = { _state.value.sounds }
         CallService.onHangUp = { leaveCall() }
         // Toda mudança na minha chamada (entrar, sair, mudo, fone, câmera) vai para o servidor e para a tela.
         viewModelScope.launch {
@@ -379,6 +411,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val st = _state.value
                 val known = st.channels.values.any { list -> list.any { it.id == m.channelId } } || st.dms.any { it.channelId == m.channelId }
                 if (!known) refresh()
+                st.messageSound(m, foreground)?.let { CallSounds.play(it) }
                 _state.update { cur ->
                     val loaded = cur.messages[m.channelId]
                     val isOpen = cur.openChannelId == m.channelId
@@ -404,6 +437,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ServerEvent.Refresh -> refresh()
             is ServerEvent.Error -> _state.update { it.copy(error = e.text) }
         }
+    }
+
+    // ---- Sons ----
+
+    fun setSounds(p: SoundPrefs) {
+        soundStore.save(p)
+        _state.update { it.copy(sounds = p) }
+    }
+
+    fun toggleServerMuted(id: String) = setMuted(servers = _state.value.mutedServers.toggle(id))
+    fun toggleChannelMuted(id: String) = setMuted(channels = _state.value.mutedChannels.toggle(id))
+
+    private fun Set<String>.toggle(id: String) = if (id in this) this - id else this + id
+
+    private fun setMuted(servers: Set<String> = _state.value.mutedServers, channels: Set<String> = _state.value.mutedChannels) {
+        soundStore.saveMuted(servers, channels)
+        _state.update { it.copy(mutedServers = servers, mutedChannels = channels) }
     }
 
     private fun bump(cur: UiState, m: Message): List<Unread> {

@@ -1751,3 +1751,29 @@ describe("sessões, senha e contas desativadas (#89)", () => {
     await h.close();
   });
 });
+
+describe("convite de conta com servidor", () => {
+  it("convite de conta com servidor: a conta nova já entra nele; só membro do servidor gera", async () => {
+    const login = (await post("/auth/login", { username: "thiago", password: "12345678" })).body.token;
+    // quem convida precisa ser membro do servidor
+    const other = await post("/auth/register", { inviteCode: (await post("/invites", {}, login)).body.code, username: "eva", password: "12345678" });
+    const evaServer = await post("/servers", { name: "Da Eva" }, other.body.token);
+    expect((await post("/invites", { serverId: evaServer.body.id }, login)).status).toBe(404);
+    const mine = (await get("/servers", login)).body as { id: string; name: string }[];
+    const own = mine.length ? { body: mine[0]! } : await post("/servers", { name: "Casa do Thiago" }, login);
+    const inv = await post("/invites", { serverId: own.body.id }, login);
+    expect(inv.status).toBe(200);
+    const preview = await fetch(`${base}/account-invites/${inv.body.code}`);
+    expect(await preview.json()).toEqual({ serverName: own.body.name });
+    const r = await post("/auth/register", { inviteCode: inv.body.code, username: "duda", password: "12345678" });
+    expect(r.status).toBe(200);
+    expect((await get("/servers", r.body.token)).body).toMatchObject([{ id: own.body.id, role: "member" }]);
+    expect((await get(`/servers/${own.body.id}/members`, login)).body.some((m: any) => m.username === "duda")).toBe(true);
+    // uso único, e a prévia some depois de usado
+    expect((await post("/auth/register", { inviteCode: inv.body.code, username: "duda2", password: "12345678" })).status).toBe(403);
+    expect((await fetch(`${base}/account-invites/${inv.body.code}`)).status).toBe(404);
+    // sem servidor a prévia diz null
+    const plain = await post("/invites", {}, login);
+    expect(await (await fetch(`${base}/account-invites/${plain.body.code}`)).json()).toEqual({ serverName: null });
+  });
+});

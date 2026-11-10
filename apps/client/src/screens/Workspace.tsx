@@ -861,7 +861,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
         {home ? (
           dmChannel && dm && dmCall ? (
             <div className="dm-call">
-              <button className="plain-btn dm-call-back" onClick={() => setDmCall(false)}>← Voltar ao chat</button>
+              <button className="plain-btn dm-call-back" onClick={() => setDmCall(false)}><Icon name="arrow-left" size={16} /> Voltar ao chat</button>
               <CallView channel={dmChannel} snap={snap} voice={voice} members={voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} />
             </div>
           ) : dmChannel && dm ? (

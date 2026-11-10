@@ -1,4 +1,4 @@
-import type { Attachment, SessionInfo, Unread, UserStatus } from "@turtle/protocol";
+import type { AccountInvitePreview, Attachment, SessionInfo, Unread, UserStatus } from "@turtle/protocol";
 import type { Account, Channel, ChannelKind, Dm, Friend, Person, ProfileView, InvitePreview, Member, Message, Server, User, VoiceToken } from "@turtle/protocol";
 
 const KEY = "turtle.token";
@@ -131,7 +131,9 @@ export const api = {
   accounts: () => req<Account[]>("GET", "/admin/users"),
   setInviter: (userId: string, canInvite: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { canInvite }),
   setAccountDisabled: (userId: string, disabled: boolean) => req<{ ok: true }>("PATCH", `/admin/users/${userId}`, { disabled }),
-  createAccountInvite: () => req<{ code: string }>("POST", "/invites", {}),
+  /** Convite de conta de uso único; com `serverId`, a conta nova já entra nesse servidor. */
+  createAccountInvite: (serverId?: string) => req<{ code: string }>("POST", "/invites", serverId ? { serverId } : {}),
+  accountInvitePreview: (code: string) => req<AccountInvitePreview>("GET", `/account-invites/${encodeURIComponent(code)}`),
   createInvite: (serverId: string, days = 7) => req<{ code: string; expiresAt: string | null }>("POST", `/servers/${serverId}/invites`, { days }),
   invitePreview: (code: string) => req<InvitePreview>("GET", `/invites/${encodeURIComponent(code)}`),
   joinInvite: (code: string) => req<Server>("POST", `/invites/${encodeURIComponent(code)}/join`, {}),

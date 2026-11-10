@@ -255,6 +255,10 @@ export const createInviteBody = z.object({
 /** O que se vê de um convite antes de entrar. */
 export const invitePreviewSchema = z.object({ serverName: z.string(), members: z.number() });
 export type InvitePreview = z.infer<typeof invitePreviewSchema>;
+/** Convite de conta (admin/Convidador). Com `serverId`, a conta nova já entra nesse servidor. */
+export const createAccountInviteBody = z.object({ serverId: z.string().min(1).max(64).optional() });
+/** Prévia de um convite de conta na tela de cadastro (`serverName` null = começa sem servidor). */
+export interface AccountInvitePreview { serverName: string | null }
 
 export const createChannelBody = z.object({ name: channelNameSchema, kind: channelKind.default("text") });
 

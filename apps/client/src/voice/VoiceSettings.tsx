@@ -3,6 +3,7 @@ import { micConstraints, needsAudioProcessor, type AudioPrefs, type NoiseMode } 
 import { createRnnoiseGraph, type RnnoiseGraph, monoMixer } from "./rnnoise";
 import type { VoiceClient } from "./client";
 import { desktop, loadShortcuts, loadShowGame, saveShortcuts, saveShowGame, toAccelerator, type Shortcuts } from "../desktop";
+import { SoundboardVolume } from "../components/Soundboard";
 
 const noiseLabels: Record<NoiseMode, string> = {
   gtcrn: "GTCRN (recomendado · rede neural)",
@@ -281,6 +282,11 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
             onChange={(e) => void voice.setInputGain(Number(e.target.value))}
           />
         </label>
+        <div className="voice-soundboard">
+          <span>Soundboard</span>
+          <SoundboardVolume />
+          <span className="field-note">Volume dos sons que as pessoas tocam na chamada (só para você). Para não ouvir os sons de uma pessoa, clique com o botão direito nela na chamada.</span>
+        </div>
         <MicTest prefs={prefs} />
         {desktop()?.setShortcuts && <ShortcutSettings />}
         {desktop()?.setActivityEnabled && <ShowGameSetting />}

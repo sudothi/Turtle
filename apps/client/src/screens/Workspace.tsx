@@ -13,6 +13,7 @@ import { ChannelSidebar } from "../components/ChannelSidebar";
 import { UserPanel } from "../components/UserPanel";
 import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
+import { soundboard } from "../soundboard";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
@@ -403,6 +404,9 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
           if (evt.nonce) setOutbox((l) => (l.some((o) => o.nonce === evt.nonce) ? l.filter((o) => o.nonce !== evt.nonce) : l));
           onMessage.current(evt.message);
         }
+        if (evt.t === "error" && !evt.nonce) soundboard.onError(evt.error);
+        if (evt.t === "sounds") void soundboard.load(evt.serverId);
+        if (evt.t === "soundboardPlay" && evt.channelId === voice.getSnapshot().channelId) void soundboard.onEvent(evt, voice.getSnapshot().deafened);
         if (evt.t === "error" && evt.nonce) {
           const nonce = evt.nonce;
           setOutbox((l) => l.map((o) => (o.nonce === nonce ? { ...o, status: "failed", error: evt.error } : o)));
@@ -509,6 +513,21 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       ws.current?.close();
     };
   }, [onLogout, voice, loadServers, loadServer, loadHome, loadUnread]);
+
+  // O soundboard toca pelo WebSocket (o servidor confere e repassa para a chamada).
+  useEffect(() => {
+    soundboard.setSender((evt) => {
+      const s = ws.current;
+      if (s?.readyState !== WebSocket.OPEN) return false;
+      s.send(JSON.stringify(evt));
+      return true;
+    });
+    return () => soundboard.setSender(undefined);
+  }, []);
+  // Ensurdeceu ou saiu da chamada: corta o som que estiver tocando.
+  useEffect(() => {
+    if (snap.deafened || !snap.channelId) soundboard.stopAll();
+  }, [snap.deafened, snap.channelId]);
 
   /** Envia pelo WebSocket se estiver aberto; senão fica na fila e vai quando reconectar. */
   const transmit = useCallback((o: Outgoing) => {
@@ -915,7 +934,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
             noServer
           )
         ) : view === "voice" ? (
-          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={named.voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} />
+          <CallView channel={known[voiceView ?? ""]} snap={snap} voice={voice} members={named.voiceStates} onProfile={setViewProfile} onMenu={openPersonMenu} server={servers.find((x) => x.id === known[voiceView ?? ""]?.serverId)} meId={user.id} />
         ) : (
           <ChatView
             channel={textChannel}

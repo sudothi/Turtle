@@ -184,6 +184,14 @@ const icons = {
       <circle cx="19" cy="12" r="2.4" fill="currentColor" />
     </>
   ),
+  soundboard: (
+    <>
+      <rect x="2.5" y="2.5" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <rect x="13" y="2.5" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <rect x="2.5" y="13" width="8.5" height="8.5" rx="1.5" fill="currentColor" />
+      <path d="M14 18.5c0-1 .8-1.8 1.8-1.8.5 0 .9.2 1.2.4V12.5l4.5-1v6.3c0 1-.8 1.8-1.8 1.8s-1.8-.8-1.8-1.8.8-1.8 1.8-1.8c.3 0 .5 0 .7.1v-3.4l-2.4.5v5.3c0 1-.8 1.8-1.8 1.8S14 19.5 14 18.5z" fill="currentColor" />
+    </>
+  ),
   chat: <path d="M4 4.5h16a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H10l-5 4v-4H4A1.5 1.5 0 0 1 2.5 16V6A1.5 1.5 0 0 1 4 4.5z" fill="currentColor" />,
   profile: (
     <>

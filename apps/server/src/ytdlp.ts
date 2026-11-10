@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
-import { setPriority } from "node:os";
+import { randomBytes } from "node:crypto";
+import { copyFileSync, existsSync, rmSync } from "node:fs";
+import { setPriority, tmpdir } from "node:os";
+import { join } from "node:path";
 import { JUKEBOX_MAX_MS } from "@turtle/protocol";
 
 /**
@@ -65,10 +68,25 @@ const BASE_ARGS = [
   "--socket-timeout", "20", "--retries", "2",
 ];
 
-export function ytdlpRunner(bin: string, extra: string[] = []): YtdlpRun {
+/**
+ * `cookies`: arquivo cookies.txt (formato Netscape) de uma conta Google descartável, para o YouTube não pedir login.
+ * O yt-dlp reescreve o arquivo que recebe, então cada execução usa uma cópia temporária (o original fica só leitura).
+ */
+export function ytdlpRunner(bin: string, extra: string[] = [], cookies?: string): YtdlpRun {
   return (args, timeoutMs) =>
     new Promise((resolve, reject) => {
-      const child = execFile(bin, [...BASE_ARGS, ...extra, ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, killSignal: "SIGKILL" }, (err, stdout, stderr) => {
+      let jar: string | null = null;
+      if (cookies && existsSync(cookies)) {
+        jar = join(tmpdir(), `ytc-${randomBytes(6).toString("hex")}.txt`);
+        try {
+          copyFileSync(cookies, jar);
+        } catch {
+          jar = null;
+        }
+      }
+      const cleanup = () => { if (jar) rmSync(jar, { force: true }); };
+      const child = execFile(bin, [...BASE_ARGS, ...extra, ...(jar ? ["--cookies", jar] : []), ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, killSignal: "SIGKILL" }, (err, stdout, stderr) => {
+        cleanup();
         if (err) return reject(new Error(String(stderr || err.message).trim().split("\n").pop()?.slice(0, 300) ?? "yt-dlp falhou"));
         resolve(stdout);
       });

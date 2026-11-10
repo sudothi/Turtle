@@ -323,7 +323,10 @@ export function jukeboxService(opts: JukeboxOptions) {
     } catch (e) {
       opts.log?.(`discoteca: não baixou ${item.key}: ${(e as Error).message}`);
       if (b.current !== item) return;
-      say(b, `Não deu para tocar “${item.title}”; pulei para a próxima.`);
+      const login = /sign in to confirm|not a bot|cookies/i.test((e as Error).message);
+      say(b, login
+        ? `O YouTube pediu login para “${item.title}” (cookies ausentes ou vencidos); pulei para a próxima.`
+        : `Não deu para tocar “${item.title}”; pulei para a próxima.`);
       return advance(b);
     }
     if (b.current !== item || boxes.get(b.channelId) !== b) return;

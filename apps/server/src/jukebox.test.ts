@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -8,7 +8,7 @@ import { createDb, type DbHandle } from "@turtle/db";
 import { JUKEBOX_MAX_PER_USER, type JukeboxState, type MusicTrack } from "@turtle/protocol";
 import { buildApp } from "./app.js";
 import { jukeboxService } from "./jukebox.js";
-import { mediaLink, ytdlp, type YtdlpRun } from "./ytdlp.js";
+import { mediaLink, ytdlp, ytdlpRunner, type YtdlpRun } from "./ytdlp.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (ok: () => boolean, ms = 3000) => {
@@ -100,6 +100,23 @@ describe("yt-dlp", () => {
     const args = fake.calls[0]!;
     expect(args.slice(-2)).toEqual(["--", "https://www.youtube.com/watch?v=ddddddddddd"]);
     expect(args).toContain("--max-filesize");
+  });
+});
+
+describe("cookies do yt-dlp", () => {
+  it("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "turtle-ck-"));
+    const bin = join(dir, "fake-yt");
+    writeFileSync(bin, "#!/bin/sh\necho \"$@\"\n", { mode: 0o755 });
+    const jar = join(dir, "cookies.txt");
+    writeFileSync(jar, "# Netscape HTTP Cookie File\n");
+    const out = await ytdlpRunner(bin, [], jar)(["--version"], 5000);
+    const used = /--cookies (\S+)/.exec(out)?.[1];
+    expect(used).toBeTruthy();
+    expect(used).not.toBe(jar);
+    expect(existsSync(used!)).toBe(false);
+    expect(existsSync(jar)).toBe(true);
+    expect(await ytdlpRunner(bin, [], join(dir, "nao-existe.txt"))(["--version"], 5000)).not.toMatch(/--cookies/);
   });
 });
 

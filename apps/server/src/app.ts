@@ -117,7 +117,7 @@ export interface AppOptions {
    * Discoteca (bot de música da chamada). `ytdlp`: caminho do yt-dlp (liga links do YouTube, SoundCloud e Bandcamp
    * e a música completa na busca); sem ele, a busca toca só a prévia de 30 s. `run` e `fetchImage` são para testes.
    */
-  jukebox?: { cacheDir?: string; cacheMb?: number; ytdlp?: string; ytdlpArgs?: string[]; run?: YtdlpRun; fetchImage?: (url: string) => Promise<Buffer | null>; leadMs?: number; idleMs?: number };
+  jukebox?: { cacheDir?: string; cacheMb?: number; ytdlp?: string; ytdlpArgs?: string[]; ytdlpCookies?: string; run?: YtdlpRun; fetchImage?: (url: string) => Promise<Buffer | null>; leadMs?: number; idleMs?: number };
   /** Só para testes: substitui o cliente da API de salas do LiveKit. */
   roomService?: Pick<RoomServiceClient, "removeParticipant" | "getParticipant">;
   /** Logs (pino). Padrão: desligado; em produção o index.ts liga com `serverLogger()`. */
@@ -340,7 +340,7 @@ export async function buildApp({
   };
   // Discoteca: fila e relógio de cada chamada de servidor; quem está no servidor (mesmo fora da chamada) recebe o estado.
   const music = musicService(musicFetch);
-  const ytdlpRun = jukeboxOpts.run ?? (jukeboxOpts.ytdlp ? ytdlpRunner(jukeboxOpts.ytdlp, jukeboxOpts.ytdlpArgs) : undefined);
+  const ytdlpRun = jukeboxOpts.run ?? (jukeboxOpts.ytdlp ? ytdlpRunner(jukeboxOpts.ytdlp, jukeboxOpts.ytdlpArgs, jukeboxOpts.ytdlpCookies) : undefined);
   const jukebox = jukeboxService({
     cacheDir: jukeboxOpts.cacheDir ?? join(uploadDir, "..", "music-cache"),
     cacheBytes: (jukeboxOpts.cacheMb ?? 1024) * 1024 * 1024,

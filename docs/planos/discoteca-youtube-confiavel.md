@@ -37,3 +37,13 @@ O servidor tenta até 3 vídeos candidatos; se todos falharem, pula com aviso cl
 
 ## Termos de uso
 Baixar áudio do YouTube vai contra os termos dele. O Turtle é privado (~30 contas, sem fins comerciais), mas o risco continua. Cookie de conta pessoal aumenta o risco para essa conta, por isso só conta descartável.
+
+## Cookies: como configurar (caminho escolhido em 2026-11-10)
+Código (PR #185): `YTDLP_COOKIES` aponta para um `cookies.txt` (formato Netscape). Cada download usa uma cópia temporária, então o arquivo original fica só leitura. Se o YouTube ainda pedir login, o painel avisa "cookies ausentes ou vencidos".
+
+Passo a passo (o cookie nunca vai para o chat nem para o repositório):
+1. Criar uma conta Google só para isso (não a pessoal).
+2. Abrir uma **janela anônima**, entrar nessa conta no YouTube, abrir `https://www.youtube.com/robots.txt` na mesma aba, exportar os cookies de `youtube.com` com uma extensão como "Get cookies.txt LOCALLY" e **fechar a janela anônima** (assim o YouTube não troca o cookie por baixo).
+3. Colocar o arquivo na VPS fora do repositório, por exemplo `/home/kyo/turtle/secrets/yt-cookies.txt` (gerenciador de arquivos do hPanel ou `scp`), com `chmod 600`.
+4. No compose da VPS, no serviço `api`: volume `./secrets/yt-cookies.txt:/run/secrets/yt-cookies.txt:ro` e variável `YTDLP_COOKIES=/run/secrets/yt-cookies.txt`; depois `docker compose up -d api`.
+5. Quando vencer (o painel avisa), repetir os passos 2 e 3.

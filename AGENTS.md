@@ -35,7 +35,7 @@ Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeir
 
 ## Decisões e pegadinhas que não aparecem no código
 - Convite de **conta** só pelo admin do app (Configurações > Administração, link `/convite/<código>`); convite de **servidor** só entra num servidor; conta nova começa sem servidor. Limite de 2 servidores próprios por pessoa.
-- Voz: token em `POST /voice/:canal/token` (sala `voice-<canalId>`); quem está na chamada é rastreado pelo gateway WebSocket, não por webhook do LiveKit.
+- Voz: token em `POST /voice/:canal/token` (sala `voice-<canalId>`). O gateway inicia o estado da chamada; se o socket cair, a presença só é conservada com sessão/permissão válidas e confirmação periódica da mídia no LiveKit. Webhooks e reconciliação removem estados encerrados. No iOS, sair do estado ativo desliga a câmera; PiP fica para depois.
 - H.264: o LiveKit negocia perfil 42e01f e o Chromium cai no encoder por software; `apps/client/src/voice/codec.ts` coloca Main/High primeiro para usar NVENC/hardware. Não remova.
 - Captura real de tela não dá para testar no container da nuvem.
 - Migração antiga apaga canais com `server_id` nulo (DMs usam `kind=dm` e `server_id` nulo; cuidado ao mexer).
@@ -47,4 +47,4 @@ Prontos e no main: auth por convite, servidores, chat, DMs e amigos, voz, tela/c
 Pendente principal: push notifications, cota de upload na UI, assinatura com certificado do instalador Windows, paridade de chat (reações/busca) e acessibilidade. A lista completa e priorizada vem da auditoria (issues #88–#104, mais #112): veja a aba Issues.
 
 ## Como trabalhar aqui
-Branch por tarefa → PR para `main` com descrição clara → thiago revisa e mescla. Rode `pnpm typecheck` e `pnpm test` antes de abrir PR. Mantenha o estilo existente e comente só o que não é óbvio.
+Branch por tarefa (`feat/`, `fix/`, `chore/`, `docs/` conforme a mudança; sem prefixo `codex/`) → PR para `main` com descrição clara → thiago revisa e mescla. Separe mudanças por responsabilidade em commits. Rode `pnpm typecheck` e `pnpm test` antes de abrir PR. Mantenha o estilo existente e comente só o que não é óbvio.

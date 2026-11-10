@@ -1363,6 +1363,17 @@ describe("quem está de fato na chamada", () => {
     present = new Set(); watcher.ws.close();
   });
 
+  it("relatório de voz seguido de fechamento imediato não deixa participante fantasma", async () => {
+    present = new Set();
+    const watcher = await wsOpen(dono);
+    const mobile = await wsOpen(dono);
+    mobile.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    mobile.ws.close();
+    await wait(200);
+    expect(lastStates(watcher.events)).toEqual([]);
+    watcher.ws.close();
+  });
+
   it("webhook: quem entra sem permissão sai na hora; quem entra e não avisa o gateway sai depois", async () => {
     removed.length = 0;
     expect(await hook("participant_joined", foraId)).toBe(200);

@@ -2121,6 +2121,7 @@ export async function buildApp({
       const floodSecond = attemptLimiter({ max: 10, windowMs: 1_000 });
       const floodWindow = attemptLimiter({ max: 60, windowMs: 10_000 });
       const handle = async (raw: Buffer) => {
+        if (gone) return;
         let evt;
         try {
           evt = clientEvent.parse(JSON.parse(raw.toString()));
@@ -2198,15 +2199,17 @@ export async function buildApp({
             : channel.kind === "dm"
               ? (await isDmMember(channel.id, user.id)) && !(await dmBlocked(channel.id))
               : channel.kind === "voice" && !!channel.serverId && !!memberships.get(socket)?.has(channel.serverId);
+          if (gone || !online.has(socket)) return;
           if (!channel || !okVoice)
             return socket.send(JSON.stringify({ t: "error", error: "canal de voz não existe" } satisfies ServerEvent));
-          // A mesma conta só fica numa chamada por vez (o LiveKit derruba a sessão antiga).
-          for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
           // Primeira pessoa a entrar na chamada de uma DM/grupo: toca para as outras (só a quem está conectado).
           const alreadyThere = [...voice.values()].some((v) => v.channelId === channel.id);
           const ringTargets = channel.kind === "dm" && !alreadyThere && !rings.has(channel.id)
             ? (await db.select({ id: dmMembers.userId }).from(dmMembers).where(eq(dmMembers.channelId, channel.id))).map((r) => r.id).filter((id) => id !== user.id)
             : [];
+          if (gone || !online.has(socket)) return;
+          // Só substitui a conexão antiga depois de concluir todas as consultas e confirmar que esta está viva.
+          for (const [s, v] of voice) if (s !== socket && v.userId === user.id) voice.delete(s);
           voice.set(socket, {
             userId: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, staff: canInviteAccounts(user), channelId: channel.id, serverId: channel.serverId ?? "",
             muted: evt.muted, deafened: evt.deafened, camera: evt.camera, screen: evt.screen,

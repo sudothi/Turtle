@@ -46,7 +46,7 @@ export function App() {
   const logout = useCallback(() => {
     if (getToken()) void api.logout().catch(() => {});
     clearSession();
-    if (!insideApp()) go("/entrar", true);
+    if (!insideApp()) go("/inicio", true);
   }, [clearSession, go]);
   const onAuth = useCallback((u: User) => {
     setUser(u);
@@ -66,7 +66,7 @@ export function App() {
       ) : user ? (
         <Workspace user={user} onLogout={logout} />
       ) : (
-        <AuthScreen onAuth={onAuth} onHome={insideApp() ? undefined : () => go("/entrar")} />
+        <AuthScreen onAuth={onAuth} onHome={insideApp() ? undefined : () => go("/inicio")} />
       )}
     </>
   );

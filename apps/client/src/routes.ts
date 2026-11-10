@@ -4,7 +4,7 @@ export type AppSurface = "waitlist" | "home" | "download" | "workspace" | "auth"
 export function appSurface(path: string, loggedIn: boolean, installed: boolean): AppSurface {
   const route = path.replace(/\/+$/, "") || "/";
   if (route === "/" && !installed) return "waitlist";
-  if (route === "/entrar") return "home";
+  if (route === "/inicio") return "home";
   if (route === "/download") return "download";
   return loggedIn ? "workspace" : "auth";
 }

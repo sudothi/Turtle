@@ -991,7 +991,7 @@ a.auth-brand { text-decoration: none; }
 .sb-anchor { position: relative; }
 .sb-panel {
   --lino-bg: var(--ink-2); --lino-radius: 12px; --slash-gap: var(--ink-3);
-  position: absolute; bottom: calc(100% + 14px); left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 96px; left: 16px;
   width: min(420px, calc(100vw - 32px)); max-height: min(520px, 70vh);
   display: flex; flex-direction: column; gap: 10px; padding: 14px; z-index: 20;
 }
@@ -1056,5 +1056,8 @@ a.auth-brand { text-decoration: none; }
   .tile-sound, .sb-grid.cooling .sb-sound::after { animation: none; }
   .sb-sound:hover:not(:disabled) { transform: none; }
 }
-.app.m .sb-panel { position: fixed; left: 16px; right: 16px; bottom: 96px; transform: none; width: auto; }
+@media (max-width: 700px) { .sb-panel { left: 16px !important; right: 16px; width: auto; } }
 .voice-soundboard { display: flex; flex-direction: column; gap: 6px; }
+/* Mini perfil de quem está transmitindo: botão de assistir, como no Discord. */
+.up-live { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.up-live .t-btn { margin-top: 2px; }

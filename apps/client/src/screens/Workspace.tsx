@@ -755,8 +755,29 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     onChanged: () => { setProfileVersion((n) => n + 1); void loadHome().catch(() => {}); },
     onEditProfile: () => setSettings("profile"),
     onOpenServer: (id) => chooseServer(id),
+    streaming: (id) => voiceStates.some((v) => v.userId === id && v.screen),
+    // Assistir pelo perfil, como no Discord: entra na chamada da pessoa (se ainda não está nela), abre o palco e assiste.
+    onWatch: (id) => {
+      const vs = voiceStates.find((v) => v.userId === id && v.screen);
+      if (!vs) return;
+      const dm = dms.find((d) => d.channelId === vs.channelId);
+      if (dm) {
+        openDm(dm);
+        setDmCall(true);
+      } else {
+        setHome(false);
+        if (vs.serverId !== serverId) chooseServer(vs.serverId);
+        setVoiceView(vs.channelId);
+        setView("voice");
+        showContent();
+      }
+      void (async () => {
+        if (voice.getSnapshot().channelId !== vs.channelId || voice.getSnapshot().status === "idle") await voice.join(vs.channelId);
+        voice.watch(id);
+      })();
+    },
   };
-  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
+  const footer = <UserPanel user={user} snap={snap} voice={voice} channels={allKnown} serverName={callServer?.name} callServer={callServer} onSettings={() => setSettings("voice")} onProfile={() => setSettings("profile")} onShare={() => setSharing(true)} onDownload={() => setSettings("desktop")} onLogout={onLogout} onStatus={changeStatus} />;
 
   // Celular: barra da chamada ativa quando se está em outra tela (chat, outro servidor, Amigos).
   const callChannel = snap.channelId ? known[snap.channelId] ?? (dms.find((d) => d.channelId === snap.channelId) && asChannel(dms.find((d) => d.channelId === snap.channelId)!)) : undefined;

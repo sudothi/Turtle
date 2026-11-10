@@ -26,6 +26,10 @@ export interface ProfileHandlers {
   /** Abre as configurações do próprio perfil. */
   onEditProfile: () => void;
   onOpenServer?: (serverId: string) => void;
+  /** A pessoa está transmitindo a tela numa chamada que você enxerga. */
+  streaming?: (userId: string) => boolean;
+  /** Entrar na chamada dela (se precisar) e assistir à transmissão. */
+  onWatch?: (userId: string) => void;
 }
 
 /** Carrega o perfil e recarrega depois de cada ação (amizade, bloqueio). */
@@ -241,6 +245,15 @@ export function ProfilePopout({
         </Masthead>
         <div className="up-body">
           <Names profile={profile} role={role} onOpen={onFull} />
+          {!mine && h.onWatch && h.streaming?.(userId) && (
+            <div className="up-live">
+              <span className="live-badge">AO VIVO</span>
+              <span className="t-muted">Transmitindo a tela</span>
+              <Button block size="sm" onClick={() => { onClose(); h.onWatch!(userId); }}>
+                <Icon name="eye" size={18} /> Assistir transmissão
+              </Button>
+            </div>
+          )}
           <div className="up-card">
             <About profile={profile} compact />
           </div>

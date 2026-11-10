@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   MAX_SOUNDS_PER_SERVER, SOUND_COOLDOWN_MS, SOUND_MAX_MS, SOUND_NAME_MAX, canAddSound, canEditSound, soundIcons,
   type Server, type Sound, type SoundIcon as SoundIconId,
@@ -41,18 +42,30 @@ export function SoundboardVolume({ compact }: { compact?: boolean }) {
 }
 
 /** Botão dos controles da chamada que abre a grade de sons do servidor. */
-export function SoundboardButton({ server, meId, deafened }: { server: Server; meId: string; deafened: boolean }) {
+export function SoundboardButton({ server, meId, deafened, compact }: { server: Server; meId: string; deafened: boolean; /** Versão pequena do painel "Voz conectada" (o painel abre para cima, alinhado à esquerda). */ compact?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<{ left: number; bottom: number }>();
   const box = useRef<HTMLDivElement>(null);
+  /** O painel fica fixo na tela, acima do botão: centrado nele (ou alinhado à esquerda no painel de voz), sem sair da janela. */
+  const toggle = () => {
+    if (open) return setOpen(false);
+    const r = box.current?.getBoundingClientRect();
+    if (r) {
+      const w = Math.min(420, innerWidth - 32);
+      const want = compact ? r.left : r.left + r.width / 2 - w / 2;
+      setPlace({ left: Math.max(16, Math.min(want, innerWidth - w - 16)), bottom: innerHeight - r.top + 10 });
+    }
+    setOpen(true);
+  };
   useEffect(() => {
     void soundboard.load(server.id);
   }, [server.id]);
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent) => {
-      // Cliques dentro de um modal aberto pelo painel (adicionar/editar) não fecham o painel.
+      // Cliques dentro de um modal ou menu aberto pelo painel (ficam fora dele, no body) não fecham o painel.
       const t = e.target as HTMLElement;
-      if (!box.current?.contains(t) && !t.closest?.(".t-modal-backdrop")) setOpen(false);
+      if (!box.current?.contains(t) && !t.closest?.(".sb-panel, .t-modal-backdrop, .sb-menu")) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector(".t-modal-backdrop") && setOpen(false);
     document.addEventListener("pointerdown", close);
@@ -63,16 +76,17 @@ export function SoundboardButton({ server, meId, deafened }: { server: Server; m
     };
   }, [open]);
   return (
-    <div className="sb-anchor" ref={box}>
-      <IconButton label="Soundboard" aria-expanded={open} aria-pressed={open} className={`big ${open ? "is-on" : ""}`} onClick={() => setOpen((o) => !o)}>
-        <Icon name="soundboard" size={24} />
+    <div className={`sb-anchor ${compact ? "side" : ""}`} ref={box}>
+      <IconButton label="Soundboard" aria-expanded={open} aria-pressed={open} className={`${compact ? "" : "big"} ${open ? "is-on" : ""}`} onClick={toggle}>
+        <Icon name="soundboard" size={compact ? 20 : 24} />
       </IconButton>
-      {open && <SoundboardPanel server={server} meId={meId} deafened={deafened} />}
+      {/* No body: os controles têm filtro (.lino), que prenderia um elemento fixo dentro deles. */}
+      {open && createPortal(<SoundboardPanel server={server} meId={meId} deafened={deafened} place={place} />, document.body)}
     </div>
   );
 }
 
-function SoundboardPanel({ server, meId, deafened }: { server: Server; meId: string; deafened: boolean }) {
+function SoundboardPanel({ server, meId, deafened, place }: { server: Server; meId: string; deafened: boolean; place?: { left: number; bottom: number } }) {
   const { sounds, notice } = useSoundboard();
   const list = sounds[server.id];
   const [q, setQ] = useState("");
@@ -110,7 +124,7 @@ function SoundboardPanel({ server, meId, deafened }: { server: Server; meId: str
   const full = (list?.length ?? 0) >= MAX_SOUNDS_PER_SERVER;
 
   return (
-    <div className="sb-panel lino lino-lg" role="dialog" aria-label="Soundboard" onClick={() => setMenu(undefined)}>
+    <div className="sb-panel lino lino-lg" role="dialog" aria-label="Soundboard" style={place} onClick={() => setMenu(undefined)}>
       <div className="sb-head">
         <b className="t-display">Soundboard</b>
         <SoundboardVolume compact />
@@ -143,7 +157,7 @@ function SoundboardPanel({ server, meId, deafened }: { server: Server; meId: str
       <div className="sb-foot t-muted">
         {notice ? <span role="status" className="sb-notice">{notice.text}</span> : <span>{list?.length ?? 0} de {MAX_SOUNDS_PER_SERVER} sons</span>}
       </div>
-      {menu && (
+      {menu && createPortal(
         <div className="sb-menu lino" role="menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" className="menu-item" onClick={() => { void soundboard.preview(menu.sound); setMenu(undefined); }}>
             <span>Ouvir só para mim</span><Icon name="headphones" size={16} />
@@ -153,9 +167,11 @@ function SoundboardPanel({ server, meId, deafened }: { server: Server; meId: str
               <span>Editar som</span><Icon name="pencil" size={16} />
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
-      {editing && <SoundModal serverId={server.id} sound={editing === "new" ? undefined : editing} canDelete={editing !== "new" && canEditSound(editing, meId, server.role)} onClose={() => setEditing(undefined)} />}
+      {/* No body: dentro do painel (que tem transform) o modal ficaria preso e cortado. */}
+      {editing && createPortal(<SoundModal serverId={server.id} sound={editing === "new" ? undefined : editing} canDelete={editing !== "new" && canEditSound(editing, meId, server.role)} onClose={() => setEditing(undefined)} />, document.body)}
     </div>
   );
 }

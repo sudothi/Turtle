@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { Channel, User, UserStatus } from "@turtle/protocol";
+import type { Channel, Server, User, UserStatus } from "@turtle/protocol";
 import { canInviteAccounts, shownName } from "@turtle/protocol";
 import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton, StaffTag } from "@turtle/ui";
 import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 import { desktop } from "../desktop";
+import { SoundboardButton } from "./Soundboard";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
   idle: "",
@@ -20,6 +21,7 @@ export function UserPanel({
   voice,
   channels,
   serverName,
+  callServer,
   onSettings,
   onProfile,
   onShare,
@@ -33,6 +35,8 @@ export function UserPanel({
   channels: Channel[];
   /** Nome do servidor da chamada em andamento. */
   serverName?: string;
+  /** Servidor da chamada em andamento (liga o botão do soundboard; chamadas de DM não têm). */
+  callServer?: Server;
   onSettings: () => void;
   onProfile: () => void;
   /** Abre a escolha de qualidade antes de transmitir a tela. */
@@ -81,6 +85,7 @@ export function UserPanel({
               >
                 <Icon name={snap.screen ? "screen-off" : "screen"} />
               </IconButton>
+              {callServer && <SoundboardButton server={callServer} meId={user.id} deafened={snap.deafened} compact />}
             </div>
           )}
           {snap.needsAudioUnlock && (

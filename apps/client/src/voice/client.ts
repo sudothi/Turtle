@@ -437,6 +437,7 @@ export class VoiceClient {
       );
       this.set({ screen: room.localParticipant.isScreenShareEnabled, error: undefined });
       if (this.snap.screen) this.startStats();
+      else await this.stopScreenAudio(room);
       if (ctx && this.snap.screen) {
         const c = ctx;
         ctx = undefined;
@@ -474,6 +475,8 @@ export class VoiceClient {
         dtx: false,
         red: false,
       });
+      // O vídeo acabou enquanto o áudio publicava: não deixa o áudio sozinho na sala.
+      if (this.room === room && !room.localParticipant.isScreenShareEnabled) await this.stopScreenAudio(room);
     } catch (err) {
       this.stopShareAudio();
       this.set({ error: `A transmissão está sem áudio (${(err as Error).message}).` });
@@ -482,11 +485,13 @@ export class VoiceClient {
 
   /** Para o áudio da transmissão e tira a publicação dele (o LiveKit não tira sozinho quando o vídeo acaba por fora). */
   private stopShareAudio() {
-    const a = this.shareAudio;
-    this.shareAudio = undefined;
-    a?.stop();
-    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
-    if (pub?.track) void this.room?.localParticipant.unpublishTrack(pub.track).catch(() => {});
+    const room = this.room;
+    if (room) void this.stopScreenAudio(room).catch(() => {});
+    else {
+      const a = this.shareAudio;
+      this.shareAudio = undefined;
+      a?.stop();
+    }
   }
 
   async stopScreen() {
@@ -495,12 +500,29 @@ export class VoiceClient {
     try {
       await room.localParticipant.setScreenShareEnabled(false);
     } finally {
-      this.stopShareAudio();
-      this.stopStats();
-      this.set({ screen: false, shareStats: undefined });
-      this.reportState();
-      this.refresh();
+      try {
+        // The browser may have already removed the video, leaving only audio.
+        await this.stopScreenAudio(room);
+      } finally {
+        if (this.room === room) {
+          this.stopStats();
+          this.set({ screen: false, shareStats: undefined });
+          this.reportState();
+          this.refresh();
+        }
+      }
     }
+  }
+
+  /** Versão que espera: para o áudio por processo do app desktop e o áudio de tela do navegador, e tira a publicação. */
+  private async stopScreenAudio(room: Room) {
+    const a = this.shareAudio;
+    this.shareAudio = undefined;
+    a?.stop();
+    const track = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+    if (!track) return;
+    track.stop();
+    await room.localParticipant.unpublishTrack(track, true);
   }
 
   setScreenProfile(screenProfile: ScreenProfileId) {
@@ -620,7 +642,8 @@ export class VoiceClient {
   }
 
   private streamVolumeFor(userId: string) {
-    return this.snap.deafened ? 0 : (this.snap.prefs.streamVolumes[userId] ?? 1);
+    const participant = this.room?.remoteParticipants.get(userId);
+    return this.snap.deafened || !participant || !this.isWatching(participant) ? 0 : (this.snap.prefs.streamVolumes[userId] ?? 1);
   }
 
   private applyVolume(p: RemoteParticipant) {
@@ -634,9 +657,14 @@ export class VoiceClient {
   }
 
   /** Voz e câmera sempre; transmissão de tela (e o áudio dela) só de quem você escolheu assistir. */
-  private syncPub(pub: RemoteTrackPublication, userId: string) {
+  private isWatching(p: RemoteParticipant) {
+    const screen = p.getTrackPublication(Track.Source.ScreenShare);
+    return !!screen && !screen.isMuted && this.watching.has(p.identity);
+  }
+
+  private syncPub(pub: RemoteTrackPublication, p: RemoteParticipant) {
     const isScreen = pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio;
-    const want = !isScreen || this.watching.has(userId);
+    const want = !isScreen || this.isWatching(p);
     const asked = this.asked.has(pub.trackSid);
     if (want && !asked) {
       this.asked.add(pub.trackSid);
@@ -645,10 +673,34 @@ export class VoiceClient {
       this.asked.delete(pub.trackSid);
       pub.setSubscribed(false);
     }
+    if (pub.source === Track.Source.ScreenShareAudio && pub.track) {
+      if (want) this.attachAudio(pub.track, p);
+      else {
+        p.setVolume(0, Track.Source.ScreenShareAudio);
+        this.detachAudio(pub.track);
+      }
+    }
   }
 
   private syncSubscriptions(p: RemoteParticipant) {
-    for (const pub of p.trackPublications.values()) this.syncPub(pub as RemoteTrackPublication, p.identity);
+    const screen = p.getTrackPublication(Track.Source.ScreenShare);
+    if (!screen || screen.isMuted) this.watching.delete(p.identity);
+    for (const pub of p.trackPublications.values()) this.syncPub(pub as RemoteTrackPublication, p);
+    this.applyVolume(p);
+  }
+
+  private attachAudio(track: RemoteTrack, p: RemoteParticipant) {
+    if (!track.attachedElements.length) {
+      const el = track.attach();
+      el.dataset.turtleAudio = track.sid ?? p.identity;
+      document.body.appendChild(el);
+    }
+    this.applyVolume(p);
+  }
+
+  private detachAudio(track: RemoteTrack) {
+    for (const el of track.detach()) el.remove();
+    for (const el of document.querySelectorAll(`audio[data-turtle-audio="${track.sid}"]`)) el.remove();
   }
 
   private syncAll() {
@@ -732,28 +784,30 @@ export class VoiceClient {
         refresh();
       })
       .on(RoomEvent.ActiveSpeakersChanged, refresh)
-      .on(RoomEvent.TrackMuted, refresh)
-      .on(RoomEvent.TrackUnmuted, refresh)
+      .on(RoomEvent.TrackMuted, (pub) => { if (pub.source === Track.Source.ScreenShare) this.syncAll(); refresh(); })
+      .on(RoomEvent.TrackUnmuted, (pub) => { if (pub.source === Track.Source.ScreenShare) this.syncAll(); refresh(); })
       .on(RoomEvent.TrackPublished, (pub, p) => {
-        this.syncPub(pub, p.identity);
+        this.syncSubscriptions(p);
         refresh();
       })
       .on(RoomEvent.TrackUnpublished, (pub, p) => {
         this.asked.delete(pub.trackSid);
         // A pessoa parou de transmitir: na próxima vez, o Assistir volta a ser uma escolha.
-        if (pub.source === Track.Source.ScreenShare) {
-          this.watching.delete(p.identity);
-          // Sem o vídeo, o áudio da tela dela não fica tocando (cancela a assinatura se ainda estiver publicado).
-          this.syncSubscriptions(p);
-        }
+        if (pub.source === Track.Source.ScreenShare) this.watching.delete(p.identity);
+        this.syncSubscriptions(p);
         refresh();
       })
       .on(RoomEvent.LocalTrackPublished, refresh)
-      .on(RoomEvent.LocalTrackUnpublished, () => {
+      .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         // O botão "Parar compartilhamento" do navegador encerra a captura por fora do app.
         if (this.room !== room) return;
         const lp = room.localParticipant;
-        if (!lp.isScreenShareEnabled && (this.shareAudio || lp.getTrackPublication(Track.Source.ScreenShareAudio))) this.stopShareAudio();
+        if (!lp.isScreenShareEnabled && (pub.source === Track.Source.ScreenShare || this.shareAudio || lp.getTrackPublication(Track.Source.ScreenShareAudio))) {
+          // TrackEnded só tira a publicação da track que acabou, não o áudio pareado (do navegador ou do app desktop).
+          void this.stopScreenAudio(room).catch(() => {
+            if (this.room === room) this.set({ error: "Não foi possível encerrar o áudio da transmissão. Saia da chamada para interrompê-lo." });
+          });
+        }
         if (this.snap.screen && !lp.isScreenShareEnabled) {
           this.stopStats();
           this.set({ screen: false, shareStats: undefined });
@@ -766,20 +820,21 @@ export class VoiceClient {
         refresh();
       })
       .on(RoomEvent.ConnectionQualityChanged, refresh)
-      .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub, p) => {
+      .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub, p) => {
+        if (this.room !== room) return;
+        this.syncSubscriptions(p);
         if (track.kind === Track.Kind.Audio) {
-          const el = track.attach();
-          el.dataset.turtleAudio = track.sid ?? p.identity;
-          document.body.appendChild(el);
-          this.applyVolume(p);
+          if (pub.source === Track.Source.ScreenShareAudio && !this.isWatching(p)) {
+            p.setVolume(0, Track.Source.ScreenShareAudio);
+            this.detachAudio(track);
+          } else this.attachAudio(track, p);
         }
         // Vídeo não vira elemento aqui: a grade da chamada anexa a track ao <video> de cada cartão.
         refresh();
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
         // Quando a pessoa sai, o LiveKit já desanexou o elemento; remove pelo sid também.
-        for (const el of track.detach()) el.remove();
-        for (const el of document.querySelectorAll(`audio[data-turtle-audio="${track.sid}"]`)) el.remove();
+        this.detachAudio(track);
         refresh();
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => {
@@ -843,7 +898,7 @@ export class VoiceClient {
       const cam = p.getTrackPublication(Track.Source.Camera);
       if (cam && !cam.isMuted) videos.push({ ...base, key: `${p.identity}:camera`, source: "camera", track: cam.track, watching: true });
       const scr = p.getTrackPublication(Track.Source.ScreenShare);
-      if (scr) {
+      if (scr && !scr.isMuted) {
         const watching = isLocal || this.watching.has(p.identity);
         const hasAudio = !!p.getTrackPublication(Track.Source.ScreenShareAudio);
         videos.push({ ...base, key: `${p.identity}:screen`, source: "screen", track: watching ? scr.track : undefined, watching, hasAudio });

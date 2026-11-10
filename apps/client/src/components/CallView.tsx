@@ -92,7 +92,7 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, onMen
   const flash = useSoundboard().flashes[p.id];
   return (
     <div ref={ref} className={`tile lino lino-lg ${speaking ? "speaking" : ""} ${camera?.track ? "has-video" : ""}`} onDoubleClick={() => (camera ? toggleFullscreen(ref.current) : onFocus())} onContextMenu={onMenu && ((e) => onMenu(p.id, e))}>
-      {camera?.track ? <VideoView track={camera.track} className={p.isLocal && snap.facing === "user" ? "mirror" : ""} /> : <Avatar name={profile ? shownName(profile) : p.name} src={fileUrl(profile?.avatar)} size={strip ? 48 : 88} speaking={speaking} />}
+      {camera?.track ? <VideoView track={camera.track} contain className={p.isLocal && snap.facing === "user" ? "mirror" : ""} /> : <Avatar name={profile ? shownName(profile) : p.name} src={fileUrl(profile?.avatar)} size={strip ? 48 : 88} speaking={speaking} />}
       <div className="tile-name">
         {p.muted && <Icon name="mic-off" size={16} />}
         <button className="tile-name-btn" title="Ver perfil" onClick={() => onProfile?.(p.id)} onDoubleClick={(e) => e.stopPropagation()}>

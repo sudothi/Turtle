@@ -25,12 +25,13 @@ export function sortH264(codecs: RTCRtpCodec[]): RTCRtpCodec[] {
 /**
  * O servidor só aceita o perfil 42e01f (Constrained Baseline) na resposta. Os dois perfis são o mesmo fluxo
  * de bits, mas 42001f (Baseline) é o que o codificador de hardware aceita. Na resposta do servidor,
- * trocamos o perfil do H.264 de vídeo; o fluxo continua decodificável por quem assiste, que lê o SPS.
+ * ajustamos somente seções recvonly (o servidor recebe o vídeo que enviamos). Seções sendonly são
+ * câmeras/telas recebidas e precisam manter o perfil negociado para o decodificador.
  */
 export function useBaselineProfile(sdp: string): string {
   return sdp
     .split(/(?=\r?\nm=)/)
-    .map((section) => (section.includes("\nm=video") || section.startsWith("m=video") ? section.replace(/profile-level-id=42e01f/gi, "profile-level-id=42001f") : section))
+    .map((section) => (/^\r?\nm=video\b|^m=video\b/.test(section) && /^a=recvonly\r?$/m.test(section) ? section.replace(/profile-level-id=42e01f/gi, "profile-level-id=42001f") : section))
     .join("");
 }
 

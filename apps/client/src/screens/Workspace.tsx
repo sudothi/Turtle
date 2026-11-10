@@ -15,7 +15,8 @@ import { UserPanel } from "../components/UserPanel";
 import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { soundboard } from "../soundboard";
-import { jukebox } from "../jukebox";
+import { discoInviteLink, jukebox } from "../jukebox";
+import { DiscoContext, type DiscoActions } from "../components/Jukebox";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
@@ -838,8 +839,28 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     </div>
   );
 
+  const disco = useMemo<DiscoActions>(() => ({
+    voiceStates: named.voiceStates,
+    meId: user.id,
+    nameOf: whoIs,
+    join: (id) => { setHome(false); setVoiceView(id); setView("voice"); showContent(); void voice.join(id); },
+    // Convite: vai para o chat de texto aberto (se for do mesmo servidor da chamada) ou para o primeiro canal de texto dele.
+    invite: (voiceId) => {
+      const sid = known[voiceId]?.serverId;
+      if (!sid) return;
+      const texts = allKnown.filter((c) => c.kind === "text" && c.serverId === sid);
+      const to = texts.find((c) => c.id === activeId) ?? texts[0];
+      if (!to) return;
+      const o: Outgoing = { nonce: crypto.randomUUID(), channelId: to.id, content: discoInviteLink(voiceId), attachments: [], status: "sending", at: Date.now() };
+      setOutbox((l) => [...l, o]);
+      transmit(o);
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [named.voiceStates, user.id, whoIs, known, activeId, transmit, voice, showContent]);
+
   return (
     <PresenceContext.Provider value={presence}>
+    <DiscoContext.Provider value={disco}>
     <MobileBack.Provider value={mobile ? back : undefined}>
     <div
       className={mobile ? `app m m-${pane}` : `app ${showMembers ? "with-members" : ""} ${showDmPanel ? (dm?.group ? "with-members" : "with-profile") : ""}`}
@@ -1066,6 +1087,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       )}
     </div>
     </MobileBack.Provider>
+    </DiscoContext.Provider>
     </PresenceContext.Provider>
   );
 }

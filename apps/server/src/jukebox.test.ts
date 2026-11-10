@@ -8,7 +8,7 @@ import { createDb, type DbHandle } from "@turtle/db";
 import { JUKEBOX_MAX_PER_USER, type JukeboxState, type MusicTrack } from "@turtle/protocol";
 import { buildApp } from "./app.js";
 import { jukeboxService } from "./jukebox.js";
-import { mediaLink, ytdlp, ytdlpRunner, type YtdlpRun } from "./ytdlp.js";
+import { cookieJar, mediaLink, ytdlp, type YtdlpRun } from "./ytdlp.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (ok: () => boolean, ms = 3000) => {
@@ -104,20 +104,20 @@ describe("yt-dlp", () => {
 });
 
 describe("cookies do yt-dlp", () => {
-  // O yt-dlp falso é um script sh; o servidor roda em Linux, então no Windows o teste não se aplica.
-  it.skipIf(process.platform === "win32")("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", async () => {
+  it("usa uma cópia temporária do cookies.txt e apaga depois; sem arquivo, não passa --cookies", () => {
     const dir = mkdtempSync(join(tmpdir(), "turtle-ck-"));
-    const bin = join(dir, "fake-yt");
-    writeFileSync(bin, "#!/bin/sh\necho \"$@\"\n", { mode: 0o755 });
     const jar = join(dir, "cookies.txt");
     writeFileSync(jar, "# Netscape HTTP Cookie File\n");
-    const out = await ytdlpRunner(bin, [], jar)(["--version"], 5000);
-    const used = /--cookies (\S+)/.exec(out)?.[1];
-    expect(used).toBeTruthy();
+    const j = cookieJar(jar);
+    expect(j.args[0]).toBe("--cookies");
+    const used = j.args[1]!;
     expect(used).not.toBe(jar);
-    expect(existsSync(used!)).toBe(false);
+    expect(existsSync(used)).toBe(true);
+    j.cleanup();
+    expect(existsSync(used)).toBe(false);
     expect(existsSync(jar)).toBe(true);
-    expect(await ytdlpRunner(bin, [], join(dir, "nao-existe.txt"))(["--version"], 5000)).not.toMatch(/--cookies/);
+    expect(cookieJar(join(dir, "nao-existe.txt")).args).toEqual([]);
+    expect(cookieJar(undefined).args).toEqual([]);
   });
 });
 

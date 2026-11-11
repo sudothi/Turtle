@@ -4,15 +4,10 @@ import { LinoDefs, TurtleMark } from "@turtle/ui";
 import { api, getToken, setOnUnauthorized, setToken } from "./api";
 import { AuthScreen } from "./screens/AuthScreen";
 import { Workspace } from "./screens/Workspace";
-import { Landing } from "./screens/Landing";
-import { desktop } from "./desktop";
 import { appSurface } from "./routes";
 import { discoIdFromPath } from "./jukebox";
 
-/** Dentro de um app (desktop, APK ou PWA instalado) não tem página inicial: abre direto no login. */
-const insideApp = () => !!desktop() || matchMedia("(display-mode: standalone)").matches;
-
-/** Navigation shared by public pages and the web workspace. */
+/** Navegação do app (rotas de convite e de discoteca). */
 const usePath = () => {
   const [path, setPath] = useState(() => location.pathname);
   useEffect(() => {
@@ -35,7 +30,7 @@ export function App() {
     if (!getToken()) return setReady(true);
     api.me().then(setUser).catch(() => setToken(null)).finally(() => setReady(true));
   }, []);
-  const [path, go] = usePath();
+  const [, go] = usePath();
   const clearSession = useCallback(() => {
     setToken(null);
     setUser(null);
@@ -47,15 +42,12 @@ export function App() {
   const logout = useCallback(() => {
     if (getToken()) void api.logout().catch(() => {});
     clearSession();
-    if (!insideApp()) go("/inicio", true);
-  }, [clearSession, go]);
+  }, [clearSession]);
   const onAuth = useCallback((u: User) => {
     setUser(u);
     // Quem entrou por um link de discoteca continua nele (o Workspace mostra o convite).
-    go(discoIdFromPath(location.pathname) ? location.pathname : insideApp() ? "/" : "/app", true);
+    go(discoIdFromPath(location.pathname) ? location.pathname : "/", true);
   }, [go]);
-  const surface = appSurface(path, !!user, insideApp());
-  const landing = surface === "waitlist" || surface === "home" || surface === "download" ? surface : null;
   return (
     <>
       <LinoDefs />
@@ -63,12 +55,10 @@ export function App() {
         <div className="splash" aria-label="Carregando">
           <TurtleMark size={64} />
         </div>
-      ) : landing ? (
-        <Landing tab={landing} loggedIn={!!user} go={go} />
-      ) : user ? (
+      ) : appSurface(!!user) === "workspace" && user ? (
         <Workspace user={user} onLogout={logout} />
       ) : (
-        <AuthScreen onAuth={onAuth} onHome={insideApp() ? undefined : () => go("/inicio")} />
+        <AuthScreen onAuth={onAuth} />
       )}
     </>
   );

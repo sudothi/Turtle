@@ -9,10 +9,10 @@ turn:
   enabled: true
   udp_port: 3478
   tls_port: 5349
-  domain: lk.ogturtle.xyz
-  cert_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.ogturtle.xyz/lk.ogturtle.xyz.crt
-  key_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.ogturtle.xyz/lk.ogturtle.xyz.key
+  domain: lk.turtlechat.tech
+  cert_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.turtlechat.tech/lk.turtlechat.tech.crt
+  key_file: /caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/lk.turtlechat.tech/lk.turtlechat.tech.key
 # Webhooks (#91): o app confere quem está de fato nas salas (a api_key vem de LIVEKIT_WEBHOOK_API_KEY no compose).
 webhook:
   urls:
-    - https://app.ogturtle.xyz/livekit/webhook
+    - https://turtlechat.tech/livekit/webhook

@@ -1,5 +1,6 @@
 # HTTPS automático (Let's Encrypt). O WebSocket do chat (/ws) passa pelo mesmo proxy.
-{$DOMAIN_APP} {
+# Tudo que o app serve, compartilhado entre o domínio atual e o antigo.
+(app) {
 	encode zstd gzip
 
 	# Cabeçalhos de segurança (#93). A CSP começa em Report-Only: o navegador só avisa
@@ -20,12 +21,31 @@
 		root * /srv/desktop
 		@manifesto path *.yml
 		header @manifesto Cache-Control "no-cache"
+		# O site público (outro domínio) lê o latest.yml para montar o botão de download.
+		header Access-Control-Allow-Origin "https://{$DOMAIN_SITE}"
 		file_server
 	}
 
 	handle {
 		reverse_proxy api:3000
 	}
+}
+
+# Domínio interno do app (login, chat, voz e /desktop/). O site público fica em outro domínio (GitHub Pages).
+{$DOMAIN_APP} {
+	import app
+}
+
+# Domínio antigo: apps desktop e APK já instalados ainda apontam para ele. Quem abre no navegador (navegação de
+# página, exceto /desktop/) vai para o domínio novo; a API, o WebSocket e /desktop/ continuam respondendo aqui
+# para o APK e para o auto-update do desktop antigo. Remova este bloco quando todo mundo estiver na versão nova.
+{$DOMAIN_APP_LEGACY} {
+	@pagina {
+		header Sec-Fetch-Mode navigate
+		not path /desktop/*
+	}
+	redir @pagina https://{$DOMAIN_APP}{uri} 308
+	import app
 }
 
 # Sinalização do LiveKit (roda em network_mode: host na VPS; as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).

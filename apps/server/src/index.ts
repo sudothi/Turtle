@@ -38,6 +38,7 @@ const app = await buildApp({
   db, bootstrapInvite: process.env.BOOTSTRAP_INVITE, livekit, clientDir: process.env.CLIENT_DIST, uploadDir: process.env.UPLOAD_DIR,
   logger: level === "silent" ? false : serverLogger(level),
   waitlistNotify, jukebox,
+  siteOrigins: (process.env.SITE_ORIGINS ?? "https://ogturtle.xyz,https://www.ogturtle.xyz").split(",").map((o) => o.trim()).filter(Boolean),
 });
 // Promessa rejeitada sem tratamento vira log, não queda do servidor (que derrubaria o chat de todo mundo).
 process.on("unhandledRejection", (err) => app.log.error({ err }, "promessa rejeitada sem tratamento"));

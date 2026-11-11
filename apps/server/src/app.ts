@@ -83,6 +83,8 @@ import { VoicePresence } from "./voice-presence.js";
 export interface AppOptions {
   db: Db;
   waitlistNotify?: WaitlistNotice;
+  /** Origens do site público autorizadas a enviar a fila de espera (CORS). */
+  siteOrigins?: string[];
   /** Convite inicial criado se ainda não existe nenhum usuário (primeiro usuário vira admin). */
   bootstrapInvite?: string;
   /** Sem isso, o endpoint de token de voz responde 503. */
@@ -155,7 +157,7 @@ const DUMMY_HASH = await hashPassword(newToken());
 const PRIVATE_NETS = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
 
 export interface LiveKitConfig {
-  /** URL que o cliente usa para conectar (ws://localhost:7880 local, wss://lk.ogturtle.xyz em produção). */
+  /** URL que o cliente usa para conectar (ws://localhost:7880 local, wss://lk.turtlechat.tech em produção). */
   url: string;
   apiKey: string;
   apiSecret: string;
@@ -202,10 +204,10 @@ export async function buildApp({
   trustProxy = PRIVATE_NETS, authLimit = { perIp: 20, perName: 8 },
   heartbeatMs = 30_000, attachmentQuotaBytes = 500 * 1024 ** 2,
   attachmentRetentionMs = 7 * 24 * 3_600_000, sweepIntervalMs = 15 * 60_000, maxDiskUsageRatio = 0.85,
-  voiceGraceMs = 30_000, voiceReconcileMs = 15_000, voiceLeaseMs = 45_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify, jukebox: jukeboxOpts = {},
+  voiceGraceMs = 30_000, voiceReconcileMs = 15_000, voiceLeaseMs = 45_000, roomService, linkPreviewAllowPrivate, musicFetch, waitlistNotify, siteOrigins, jukebox: jukeboxOpts = {},
 }: AppOptions) {
   const app = Fastify({ logger, trustProxy });
-  registerWaitlist(app, db, waitlistNotify);
+  registerWaitlist(app, db, waitlistNotify, siteOrigins);
   await app.register(websocket);
   await app.register(multipart, { limits: { files: 1, fields: 0, fileSize: BANNER_MAX_BYTES } });
   const files = fileStore(uploadDir);

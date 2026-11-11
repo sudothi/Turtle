@@ -17,7 +17,7 @@ android {
         versionCode = (project.findProperty("versionCode") ?: "1").toString().toInt()
         versionName = (project.findProperty("versionName") ?: "0.1.0").toString()
         // Servidor do Turtle. Para apontar para outro: -PserverUrl=https://exemplo.com
-        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("serverUrl") ?: "https://app.ogturtle.xyz"}\"")
+        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("serverUrl") ?: "https://turtlechat.tech"}\"")
     }
 
     // Assinatura: o Android só atualiza um app por cima de outro com a MESMA chave. O CI lê a chave dos

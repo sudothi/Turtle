@@ -10,6 +10,21 @@ beforeEach(async () => { await handle.db.delete(waitlistEntries); });
 afterAll(async () => { await app.close(); await handle.close(); });
 const signup = (body: unknown, remoteAddress = "203.0.113.1") => app.inject({ method: "POST", url: "/waitlist", payload: body as object, remoteAddress });
 
+describe("CORS do site público", () => {
+  let cors: Awaited<ReturnType<typeof buildApp>>;
+  beforeAll(async () => { cors = await buildApp({ db: handle.db, siteOrigins: ["https://ogturtle.xyz"] }); });
+  afterAll(async () => { await cors.close(); });
+  it("libera só a origem do site, no preflight e no envio", async () => {
+    const pre = await cors.inject({ method: "OPTIONS", url: "/waitlist", headers: { origin: "https://ogturtle.xyz" } });
+    expect(pre.statusCode).toBe(204);
+    expect(pre.headers["access-control-allow-origin"]).toBe("https://ogturtle.xyz");
+    const ok = await cors.inject({ method: "POST", url: "/waitlist", payload: { email: "cors@example.test" }, headers: { origin: "https://ogturtle.xyz" }, remoteAddress: "203.0.113.50" });
+    expect(ok.headers["access-control-allow-origin"]).toBe("https://ogturtle.xyz");
+    const other = await cors.inject({ method: "POST", url: "/waitlist", payload: { email: "cors2@example.test" }, headers: { origin: "https://evil.test" }, remoteAddress: "203.0.113.51" });
+    expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
 describe("public waiting list", () => {
   it("persists a normalized address without authentication or an SMTP provider", async () => {
     const response = await signup({ email: "  Amigo@Example.TEST " });

@@ -52,5 +52,5 @@ nsis:
 # Auto-atualização: o app procura o latest.yml neste endereço (servido pelo Caddy do VPS).
 publish:
   provider: generic
-  url: https://app.ogturtle.xyz/desktop/
+  url: https://turtlechat.tech/desktop/
   channel: latest

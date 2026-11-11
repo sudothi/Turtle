@@ -14,7 +14,7 @@ Chat privado estilo Discord para o grupo de amigos do thiago, otimizado para **c
 
 ## Stack e estrutura
 TypeScript, pnpm + Turborepo. Node/Fastify + WebSocket próprio, PostgreSQL (Drizzle), LiveKit auto-hospedado (SFU), Docker Compose + Caddy, sharp (imagens).
-- `apps/server` API + gateway WebSocket · `apps/client` React (web) · `apps/desktop` Electron · `apps/android` nativo Kotlin/Compose · `apps/ios` prova inicial React Native
+- `apps/server` API + gateway WebSocket · `apps/client` React (web, só login e app) ·  · `apps/desktop` Electron · `apps/android` nativo Kotlin/Compose · `apps/ios` prova inicial React Native
 - `packages/protocol` tipos compartilhados · `packages/db` banco/migrações · `packages/ui` design system linocut
 - `infra/` compose, Caddyfile, LiveKit, backup e deploy · `docs/planos/` planos de cada frente
 
@@ -28,7 +28,7 @@ pnpm desktop       # Electron, em outro terminal, com o dev rodando
 Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeiro cadastro: `BOOTSTRAP_INVITE` do `.env`. Depois de trocar de branch, recompile `protocol` e `db`. Checagens: `pnpm typecheck` e `pnpm test`.
 
 ## Produção
-- VPS Hostinger KVM 2 (Ubuntu 24.04), app em https://app.ogturtle.xyz, LiveKit em lk.ogturtle.xyz. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
+- VPS Hostinger KVM 2 (Ubuntu 24.04), app interno em https://turtlechat.tech, LiveKit em lk.turtlechat.tech. O site público (início, fila de espera, download) fica em https://ogturtle.xyz, num repo separado (sudothi/turtlesite, hospedado na Vercel). O domínio antigo app.ogturtle.xyz continua servindo o app para desktop/APK já instalados. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
 - Deploy: workflow "Deploy (VPS)" no GitHub Actions, **só manual** (`workflow_dispatch`; sha vazio = main, sha antigo = rollback), usa `infra/deploy.sh` com backup e rollback automático. Só rode com ok do thiago.
 - Compose e arquivos da VPS (`~/turtle/`) espelham `infra/` do repositório (serviço `api`, veja `docs/planos/infra-vps.md`).
 - Backup do Postgres + uploads na VPS todo dia 07:00 UTC (`~/turtle/backups/`, 14 dias). Uploads ficam no volume Docker `uploads`.

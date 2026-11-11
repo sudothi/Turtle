@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, asc, eq, isNull, lt, or, waitlistEntries, type Db } from "@turtle/db";
 import { waitlistBody } from "@turtle/protocol";
 import { attemptLimiter } from "./limiter.js";
@@ -22,7 +22,15 @@ export async function deliverWaitlistNotices(db: Db, notify: WaitlistNotice, fai
   }
 }
 
-export function registerWaitlist(app: FastifyInstance, db: Db, notify?: WaitlistNotice) {
+/** O site público (outro domínio) envia o e-mail daqui: libera só essas origens e só nesta rota. */
+export function registerWaitlist(app: FastifyInstance, db: Db, notify?: WaitlistNotice, siteOrigins: string[] = []) {
+  const cors = (origin: string | undefined, reply: FastifyReply) => {
+    if (origin && siteOrigins.includes(origin)) reply.header("access-control-allow-origin", origin).header("vary", "origin");
+  };
+  app.options("/waitlist", async (request, reply) => {
+    cors(request.headers.origin, reply);
+    return reply.header("access-control-allow-methods", "POST").header("access-control-allow-headers", "content-type").header("access-control-max-age", "86400").code(204).send();
+  });
   const limit = attemptLimiter({ max: 5, windowMs: 10 * 60_000 });
   let running: Promise<void> | undefined;
   const flush = () => {
@@ -41,6 +49,7 @@ export function registerWaitlist(app: FastifyInstance, db: Db, notify?: Waitlist
   app.addHook("onClose", async () => { clearInterval(timer); await running; });
 
   app.post("/waitlist", { bodyLimit: 1024 }, async (request, reply) => {
+    cors(request.headers.origin, reply);
     const blocked = limit.blockedFor(request.ip);
     if (blocked) return reply.header("retry-after", blocked).code(429).send({ error: "Muitas tentativas. Aguarde alguns minutos e tente novamente." });
     limit.hit(request.ip);

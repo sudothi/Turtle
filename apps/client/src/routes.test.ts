@@ -1,19 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { appSurface } from "./routes";
 
-describe("public and app entry routes", () => {
-  it.each([false, true])("keeps the browser root public with loggedIn=%s", loggedIn => {
-    expect(appSurface("/", loggedIn, false)).toBe("waitlist");
-    expect(appSurface("/inicio", loggedIn, false)).toBe("home");
-    expect(appSurface("/inicio/", loggedIn, false)).toBe("home");
-    expect(appSurface("/download", loggedIn, false)).toBe("download");
+describe("app entry", () => {
+  it("shows authentication to visitors on any route, including the old public pages", () => {
+    expect(appSurface(false)).toBe("auth");
   });
-  it("keeps the installed desktop/PWA root connected directly to authentication or the workspace", () => {
-    expect(appSurface("/", false, true)).toBe("auth");
-    expect(appSurface("/", true, true)).toBe("workspace");
-  });
-  it.each(["/app", "/entrar", "/entrar/", "/login", "/convite/test-code", "/discoteca/abc"])("keeps %s behind authentication", route => {
-    expect(appSurface(route, false, false)).toBe("auth");
-    expect(appSurface(route, true, false)).toBe("workspace");
+  it("opens the workspace once logged in", () => {
+    expect(appSurface(true)).toBe("workspace");
   });
 });

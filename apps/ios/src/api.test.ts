@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { Api, ApiError } from "./api";
-import { userSchema } from "@turtle/protocol";
+import { messageSchema, userSchema } from "@turtle/protocol";
 
 vi.mock("expo-file-system", () => ({
   File: class extends Blob {
@@ -45,4 +45,21 @@ it.each(["avatar", "banner"] as const)("uploads %s as real multipart bytes with 
     return new Response(JSON.stringify(user));
   });
   await expect(new Api("https://example.test", "session", transport).uploadImage(kind, "file:///crop.jpg")).resolves.toEqual(user);
+});
+
+it("encodes message IDs and emoji paths and uses idempotent add/remove reaction methods", async () => {
+  const message = messageSchema.parse({ id: "send:self/one", channelId: "room", userId: "self", username: "self", content: "texto", createdAt: new Date().toISOString() });
+  const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(message)));
+  const api = new Api("https://example.test", "session", transport);
+  await api.editMessage(message.id, "editada");
+  expect(transport.mock.calls[0]).toMatchObject(["https://example.test/messages/send%3Aself%2Fone", { method: "PATCH", body: JSON.stringify({ content: "editada" }) }]);
+  transport.mockResolvedValue(new Response(JSON.stringify(message)));
+  await api.setReaction(message.id, "❤️", true);
+  expect(transport.mock.calls[1]).toMatchObject([`https://example.test/messages/send%3Aself%2Fone/reactions/${encodeURIComponent("❤️")}`, { method: "PUT", body: undefined }]);
+  transport.mockResolvedValue(new Response(JSON.stringify(message)));
+  await api.setReaction(message.id, "❤️", false);
+  expect(transport.mock.calls[2]?.[1]?.method).toBe("DELETE");
+  transport.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+  await api.deleteMessage(message.id);
+  expect(transport.mock.calls[3]).toMatchObject(["https://example.test/messages/send%3Aself%2Fone", { method: "DELETE" }]);
 });

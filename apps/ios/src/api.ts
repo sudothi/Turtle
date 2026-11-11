@@ -1,5 +1,6 @@
 import { updateProfileBody, accountSchema, createServerBody, createChannelBody, renameServerBody, invitePreviewSchema, createGroupBody, personSchema, profileViewSchema, unreadSchema, channelSchema, dmSchema, friendSchema, loginBody, memberSchema, messageSchema, registerBody, sendTextBody, serverSchema, userSchema, voiceTokenSchema } from "@turtle/protocol";
 import { z } from "zod";
+import { editMessageBody } from "@turtle/protocol";
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -113,6 +114,9 @@ export class Api {
     return this.request(`/channels/${encodeURIComponent(id)}/messages?${query}`, z.array(messageSchema));
   };
   sendText = (id: string, body: z.input<typeof sendTextBody>) => this.request(`/channels/${encodeURIComponent(id)}/messages`, messageSchema, sendTextBody.parse(body));
+  editMessage = (id: string, content: string) => this.request(`/messages/${encodeURIComponent(id)}`, messageSchema, editMessageBody.parse({ content }), "PATCH");
+  deleteMessage = (id: string) => this.request(`/messages/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
+  setReaction = (id: string, emoji: string, add: boolean) => this.request(`/messages/${encodeURIComponent(id)}/reactions/${encodeURIComponent(emoji)}`, messageSchema, undefined, add ? "PUT" : "DELETE");
   fileUrl = (key: string | null | undefined) => key ? `${this.origin}/files/${encodeURIComponent(key)}` : undefined;
   voiceToken = (id: string) => this.request(`/voice/${encodeURIComponent(id)}/token`, voiceTokenSchema, {});
 }

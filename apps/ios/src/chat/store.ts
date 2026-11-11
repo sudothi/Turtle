@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ServerEvent } from "@turtle/protocol";
 import type { Api } from "../api";
-import { Conversation, type ConversationDisk } from "./conversation";
+import { Conversation, type ConversationApi, type ConversationDisk } from "./conversation";
 
 export interface ChatStorage { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<unknown>; removeItem(key: string): Promise<unknown> }
 export interface ChatOptions { userId: string; storage: ChatStorage; id: () => string }
@@ -22,7 +22,7 @@ export class ChatStore {
   private saveTimer?: ReturnType<typeof setTimeout>;
   private active = new Set<string>();
   private readonly key: string;
-  constructor(private readonly api: Pick<Api, "messages" | "sendText" | "origin">, private readonly options: ChatOptions, private readonly reject: (error: unknown) => Promise<boolean>) {
+  constructor(private readonly api: ConversationApi & Pick<Api, "origin">, private readonly options: ChatOptions, private readonly reject: (error: unknown) => Promise<boolean>) {
     this.key = `turtle.chat.v1:${encodeURIComponent(api.origin)}:${options.userId}`;
     this.ready = this.restore();
   }

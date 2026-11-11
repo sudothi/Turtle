@@ -42,7 +42,7 @@ export function NotificationSettings() {
         </span>
       </label>
       <label className="t-field-label" htmlFor="sound-volume">Volume dos sons — {Math.round(prefs.volume * 100)}%</label>
-      <input id="sound-volume" type="range" min={0} max={1} step={0.05} value={prefs.volume} disabled={!prefs.enabled} onChange={(e) => set({ volume: Number(e.target.value) })} />
+      <input id="sound-volume" type="range" min={0} max={1} step={0.01} value={prefs.volume} disabled={!prefs.enabled} onChange={(e) => set({ volume: Number(e.target.value) })} />
       <div className="sound-samples">
         {samples.map((s) => (
           <Button key={s.name} size="sm" variant="ghost" disabled={!prefs.enabled} onClick={() => previewSound(s.name)}>
@@ -59,7 +59,7 @@ export function NotificationSettings() {
         </span>
       </label>
       <label className="t-field-label" htmlFor="message-volume">Volume das mensagens — {Math.round(prefs.messageVolume * 100)}%</label>
-      <input id="message-volume" type="range" min={0} max={1} step={0.05} value={prefs.messageVolume} disabled={!prefs.enabled || !prefs.messages} onChange={(e) => set({ messageVolume: Number(e.target.value) })} />
+      <input id="message-volume" type="range" min={0} max={1} step={0.01} value={prefs.messageVolume} disabled={!prefs.enabled || !prefs.messages} onChange={(e) => set({ messageVolume: Number(e.target.value) })} />
 
       <label className="toggle-row">
         <input type="checkbox" checked={prefs.callPresence} disabled={!prefs.enabled} onChange={(e) => set({ callPresence: e.target.checked })} />

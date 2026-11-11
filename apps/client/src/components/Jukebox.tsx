@@ -199,7 +199,7 @@ function JukeboxVolume() {
         <Icon name={prefs.muted ? "speaker-off" : "speaker"} size={18} />
       </IconButton>
       <input
-        type="range" min={0} max={1} step={0.05} aria-label="Volume da discoteca (só para você)"
+        type="range" min={0} max={1} step={0.01} aria-label="Volume da discoteca (só para você)"
         value={prefs.muted ? 0 : prefs.volume}
         onChange={(e) => jukebox.setPrefs({ volume: Number(e.target.value), muted: false })}
       />

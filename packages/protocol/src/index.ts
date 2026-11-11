@@ -569,6 +569,10 @@ export const jukeboxStateSchema = z.object({
   /** Posição (ms) em que a faixa foi pausada; null se não está pausada. */
   pausedAt: z.number().nullable(),
   queue: z.array(jukeboxItemSchema),
+  /** Quem votou para pular a faixa atual (zera quando a faixa muda). */
+  skipVotes: z.array(z.string()),
+  /** Votos que pulam a faixa: mais da metade de quem está na chamada. */
+  skipNeeded: z.number().int(),
   /** Aviso curto para quem está na chamada (por exemplo, uma faixa que não deu para tocar). */
   notice: z.string().nullable(),
   /** Hora do servidor quando o estado foi enviado (para acertar o relógio do aparelho). */
@@ -581,5 +585,9 @@ export const jukeboxAddBody = z.union([
   z.object({ trackId: z.string().regex(/^dz\d{1,15}$/) }),
 ]);
 /** Posição atual (ms) de uma faixa, pela hora do servidor. */
+/** Votos para pular: mais da metade da chamada (2 pessoas: 2; 3: 2; 4: 3). */
+export const jukeboxSkipNeeded = (people: number) => Math.floor(Math.max(1, people) / 2) + 1;
+/** Pode mexer em qualquer faixa: admin do app ou dono/admin do servidor. */
+export const canManageJukebox = (isAppAdmin: boolean, role: ServerRole | undefined) => isAppAdmin || role === "owner" || role === "admin";
 export const jukeboxPosition = (s: Pick<JukeboxState, "startedAt" | "pausedAt">, serverNow: number) =>
   s.pausedAt ?? (s.startedAt === null ? 0 : Math.max(0, serverNow - s.startedAt));

@@ -4,7 +4,7 @@ import { readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import sharp from "sharp";
 import {
-  JUKEBOX_MAX_PER_USER, JUKEBOX_MAX_QUEUE, type JukeboxItem, type JukeboxSource, type JukeboxState, type MusicTrack,
+  JUKEBOX_MAX_PER_USER, JUKEBOX_MAX_QUEUE, jukeboxSkipNeeded, type JukeboxItem, type JukeboxSource, type JukeboxState, type MusicTrack,
 } from "@turtle/protocol";
 import { deezerTrackId, isSpotifyLink } from "./music.js";
 import { mediaLink, thumbHost, type ytdlp } from "./ytdlp.js";
@@ -44,6 +44,10 @@ interface Box {
   notice: string | null;
   /** Pausada porque todo mundo saiu da chamada: volta sozinha quando alguém entra. */
   autoPaused: boolean;
+  /** Quem está na chamada agora (para contar os votos de pular). */
+  people: string[];
+  /** Votos para pular a faixa atual. */
+  votes: Set<string>;
   timer?: ReturnType<typeof setTimeout>;
   idle?: ReturnType<typeof setTimeout>;
   noticeTimer?: ReturnType<typeof setTimeout>;
@@ -146,7 +150,7 @@ export function jukeboxService(opts: JukeboxOptions) {
     channelId: b.channelId, serverId: b.serverId,
     current: b.current && toItem(b.current),
     audio: b.current?.file ? `/jukebox/audio/${sign(b.current.file)}/${b.current.file}` : null,
-    startedAt: b.startedAt, pausedAt: b.pausedAt, queue: b.queue.map(toItem), notice: b.notice, now: now(),
+    startedAt: b.startedAt, pausedAt: b.pausedAt, queue: b.queue.map(toItem), skipVotes: [...b.votes], skipNeeded: jukeboxSkipNeeded(b.people.length), notice: b.notice, now: now(),
   });
   const emit = (b: Box) => onChange(b.channelId, b.serverId, boxes.get(b.channelId) === b ? stateOf(b) : null);
   const say = (b: Box, text: string) => {
@@ -342,6 +346,7 @@ export function jukeboxService(opts: JukeboxOptions) {
     clearTimeout(b.timer);
     if (boxes.get(b.channelId) !== b) return;
     b.current = b.queue.shift() ?? null;
+    b.votes.clear();
     b.startedAt = null;
     b.pausedAt = b.autoPaused && b.current ? 0 : null;
     if (!b.current) return emit(b);
@@ -376,7 +381,7 @@ export function jukeboxService(opts: JukeboxOptions) {
       if ("error" in track) return { error: track.error, code: 422 };
       let b = boxes.get(channelId);
       if (!b) {
-        b = { channelId, serverId, current: null, queue: [], startedAt: null, pausedAt: null, notice: null, autoPaused: false };
+        b = { channelId, serverId, current: null, queue: [], startedAt: null, pausedAt: null, notice: null, autoPaused: false, people: [], votes: new Set() };
         boxes.set(channelId, b);
       }
       // Confere de novo: outra pessoa pode ter enchido a fila enquanto o link era aberto.
@@ -411,17 +416,35 @@ export function jukeboxService(opts: JukeboxOptions) {
       emit(b);
       return true;
     },
-    /** Pula a faixa atual. Com `itemId`, só pula se ainda for ela (dois cliques juntos não pulam duas). */
-    skip(channelId: string, itemId?: string) {
+    /** Quem colocou a faixa atual (para conferir quem pode pausar). */
+    currentOwner: (channelId: string): string | null => boxes.get(channelId)?.current?.addedBy ?? null,
+    /**
+     * Pular: quem colocou a faixa (ou um admin) pula na hora; os outros votam (clicar de novo tira o voto)
+     * e a faixa pula quando os votos passam da metade da chamada. Com `itemId`, só vale se ainda for ela.
+     */
+    skip(channelId: string, userId: string, manager: boolean, itemId?: string): { ok: boolean; skipped: boolean } {
       const b = boxes.get(channelId);
-      if (!b?.current || (itemId && b.current.id !== itemId)) return false;
-      advance(b);
-      return true;
+      if (!b?.current || (itemId && b.current.id !== itemId)) return { ok: false, skipped: false };
+      if (manager || b.current.addedBy === userId) {
+        advance(b);
+        return { ok: true, skipped: true };
+      }
+      if (b.votes.has(userId)) b.votes.delete(userId);
+      else b.votes.add(userId);
+      if (b.votes.size >= jukeboxSkipNeeded(b.people.length)) {
+        say(b, `A galera votou e “${b.current.title}” foi pulada.`);
+        advance(b);
+        return { ok: true, skipped: true };
+      }
+      emit(b);
+      return { ok: true, skipped: false };
     },
-    remove(channelId: string, itemId: string) {
+    /** Tira da fila: só quem colocou a faixa (ou um admin). */
+    remove(channelId: string, itemId: string, userId: string, manager: boolean): boolean | "forbidden" {
       const b = boxes.get(channelId);
       const i = b?.queue.findIndex((x) => x.id === itemId) ?? -1;
       if (!b || i < 0) return false;
+      if (!manager && b.queue[i]!.addedBy !== userId) return "forbidden";
       b.queue.splice(i, 1);
       if (i === 0) prefetch(b);
       emit(b);
@@ -432,10 +455,20 @@ export function jukeboxService(opts: JukeboxOptions) {
       if (b) end(b);
     },
     /** Quantas pessoas estão na chamada: vazia pausa (e acaba depois de `idleMs`); alguém voltou, continua. */
-    occupancy(channelId: string, people: number) {
+    occupancy(channelId: string, people: string[]) {
       const b = boxes.get(channelId);
       if (!b) return;
-      if (people > 0) {
+      const was = b.people.length;
+      b.people = people;
+      // Quem saiu da chamada perde o voto; com menos gente, os votos que sobraram podem já bastar.
+      const before = b.votes.size;
+      for (const v of [...b.votes]) if (!people.includes(v)) b.votes.delete(v);
+      if (b.current && b.votes.size > 0 && b.votes.size >= jukeboxSkipNeeded(people.length)) {
+        say(b, `A galera votou e “${b.current.title}” foi pulada.`);
+        advance(b);
+      }
+      else if (before !== b.votes.size || (was !== people.length && b.current)) emit(b);
+      if (people.length > 0) {
         if (!b.idle) return;
         clearTimeout(b.idle);
         b.idle = undefined;

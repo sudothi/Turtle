@@ -66,7 +66,7 @@ import {
   type VoiceState,
   type VoiceToken,
   MAX_CONCURRENT_SOUNDS, MAX_SOUNDS_PER_SERVER, SOUND_COOLDOWN_MS, SOUND_MAX_BYTES, SOUNDS_PER_MINUTE,
-  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound, JUKEBOX_ADDS_PER_MINUTE, jukeboxAddBody,
+  createSoundQuery, soundboardSettingsBody, updateSoundBody, canEditSound, canManageJukebox, JUKEBOX_ADDS_PER_MINUTE, jukeboxAddBody,
   type Sound, type SoundIcon,
 } from "@turtle/protocol";
 import { processSound } from "./sound.js";
@@ -417,7 +417,7 @@ export async function buildApp({
   const broadcastVoice = () => {
     syncRings();
     // Discoteca: chamada que esvaziou pausa (e acaba depois de um tempo); alguém voltou, continua.
-    for (const id of jukebox.channels()) jukebox.occupancy(id, [...voice.values()].filter((v) => v.channelId === id).length);
+    for (const id of jukebox.channels()) jukebox.occupancy(id, [...new Set([...voice.values()].filter((v) => v.channelId === id).map((v) => v.userId))]);
     for (const s of online.keys()) s.send(JSON.stringify(voiceStatesFor(s)));
   };
   /** Tira da chamada quem deixou de ser membro (some das listas e perde a conexão de áudio). */
@@ -1944,14 +1944,21 @@ export async function buildApp({
         if (jukeboxActs.blockedFor(me(req).id)) return reply.code(429).send({ error: "calma; espere um pouco" });
         jukeboxActs.hit(me(req).id);
         const itemId = typeof req.body?.itemId === "string" ? req.body.itemId : undefined;
-        const ok = act === "pause" ? jukebox.pause(channel.id) : act === "resume" ? jukebox.resume(channel.id) : jukebox.skip(channel.id, itemId);
-        return { ok };
+        const manager = canManageJukebox(me(req).isAdmin, await roleIn(channel.serverId, me(req).id));
+        if (act === "skip") return jukebox.skip(channel.id, me(req).id, manager, itemId);
+        // Pausar e continuar mexem na faixa de alguém: só quem colocou (ou um admin).
+        const owner = jukebox.currentOwner(channel.id);
+        if (owner && owner !== me(req).id && !manager) return reply.code(403).send({ error: "só quem colocou a música (ou um admin) pode pausar" });
+        return { ok: act === "pause" ? jukebox.pause(channel.id) : jukebox.resume(channel.id) };
       });
     }
     authed.delete<{ Params: { id: string; item: string } }>("/jukebox/:id/queue/:item", async (req, reply) => {
       const channel = await jukeboxCall(req, reply);
       if (!channel) return;
-      return { ok: jukebox.remove(channel.id, req.params.item) };
+      const manager = canManageJukebox(me(req).isAdmin, await roleIn(channel.serverId, me(req).id));
+      const r = jukebox.remove(channel.id, req.params.item, me(req).id, manager);
+      if (r === "forbidden") return reply.code(403).send({ error: "você só pode tirar as músicas que colocou" });
+      return { ok: r };
     });
 
     authed.get("/me/storage", async (req) => ({ used: await attachmentUsage(me(req).id), quota: attachmentQuotaBytes }));

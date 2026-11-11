@@ -169,7 +169,8 @@ describe("fila e relógio", () => {
     await until(() => last()?.queue[0]?.status === "ready");
     expect(yt.downloads()).toBe(2); // a atual e a próxima; a terceira só quando chegar a vez
     expect(last()!.queue.map((i) => i.title)).toEqual(["Dois", "Três"]);
-    expect(jb.remove("c1", c.item.id)).toBe(true);
+    expect(jb.remove("c1", c.item.id, "u1", false)).toBe("forbidden");
+    expect(jb.remove("c1", c.item.id, "u2", false)).toBe(true);
     expect(last()!.queue.map((i) => i.title)).toEqual(["Dois"]);
     // Pausa e continua do mesmo ponto.
     await until(() => last()?.startedAt != null);
@@ -183,10 +184,38 @@ describe("fila e relógio", () => {
     const resumed = last()!;
     expect(resumed.now - resumed.startedAt!).toBeLessThanOrEqual(paused.pausedAt!);
     // Pular com o id de uma faixa que já passou não pula de novo.
-    expect(jb.skip("c1", a.item.id)).toBe(true);
-    expect(jb.skip("c1", a.item.id)).toBe(false);
+    expect(jb.skip("c1", "u1", false, a.item.id)).toMatchObject({ skipped: true });
+    expect(jb.skip("c1", "u1", false, a.item.id)).toMatchObject({ ok: false });
     await until(() => last()?.current?.title === "Dois" && last()?.startedAt != null);
-    expect(jb.skip("c1")).toBe(true);
+    expect(jb.skip("c1", "admin", true)).toMatchObject({ skipped: true });
+    expect(last()!.current).toBeNull();
+    jb.close();
+  });
+
+  it("voto para pular: mais da metade da chamada pula; clicar de novo tira o voto; quem sai perde o voto", async () => {
+    const { jb, last } = setup({ videos: { aaaaaaaaaaa: { title: "Um", duration: 200 }, bbbbbbbbbbb: { title: "Dois", duration: 200 } } });
+    await jb.add("c1", "s1", "u1", { url: "https://youtu.be/aaaaaaaaaaa" });
+    await jb.add("c1", "s1", "u1", { url: "https://youtu.be/bbbbbbbbbbb" });
+    jb.occupancy("c1", ["u1", "u2", "u3", "u4"]);
+    expect(last()!.skipNeeded).toBe(3);
+    expect(jb.skip("c1", "u2", false)).toEqual({ ok: true, skipped: false });
+    expect(last()!.skipVotes).toEqual(["u2"]);
+    jb.skip("c1", "u2", false); // desfaz
+    expect(last()!.skipVotes).toEqual([]);
+    jb.skip("c1", "u2", false);
+    jb.skip("c1", "u3", false);
+    expect(last()!.current?.title).toBe("Um");
+    // u4 sai: com 3 na chamada bastam 2 votos, que já existem.
+    jb.occupancy("c1", ["u1", "u2", "u3"]);
+    expect(last()!.current?.title).toBe("Dois");
+    expect(last()!.skipVotes).toEqual([]);
+    expect(last()!.notice).toMatch(/votou/);
+    // Voto de quem saiu não conta.
+    jb.skip("c1", "u2", false);
+    jb.occupancy("c1", ["u1", "u3"]);
+    expect(last()!.skipVotes).toEqual([]);
+    // Dono pula a própria na hora.
+    expect(jb.skip("c1", "u1", false)).toMatchObject({ skipped: true });
     expect(last()!.current).toBeNull();
     jb.close();
   });
@@ -245,12 +274,12 @@ describe("fila e relógio", () => {
     const { jb, last } = setup();
     await jb.add("c1", "s1", "u1", { trackId: "dz1" });
     await until(() => last()?.startedAt != null);
-    jb.occupancy("c1", 0);
+    jb.occupancy("c1", []);
     expect(last()!.pausedAt).not.toBeNull();
-    jb.occupancy("c1", 1);
+    jb.occupancy("c1", ["u1"]);
     expect(last()!.startedAt).not.toBeNull();
     expect(last()!.pausedAt).toBeNull();
-    jb.occupancy("c1", 0);
+    jb.occupancy("c1", []);
     await until(() => jb.state("c1") === null);
     expect(last()).toBeNull();
     jb.close();
@@ -267,7 +296,7 @@ describe("fila e relógio", () => {
     expect(jb.file("cover", sig!, file!)).toBeNull();
     // Troca de faixa: a primeira sai da fila e pode ser apagada para caber a segunda.
     await jb.add("c1", "s1", "u1", { url: "https://youtu.be/bbbbbbbbbbb" });
-    jb.skip("c1");
+    jb.skip("c1", "u1", false);
     await until(() => last()?.current?.title === "Dois" && last()?.startedAt != null);
     await until(() => !readdirSync(dir).includes("yt-aaaaaaaaaaa.webm"));
     expect(readdirSync(dir)).toContain("yt-bbbbbbbbbbb.webm");
@@ -370,9 +399,29 @@ describe("discoteca no app", () => {
     expect((await call("GET", `/jukebox/${sala}`, membro)).body.state.pausedAt).not.toBeNull();
     expect((await call("POST", `/jukebox/${sala}/resume`, dono, {})).body).toEqual({ ok: true });
 
+    // Quem não colocou a música (e não é admin) não pausa nem tira da fila; o pular vira voto.
+    B.ws.send(JSON.stringify({ t: "voice", channelId: sala, muted: false, deafened: false }));
+    await sleep(150);
+    expect((await call("POST", `/jukebox/${sala}/pause`, membro, {})).status).toBe(403);
+    const fila = await call("POST", `/jukebox/${sala}/queue`, dono, link);
+    expect((await call("DELETE", `/jukebox/${sala}/queue/${fila.body.id}`, membro)).status).toBe(403);
+    expect((await call("POST", `/jukebox/${sala}/skip`, membro, {})).body).toEqual({ ok: true, skipped: false });
+    expect((await call("GET", `/jukebox/${sala}`, dono)).body.state).toMatchObject({ skipVotes: [expect.any(String)], skipNeeded: 2 });
+    expect((await call("DELETE", `/jukebox/${sala}/queue/${fila.body.id}`, dono)).body).toEqual({ ok: true });
+
     // Apagar o canal acaba com a discoteca (e avisa o servidor).
     await call("DELETE", `/channels/${sala}`, dono);
     await until(() => B.events.some((e) => e.t === "jukebox" && e.channelId === sala && e.state === null));
     for (const x of [A, B, C, D]) x.ws.close();
+  });
+});
+
+describe("votos para pular", () => {
+  it("precisa de mais da metade da chamada", async () => {
+    const { jukeboxSkipNeeded, canManageJukebox } = await import("@turtle/protocol");
+    expect([1, 2, 3, 4, 5, 6].map(jukeboxSkipNeeded)).toEqual([1, 2, 2, 3, 3, 4]);
+    expect(canManageJukebox(true, "member")).toBe(true);
+    expect(canManageJukebox(false, "admin")).toBe(true);
+    expect(canManageJukebox(false, "member")).toBe(false);
   });
 });

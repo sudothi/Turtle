@@ -68,6 +68,8 @@ export interface DiscoActions {
   voiceStates: VoiceState[];
   meId: string;
   nameOf: NameOf;
+  /** Mexe em qualquer faixa da discoteca desse servidor (admin do app ou dono/admin do servidor). */
+  canManage: (serverId: string) => boolean;
   /** Entra na chamada (e abre ela). */
   join: (channelId: string) => void;
   /** Abre a escolha do convite da discoteca dessa chamada: copiar o link ou mandar para um chat. */
@@ -319,6 +321,11 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
 
   const cur = s?.current;
   const paused = !!cur && s.pausedAt !== null;
+  const manager = !!s && !!disco?.canManage(s.serverId);
+  const mine = (i: JukeboxItem) => manager || i.addedBy === disco?.meId;
+  const voted = !!s && !!disco && s.skipVotes.includes(disco.meId);
+  const votes = s?.skipVotes.length ?? 0;
+  const skipLabel = cur && mine(cur) ? "Pular" : voted ? `Tirar voto para pular (${votes}/${s!.skipNeeded})` : `Votar para pular (${votes}/${s?.skipNeeded ?? 0})`;
   const notice = error ?? s?.notice ?? added;
 
   return (
@@ -346,12 +353,17 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
             <span className="jb-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, (pos / cur.durationMs) * 100)}%` }} /></span>
           </div>
           <div className="jb-current-ctl">
-            <IconButton label={paused ? "Continuar" : "Pausar"} onClick={() => act(paused ? "resume" : "pause")}>
-              <Icon name={paused ? "play" : "pause"} size={18} />
-            </IconButton>
-            <IconButton label="Pular" onClick={() => act("skip")}>
-              <Icon name="skip" size={18} />
-            </IconButton>
+            {mine(cur) && (
+              <IconButton label={paused ? "Continuar" : "Pausar"} onClick={() => act(paused ? "resume" : "pause")}>
+                <Icon name={paused ? "play" : "pause"} size={18} />
+              </IconButton>
+            )}
+            <span className="jb-skip">
+              <IconButton label={skipLabel} active={voted} onClick={() => act("skip")}>
+                <Icon name="skip" size={18} />
+              </IconButton>
+              {votes > 0 && <span className="jb-skip-count" aria-hidden="true">{votes}/{s.skipNeeded}</span>}
+            </span>
           </div>
         </div>
       ) : (
@@ -402,9 +414,11 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
                   <span className="t-muted">{[i.artist, `por ${nameOf(i.addedBy)}`].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className="jb-dur t-muted">{clock(i.durationMs / 1000)}</span>
-                <IconButton label={`Tirar ${i.title} da fila`} className="jb-remove" onClick={() => void api.jukeboxRemove(channelId, i.id).catch((e: Error) => setError(e.message))}>
-                  <Icon name="close" size={14} />
-                </IconButton>
+                {mine(i) && (
+                  <IconButton label={`Tirar ${i.title} da fila`} className="jb-remove" onClick={() => void api.jukeboxRemove(channelId, i.id).catch((e: Error) => setError(e.message))}>
+                    <Icon name="close" size={14} />
+                  </IconButton>
+                )}
               </li>
             ))}
           </ol>

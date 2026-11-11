@@ -150,7 +150,7 @@ export function PersonMenu({
               <label className="person-menu-volume">
                 <span>Volume do usuário <b>{Math.round(mutedForMe ? 0 : volume * 100)}%</b></span>
                 <input
-                  type="range" min={0} max={MAX_VOLUME} step={0.05}
+                  type="range" min={0} max={MAX_VOLUME} step={0.01}
                   aria-label={`Volume de ${name}`}
                   value={mutedForMe ? 0 : volume}
                   onChange={(e) => {

@@ -119,7 +119,7 @@ function PersonTile({ p, profile, camera, voice, snap, onFocus, onProfile, onMen
       {!strip && !p.isLocal && (
         <input
           className="tile-volume"
-          type="range" min={0} max={MAX_VOLUME} step={0.05} aria-label={`Volume de ${p.name}`}
+          type="range" min={0} max={MAX_VOLUME} step={0.01} aria-label={`Volume de ${p.name}`}
           value={snap.prefs.volumes[p.id] ?? 1}
           onChange={(e) => voice.setVolume(p.id, Number(e.target.value))}
         />
@@ -156,7 +156,7 @@ function StreamVolume({ v, voice, snap }: { v: VideoTile; voice: VoiceClient; sn
             <Icon name={vol === 0 ? "speaker-off" : "speaker"} size={18} />
           </IconButton>
           <input
-            type="range" min={0} max={MAX_VOLUME} step={0.05} aria-label={`Volume da transmissão de ${v.name}`}
+            type="range" min={0} max={MAX_VOLUME} step={0.01} aria-label={`Volume da transmissão de ${v.name}`}
             value={vol}
             onChange={(e) => set(Number(e.target.value))}
           />

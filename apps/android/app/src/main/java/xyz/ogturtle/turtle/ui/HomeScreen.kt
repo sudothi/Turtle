@@ -488,7 +488,7 @@ private fun ChannelRow(name: String, icon: ImageVector, unread: Int, muted: Bool
 @Composable
 private fun DmSidebar(state: UiState, vm: AppViewModel, unread: Map<String, Unread>, onFriends: () -> Unit, onOpen: (String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        item { ChannelRow("Amigos", Icons.Filled.Group, state.friends.count { it.status == "incoming" }, onFriends) }
+        item { ChannelRow("Amigos", Icons.Filled.Group, state.friends.count { it.status == "incoming" }, onClick = onFriends) }
         item { SectionLabel("Conversas", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)) }
         items(state.dms, key = { it.channelId }) { d ->
             Row(

@@ -1,0 +1,18 @@
+# HTTPS automático (Let's Encrypt). Os domínios vêm do .env (DOMAIN_APP e DOMAIN_LK).
+{$DOMAIN_APP} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()"
+		-Server
+	}
+	reverse_proxy app:3000
+}
+
+# Sinalização do LiveKit (o LiveKit roda em network_mode: host; as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).
+{$DOMAIN_LK} {
+	reverse_proxy host.docker.internal:7880
+}

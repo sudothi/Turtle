@@ -1,5 +1,7 @@
 # Turtle (repo turtle) — contexto para agentes
 
+> O projeto é **open source (MIT)**: qualquer pessoa baixa, aluga uma VPS e hospeda o próprio Turtle (`README.md`, `docs/hospedar-em-vps.md`, `docs/instalar-com-ia.md`, `infra/selfhost/`). **Não coloque no repositório dados privados do mantenedor** (IP, domínios da instância dele, e-mails, chaves, nomes): use placeholders como `app.seudominio.com`. Os endereços reais da instância do thiago ficam na memória do projeto e nos segredos do GitHub Actions.
+
 Leia isto antes de mexer em qualquer coisa. É o resumo geral do projeto; os detalhes estão em `docs/` e nas issues/PRs do GitHub (o estado vivo fica lá, não aqui).
 
 ## O que é
@@ -28,7 +30,10 @@ pnpm desktop       # Electron, em outro terminal, com o dev rodando
 Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeiro cadastro: `BOOTSTRAP_INVITE` do `.env`. Depois de trocar de branch, recompile `protocol` e `db`. Checagens: `pnpm typecheck` e `pnpm test`.
 
 ## Produção
-- VPS Hostinger KVM 2 (Ubuntu 24.04), app interno em https://turtlechat.tech, LiveKit em lk.turtlechat.tech. O site público (início, fila de espera, download) fica em https://ogturtle.xyz, num repo separado (sudothi/turtlesite, hospedado na Vercel). O domínio antigo app.ogturtle.xyz continua servindo o app para desktop/APK já instalados. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
+<<<<<<< HEAD
+- Instância do mantenedor: VPS Hostinger KVM 2 (Ubuntu 24.04), com o app e o LiveKit em subdomínios próprios (endereços na memória do projeto). Quem hospeda por conta própria usa `infra/selfhost/`. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
+=======
+>>>>>>> origin/main
 - Deploy: workflow "Deploy (VPS)" no GitHub Actions, **só manual** (`workflow_dispatch`; sha vazio = main, sha antigo = rollback), usa `infra/deploy.sh` com backup e rollback automático. Só rode com ok do thiago.
 - Compose e arquivos da VPS (`~/turtle/`) espelham `infra/` do repositório (serviço `api`, veja `docs/planos/infra-vps.md`).
 - Backup do Postgres + uploads na VPS todo dia 07:00 UTC (`~/turtle/backups/`, 14 dias). Uploads ficam no volume Docker `uploads`.

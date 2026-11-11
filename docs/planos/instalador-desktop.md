@@ -1,6 +1,6 @@
 # Instalador do app desktop (Windows)
 
-Issue #37. O app desktop instalado abre `https://turtlechat.tech`, com a cara do Turtle (preto e branco, linogravura) e atualização automática.
+Issue #37. O app desktop instalado abre `https://app.seudominio.com`, com a cara do Turtle (preto e branco, linogravura) e atualização automática.
 
 ## O que o usuário vê
 
@@ -13,7 +13,7 @@ Issue #37. O app desktop instalado abre `https://turtlechat.tech`, com a cara do
 
 ## Atualização automática
 
-- `electron-updater` com provedor `generic` em `https://turtlechat.tech/desktop/` (o repositório é privado, então GitHub Releases exigiria token no app).
+- `electron-updater` com provedor `generic` em `https://app.seudominio.com/desktop/` (o repositório é privado, então GitHub Releases exigiria token no app).
 - Ao abrir: procura por até 6 s. Se houver versão nova, baixa mostrando o progresso na splash e reinstala em silêncio, reabrindo o app. Sem rede ou servidor lento, abre a versão atual.
 - Com o app aberto: procura a cada 4 h e baixa em segundo plano; avisa por notificação e instala ao sair (ou em "Reiniciar para atualizar" na bandeja). Nunca derruba uma chamada sozinho.
 
@@ -24,13 +24,13 @@ Issue #37. O app desktop instalado abre `https://turtlechat.tech`, com a cara do
    - **GitHub Actions**: Actions > "Desktop (Windows)" > Run workflow. Baixar o artifact `turtle-windows`.
    - **No PC (Windows)**: `pnpm install` e `pnpm desktop:dist`. Sai em `apps/desktop/release/`.
 3. Publicar (precisa de ok, é produção): copiar `Turtle-Setup-<versão>.exe`, `Turtle-Setup-<versão>.exe.blockmap` e `latest.yml` para `~/turtle/desktop/` no VPS. Suba o `.exe` e o `.blockmap` antes e o `latest.yml` por último, para ninguém ver uma versão sem arquivo.
-4. Link para os amigos baixarem: `https://turtlechat.tech/desktop/Turtle-Setup-<versão>.exe`.
+4. Link para os amigos baixarem: `https://app.seudominio.com/desktop/Turtle-Setup-<versão>.exe`.
 
 ### Preparar o VPS (uma vez, precisa de ok)
 
 - `mkdir ~/turtle/desktop`
 - No `~/turtle/Caddyfile`, o bloco `handle_path /desktop/*` (igual ao `infra/Caddyfile`), e no compose o volume `./desktop:/srv/desktop:ro` no serviço `caddy`.
-- `docker compose up -d caddy` e conferir `curl -I https://turtlechat.tech/desktop/latest.yml`.
+- `docker compose up -d caddy` e conferir `curl -I https://app.seudominio.com/desktop/latest.yml`.
 
 ## Limites conhecidos
 

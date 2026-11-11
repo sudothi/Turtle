@@ -81,7 +81,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
-      WAITLIST_NOTIFY_TO: ${WAITLIST_NOTIFY_TO:-tchemello@ucs.br}
+      WAITLIST_NOTIFY_TO: ${WAITLIST_NOTIFY_TO:-}
     volumes: ["uploads:/data/uploads"]
 
 volumes: { caddy_data: {}, caddy_config: {}, pg_data: {}, uploads: {} }

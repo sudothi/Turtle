@@ -9,7 +9,7 @@ import { errorText } from "../session";
 import { Button, Field, Heading, Notice } from "../ui/components";
 import { styles as s } from "../ui/theme";
 
-const defaultOrigin = process.env.EXPO_PUBLIC_API_ORIGIN || "https://app.ogturtle.xyz";
+const defaultOrigin = process.env.EXPO_PUBLIC_API_ORIGIN || "https://turtlechat.tech";
 
 export default function AuthScreen({ initialError }: { initialError?: string }) {
   const [origin, setOrigin] = useState(defaultOrigin);
@@ -52,7 +52,7 @@ export default function AuthScreen({ initialError }: { initialError?: string }) 
         <Button secondary disabled={busy} onPress={() => { setRegister(!register); setError(undefined); }}>{register ? "Já tenho uma conta" : "Tenho um convite"}</Button>
       </View>
       <Pressable accessibilityRole="button" onPress={() => setServerSettings(!serverSettings)} disabled={busy} style={s.link}><Text style={s.caption}>Configurar servidor</Text></Pressable>
-      {serverSettings && <Field label="Endereço do servidor" value={origin} onChangeText={setOrigin} editable={!busy} keyboardType="url" placeholder="https://app.ogturtle.xyz" />}
+      {serverSettings && <Field label="Endereço do servidor" value={origin} onChangeText={setOrigin} editable={!busy} keyboardType="url" placeholder="https://turtlechat.tech" />}
       <Text style={s.footnote}>Turtle para iPhone</Text>
     </ScrollView>
   </KeyboardAvoidingView>;

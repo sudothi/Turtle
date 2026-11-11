@@ -186,7 +186,12 @@ export const withScheme = (q: string) => (/^https?:\/\//i.test(q.trim()) ? q.tri
 
 /** Convite para a discoteca no chat: a mensagem é só este endereço e o cliente mostra o cartão (ao vivo). */
 export const discoInviteLink = (channelId: string) => `turtle://discoteca/${channelId}`;
-export const parseDiscoInvite = (content: string) => /^turtle:\/\/discoteca\/([\w-]{1,64})$/.exec(content.trim())?.[1] ?? null;
+export const parseDiscoInvite = (content: string, origin: string = typeof location === "undefined" ? "" : location.origin) => {
+  const text = content.trim();
+  // O link copiado (https://<este app>/discoteca/<id>) colado no chat também vira o cartão.
+  const web = origin && text.startsWith(`${origin}/`) ? discoIdFromPath(text.slice(origin.length)) : null;
+  return web ?? /^turtle:\/\/discoteca\/([\w-]{1,64})$/.exec(text)?.[1] ?? null;
+};
 
 /** Link para colar fora do chat: abre o app e mostra o convite (com o botão Entrar). */
 export const discoWebLink = (channelId: string, origin: string = location.origin) => `${origin}/discoteca/${channelId}`;

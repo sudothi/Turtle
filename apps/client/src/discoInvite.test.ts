@@ -14,6 +14,9 @@ describe("convite da discoteca no chat", () => {
     const link = discoWebLink("uJ7a-WMy3GErVDmO", "https://app.ogturtle.xyz");
     expect(link).toBe("https://app.ogturtle.xyz/discoteca/uJ7a-WMy3GErVDmO");
     expect(discoIdFromPath(new URL(link).pathname)).toBe("uJ7a-WMy3GErVDmO");
+    expect(parseDiscoInvite(link, "https://app.ogturtle.xyz")).toBe("uJ7a-WMy3GErVDmO");
+    expect(parseDiscoInvite(`${link}\n`, "https://app.ogturtle.xyz")).toBe("uJ7a-WMy3GErVDmO");
+    expect(parseDiscoInvite(link, "https://outro.exemplo")).toBeNull();
     expect(discoIdFromPath("/discoteca/")).toBeNull();
     expect(discoIdFromPath("/convite/abc")).toBeNull();
   });

@@ -4,7 +4,7 @@
  * na chamada; cada cliente baixa o WAV uma vez (cache) e toca aqui, com o volume do soundboard de quem ouve.
  */
 import type { ServerEvent, Sound } from "@turtle/protocol";
-import { api, fileUrl } from "./api";
+import { api, fileUrl, getToken } from "./api";
 import { sharedAudio } from "./sounds";
 
 const KEY = "turtle.soundboard";
@@ -60,7 +60,9 @@ function savePrefs(p: SoundboardPrefs) {
 async function decode(key: string): Promise<AudioBuffer> {
   let hit = buffers.get(key);
   if (!hit) {
-    hit = fetch(fileUrl(key)!)
+    const token = getToken();
+    // O WAV só é servido a quem é do servidor do som, por isso vai com o token.
+    hit = fetch(fileUrl(key)!, { headers: token ? { authorization: `Bearer ${token}` } : {} })
       .then((r) => {
         if (!r.ok) throw new Error("som não encontrado");
         return r.arrayBuffer();

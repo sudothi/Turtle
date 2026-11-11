@@ -93,6 +93,7 @@ const listen = (token: string) =>
     ws.on("open", () => resolve({ ws, events }));
     ws.on("error", reject);
   });
+const getFile = (key: string, token?: string) => fetch(`${base}/files/${key}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
 const settle = () => new Promise((r) => setTimeout(r, 150));
 
 describe("soundboard", () => {
@@ -133,7 +134,7 @@ describe("soundboard", () => {
     expect((await call("GET", `/servers/${serverId}/sounds`, fora)).status).toBe(404);
     expect((await upload(serverId, fora, wav(500))).status).toBe(404);
     // o arquivo é servido como áudio
-    const file = await fetch(`${base}/files/${r.body.key}`);
+    const file = await getFile(r.body.key, dono);
     expect(file.headers.get("content-type")).toBe("audio/wav");
     expect(Buffer.from(await file.arrayBuffer()).length).toBe(44 + 48000 * 1.2 * 2);
   });
@@ -155,7 +156,7 @@ describe("soundboard", () => {
     expect((await call("PATCH", `/sounds/${soundId}`, fora, { icon: "duck" })).status).toBe(404);
     const gone = (await call("GET", `/servers/${serverId}/sounds`, dono)).body.find((s: any) => s.id === outro);
     expect((await call("DELETE", `/sounds/${outro}`, dono)).status).toBe(200);
-    expect((await fetch(`${base}/files/${gone.key}`)).status).toBe(404);
+    expect((await getFile(gone.key, dono)).status).toBe(404);
   });
 
   it("só admins adicionam quando o servidor pede", async () => {
@@ -215,6 +216,23 @@ describe("soundboard", () => {
   it("apagar o servidor apaga os sons", async () => {
     const key = (await call("GET", `/servers/${serverId}/sounds`, dono)).body[0].key;
     expect((await call("DELETE", `/servers/${serverId}`, dono, { name: "Sons" })).status).toBe(200);
-    expect((await fetch(`${base}/files/${key}`)).status).toBe(404);
+    expect((await getFile(key, dono)).status).toBe(404);
+  });
+
+  it("cada servidor tem os seus sons: nada vaza para outro servidor", async () => {
+    const dono2 = (await call("POST", "/auth/register", undefined, { inviteCode: (await call("POST", "/invites", (await call("POST", "/auth/login", undefined, { username: "admin", password: "12345678" })).body.token, {})).body.code, username: "snd-dono2", password: "12345678" })).body.token as string;
+    const a = (await call("POST", "/servers", dono2, { name: "Alfa" })).body.id;
+    const b = (await call("POST", "/servers", dono2, { name: "Beta" })).body.id;
+    const sa = (await upload(a, dono2, wav(300), "name=so-do-A&icon=cat")).body;
+    expect((await call("GET", `/servers/${b}/sounds`, dono2)).body).toEqual([]);
+    expect((await call("GET", `/servers/${a}/sounds`, dono2)).body.map((s: any) => s.name)).toEqual(["so-do-A"]);
+    // o limite é por servidor
+    expect((await call("GET", `/servers/${a}/sounds`, dono)).status).toBe(404);
+    // o arquivo só vai para quem é do servidor (sem login 401, de fora 404)
+    expect((await getFile(sa.key)).status).toBe(401);
+    expect((await getFile(sa.key, dono)).status).toBe(404);
+    const ok = await getFile(sa.key, dono2);
+    expect(ok.status).toBe(200);
+    await ok.arrayBuffer();
   });
 });

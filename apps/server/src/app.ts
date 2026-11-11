@@ -782,12 +782,15 @@ export async function buildApp({
     const path = join(files.dir, key);
     if (!(await stat(path).catch(() => null))) return reply.code(404).send({ error: "não encontrado" });
     if (key.endsWith(".wav")) {
-      // Som do soundboard (só existe enquanto a linha existir).
-      const snd = (await db.select({ id: soundboardSounds.id }).from(soundboardSounds).where(eq(soundboardSounds.fileKey, key)).limit(1))[0];
+      // Som do soundboard: só existe enquanto a linha existir e só quem é do servidor dele baixa.
+      const snd = (await db.select({ serverId: soundboardSounds.serverId }).from(soundboardSounds).where(eq(soundboardSounds.fileKey, key)).limit(1))[0];
       if (!snd) return reply.code(404).send({ error: "não encontrado" });
+      const sess = await sessionFromToken(bearer(req));
+      if (!sess) return reply.code(401).send({ error: "não autenticado" });
+      if (!(await roleIn(snd.serverId, sess.user.id))) return reply.code(404).send({ error: "não encontrado" });
       reply
         .header("content-type", "audio/wav")
-        .header("cache-control", "public, max-age=31536000, immutable")
+        .header("cache-control", "private, max-age=31536000, immutable")
         .header("x-content-type-options", "nosniff")
         .header("content-security-policy", "default-src 'none'; sandbox");
       return reply.send(createReadStream(path));

@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { JUKEBOX_MAX_MS, JUKEBOX_MAX_QUEUE, type JukeboxItem, type JukeboxState, type MusicTrack, type VoiceState } from "@turtle/protocol";
-import { Avatar, Icon, IconButton } from "@turtle/ui";
+import { Avatar, Button, Icon, IconButton, Modal } from "@turtle/ui";
 import { api, fileUrl } from "../api";
-import { jukebox, looksLikeLink, useJukebox, useJukeboxPosition, withScheme } from "../jukebox";
+import { copyText } from "../clipboard";
+import { discoWebLink, jukebox, looksLikeLink, useJukebox, useJukeboxPosition, withScheme } from "../jukebox";
 import { clock, coverTint, musicCover } from "../music";
 import { Vinyl } from "./MusicCard";
 
@@ -69,7 +70,7 @@ export interface DiscoActions {
   nameOf: NameOf;
   /** Entra na chamada (e abre ela). */
   join: (channelId: string) => void;
-  /** Manda o convite da discoteca dessa chamada para o chat de texto do servidor. */
+  /** Abre a escolha do convite da discoteca dessa chamada: copiar o link ou mandar para um chat. */
   invite: (channelId: string) => void;
 }
 export const DiscoContext = createContext<DiscoActions | null>(null);
@@ -78,7 +79,7 @@ export const DiscoContext = createContext<DiscoActions | null>(null);
  * Convite no chat: "@fulano está te convidando para uma discoteca!", com a música que toca agora e quem está na
  * chamada (só a foto; o nome aparece ao passar o mouse). Atualiza ao vivo.
  */
-export function DiscoInviteCard({ channelId, author }: { channelId: string; author: string }) {
+export function DiscoInviteCard({ channelId, author, onJoin }: { channelId: string; author?: string; onJoin?: () => void }) {
   const ctx = useContext(DiscoContext);
   const s = useJukebox().states[channelId];
   const pos = useJukeboxPosition(channelId);
@@ -93,7 +94,7 @@ export function DiscoInviteCard({ channelId, author }: { channelId: string; auth
     <div className={`jb-invite lino${playing ? " is-playing" : ""}`}>
       <div className="jb-invite-head">
         <Icon name="disco" size={18} />
-        <span><span className="jb-invite-who">@{author}</span> está te convidando para uma discoteca!</span>
+        <span>{author ? <><span className="jb-invite-who">@{author}</span> está te convidando para uma discoteca!</> : "Você foi convidado para uma discoteca!"}</span>
       </div>
       {cur ? (
         <div className="jb-now">
@@ -124,7 +125,7 @@ export function DiscoInviteCard({ channelId, author }: { channelId: string; auth
             })}
             {people.length === 0 && <span className="t-muted jb-invite-empty">Ninguém na chamada</span>}
           </div>
-          {ctx && !inCall && <button type="button" className="jb-invite-join" onClick={() => ctx.join(channelId)}>Entrar</button>}
+          {ctx && !inCall && <button type="button" className="jb-invite-join" onClick={() => { ctx.join(channelId); onJoin?.(); }}>Entrar</button>}
         </div>
       )}
     </div>
@@ -325,7 +326,7 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
       <div className="sb-head">
         <b className="t-display">Discoteca</b>
         {disco && (
-          <IconButton label="Convidar no chat" className="jb-invite-btn" onClick={() => { disco.invite(channelId); setAdded("Convite enviado no chat"); }}>
+          <IconButton label="Convidar para a discoteca" className="jb-invite-btn" onClick={() => disco.invite(channelId)}>
             <Icon name="user-plus" size={18} />
           </IconButton>
         )}
@@ -416,5 +417,60 @@ function JukeboxPanel({ channelId, nameOf, deafened, place }: { channelId: strin
         )}
       </div>
     </div>
+  );
+}
+
+/** Para onde mandar o convite: um canal de texto de servidor ou uma conversa (DM/grupo). */
+export interface InviteTarget { id: string; label: string; group: string }
+
+/** Convidar para a discoteca: copiar o link ou mandar o cartão para o chat que a pessoa escolher. */
+export function DiscoInviteModal({ channelId, targets, onSend, onClose }: { channelId: string; targets: InviteTarget[]; onSend: (target: InviteTarget) => void; onClose: () => void }) {
+  const link = discoWebLink(channelId);
+  const [copied, setCopied] = useState(false);
+  const [q, setQ] = useState("");
+  const [sent, setSent] = useState<string[]>([]);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = async () => {
+    if (!(await copyText(link))) return;
+    setCopied(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1600);
+  };
+  const term = q.trim().toLocaleLowerCase("pt-BR");
+  const shown = targets.filter((t) => !term || `${t.label} ${t.group}`.toLocaleLowerCase("pt-BR").includes(term));
+  const groups = [...new Set(shown.map((t) => t.group))];
+  return (
+    <Modal title="Convidar para a discoteca" subtitle="Copie o link ou mande o convite para um chat. Só entra quem já tem conta." onClose={onClose}>
+      <div className="invite-box lino">
+        <code className="jb-link">{link}</code>
+        <Button size="sm" onClick={() => void copy()}>
+          <Icon name={copied ? "check" : "copy"} size={16} />
+          {copied ? "Copiado" : "Copiar"}
+        </Button>
+      </div>
+      <div className="jb-pick">
+        <input className="sb-search" type="search" placeholder="Enviar para um chat…" aria-label="Buscar chat" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="jb-pick-list" role="list">
+          {groups.map((g) => (
+            <div key={g} className="jb-pick-group" role="group" aria-label={g}>
+              <span className="jb-pick-title t-muted">{g}</span>
+              {shown.filter((t) => t.group === g).map((t) => {
+                const done = sent.includes(t.id);
+                return (
+                  <div key={t.id} className="jb-pick-row" role="listitem">
+                    <span className="jb-pick-name" title={t.label}>{t.label}</span>
+                    <Button size="sm" variant="ghost" disabled={done} onClick={() => { onSend(t); setSent((l) => [...l, t.id]); }}>
+                      {done ? <><Icon name="check" size={16} /> Enviado</> : "Enviar"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {shown.length === 0 && <p className="t-muted jb-invite-empty">Nenhum chat encontrado.</p>}
+        </div>
+      </div>
+    </Modal>
   );
 }

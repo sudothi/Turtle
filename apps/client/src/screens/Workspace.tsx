@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
 import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Activity, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
-import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
+import { Avatar, Button, Icon, IconButton, Modal } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
 import { desktop, loadShortcuts, loadShowGame } from "../desktop";
@@ -15,8 +15,8 @@ import { UserPanel } from "../components/UserPanel";
 import { ChatView, type Outgoing } from "../components/ChatView";
 import { CallView } from "../components/CallView";
 import { soundboard } from "../soundboard";
-import { discoInviteLink, jukebox } from "../jukebox";
-import { DiscoContext, type DiscoActions } from "../components/Jukebox";
+import { discoIdFromPath, discoInviteLink, jukebox } from "../jukebox";
+import { DiscoContext, DiscoInviteCard, DiscoInviteModal, type DiscoActions, type InviteTarget } from "../components/Jukebox";
 import { ShareModal } from "../components/ShareModal";
 import { ScreenPicker } from "../components/ScreenPicker";
 import { SettingsModal, type SettingsTab } from "../components/SettingsModal";
@@ -49,6 +49,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
   const [user, setUser] = useState(initialUser);
   const [servers, setServers] = useState<Server[]>([]);
   const [serversLoaded, setServersLoaded] = useState(false);
+  const [discoInvite, setDiscoInvite] = useState<string | null>(null);
   const [serverId, setServerId] = useState<string | undefined>(remembered);
   const [channels, setChannels] = useState<Channel[]>([]);
   /** Todos os canais já vistos (de qualquer servidor), para nomear a chamada em andamento. */
@@ -839,24 +840,36 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     </div>
   );
 
+  // Para onde o convite da discoteca pode ir: canais de texto dos servidores (o da chamada primeiro) e conversas.
+  const inviteTargets = useMemo<InviteTarget[]>(() => {
+    const sid = discoInvite ? known[discoInvite]?.serverId : undefined;
+    const rank = (id: string) => (id === sid ? 0 : 1);
+    const perServer = [...servers].sort((a, b) => rank(a.id) - rank(b.id)).flatMap((sv) =>
+      Object.values(known).filter((c) => c.kind === "text" && c.serverId === sv.id).map((c) => ({ id: c.id, label: `#${c.name}`, group: sv.name })));
+    return [...perServer, ...dms.map((d) => ({ id: d.channelId, label: dmTitle(d), group: "Mensagens diretas" }))];
+  }, [discoInvite, known, servers, dms]);
+  const sendDiscoInvite = (to: InviteTarget) => {
+    if (!discoInvite) return;
+    const o: Outgoing = { nonce: crypto.randomUUID(), channelId: to.id, content: discoInviteLink(discoInvite), attachments: [], status: "sending", at: Date.now() };
+    setOutbox((l) => [...l, o]);
+    transmit(o);
+  };
+  // Link /discoteca/<id> aberto neste navegador: mostra o convite assim que a chamada é conhecida.
+  const [discoLinkId, setDiscoLinkId] = useState(() => discoIdFromPath(location.pathname));
+  useEffect(() => {
+    if (!discoLinkId) return;
+    if (known[discoLinkId]) history.replaceState(null, "", "/app");
+  }, [discoLinkId, known]);
+
   const disco = useMemo<DiscoActions>(() => ({
     voiceStates: named.voiceStates,
     meId: user.id,
     nameOf: whoIs,
     join: (id) => { setHome(false); setVoiceView(id); setView("voice"); showContent(); void voice.join(id); },
-    // Convite: vai para o chat de texto aberto (se for do mesmo servidor da chamada) ou para o primeiro canal de texto dele.
-    invite: (voiceId) => {
-      const sid = known[voiceId]?.serverId;
-      if (!sid) return;
-      const texts = allKnown.filter((c) => c.kind === "text" && c.serverId === sid);
-      const to = texts.find((c) => c.id === activeId) ?? texts[0];
-      if (!to) return;
-      const o: Outgoing = { nonce: crypto.randomUUID(), channelId: to.id, content: discoInviteLink(voiceId), attachments: [], status: "sending", at: Date.now() };
-      setOutbox((l) => [...l, o]);
-      transmit(o);
-    },
+    // Convite: a pessoa escolhe entre copiar o link e mandar o cartão para um chat (servidor ou DM).
+    invite: (voiceId) => setDiscoInvite(voiceId),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [named.voiceStates, user.id, whoIs, known, activeId, transmit, voice, showContent]);
+  }), [named.voiceStates, user.id, whoIs, voice, showContent]);
 
   return (
     <PresenceContext.Provider value={presence}>
@@ -1060,6 +1073,12 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       {settings && <SettingsModal user={user} voice={voice} prefs={snap.prefs} tab={settings} onTab={setSettings} onChanged={setUser} onLogout={() => { void voice.leave(); onLogout(); }} onClose={() => setSettings(null)} />}
       {editingChannel && <EditChannelModal channel={editingChannel} onClose={() => setEditingChannel(undefined)} />}
       {creating && server && <CreateChannelModal serverId={server.id} initialKind={creating} onClose={() => setCreating(undefined)} />}
+      {discoInvite && <DiscoInviteModal channelId={discoInvite} targets={inviteTargets} onSend={sendDiscoInvite} onClose={() => setDiscoInvite(null)} />}
+      {discoLinkId && known[discoLinkId] && (
+        <Modal title="Convite para a discoteca" onClose={() => setDiscoLinkId(null)}>
+          <DiscoInviteCard channelId={discoLinkId} onJoin={() => setDiscoLinkId(null)} />
+        </Modal>
+      )}
       {inviting && server && <InviteModal serverId={server.id} serverName={server.name} onClose={() => setInviting(false)} />}
       {creatingServer && (
         <CreateServerModal

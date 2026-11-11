@@ -85,10 +85,11 @@ export class Api {
   friends = () => this.request("/friends", z.array(friendSchema));
   dms = () => this.request("/dms", z.array(dmSchema));
   updateProfile = (body: z.input<typeof updateProfileBody>) => this.request("/me", userSchema, updateProfileBody.parse(body), "PATCH");
-  uploadImage = (kind: "avatar" | "banner", uri: string) => {
+  uploadImage = async (kind: "avatar" | "banner", uri: string) => {
+    const { File } = await import("expo-file-system");
     const form = new FormData();
-    // React Native's native multipart transport reads a local URI, without loading base64 into JS.
-    form.append("file", { uri, name: `${kind}.jpg`, type: "image/jpeg" } as unknown as Blob);
+    // Expo's fetch accepts File bytes; RN's proprietary { uri } part is unsupported.
+    form.append("file", new File(uri));
     return this.request(`/me/${kind}`, userSchema, form, "PUT");
   };
   removeImage = (kind: "avatar" | "banner") => this.request(`/me/${kind}`, userSchema, undefined, "DELETE");

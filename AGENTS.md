@@ -30,10 +30,7 @@ pnpm desktop       # Electron, em outro terminal, com o dev rodando
 Sem `DATABASE_URL` o servidor usa banco em memória (some ao reiniciar). Primeiro cadastro: `BOOTSTRAP_INVITE` do `.env`. Depois de trocar de branch, recompile `protocol` e `db`. Checagens: `pnpm typecheck` e `pnpm test`.
 
 ## Produção
-<<<<<<< HEAD
 - Instância do mantenedor: VPS Hostinger KVM 2 (Ubuntu 24.04), com o app e o LiveKit em subdomínios próprios (endereços na memória do projeto). Quem hospeda por conta própria usa `infra/selfhost/`. Acesso SSH só com o usuário `kyo` por chave; agentes na nuvem não alcançam a VPS.
-=======
->>>>>>> origin/main
 - Deploy: workflow "Deploy (VPS)" no GitHub Actions, **só manual** (`workflow_dispatch`; sha vazio = main, sha antigo = rollback), usa `infra/deploy.sh` com backup e rollback automático. Só rode com ok do thiago.
 - Compose e arquivos da VPS (`~/turtle/`) espelham `infra/` do repositório (serviço `api`, veja `docs/planos/infra-vps.md`).
 - Backup do Postgres + uploads na VPS todo dia 07:00 UTC (`~/turtle/backups/`, 14 dias). Uploads ficam no volume Docker `uploads`.

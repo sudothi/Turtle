@@ -1,5 +1,6 @@
 package xyz.ogturtle.turtle
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,7 +24,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        vm.openLink(intent?.dataString)
         setContent { TurtleTheme { Root(vm) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        vm.openLink(intent.dataString)
     }
 
     override fun onStart() {

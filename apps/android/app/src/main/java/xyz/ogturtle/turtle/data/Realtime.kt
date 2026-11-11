@@ -81,7 +81,7 @@ fun parseServerEvent(text: String): ServerEvent? {
 
 /** Conexão WebSocket com o servidor; reconecta sozinha (com espera crescente) se cair. */
 class Realtime(
-    private val baseUrl: String,
+    private val serverUrl: () -> String,
     private val token: () -> String?,
     private val scope: CoroutineScope,
     private val onEvent: (ServerEvent) -> Unit,
@@ -100,7 +100,7 @@ class Realtime(
                 val t = token() ?: return@launch
                 val closed = kotlinx.coroutines.CompletableDeferred<Boolean>()
                 // O token vai na primeira mensagem, não na URL (não aparece em logs de proxy).
-                val url = baseUrl.trimEnd('/').replaceFirst("http", "ws") + "/ws"
+                val url = serverUrl().trimEnd('/').replaceFirst("http", "ws") + "/ws"
                 socket = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         wait = 1_000L

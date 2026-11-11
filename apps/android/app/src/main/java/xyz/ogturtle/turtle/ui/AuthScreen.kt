@@ -44,6 +44,13 @@ import xyz.ogturtle.turtle.ui.theme.Ink
 fun AuthScreen(state: UiState, vm: AppViewModel) {
     var creating by rememberSaveable { mutableStateOf(false) }
     var invite by rememberSaveable { mutableStateOf("") }
+    var editingServer by rememberSaveable { mutableStateOf(false) }
+    var serverText by rememberSaveable { mutableStateOf("") }
+    var serverError by rememberSaveable { mutableStateOf(false) }
+    // Convite vindo de um link: abre o cadastro já preenchido.
+    LaunchedEffect(state.inviteDraft) {
+        state.inviteDraft?.let { invite = it; creating = true }
+    }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
 
@@ -97,6 +104,20 @@ fun AuthScreen(state: UiState, vm: AppViewModel) {
         }
         TextButton(onClick = { creating = !creating; vm.clearError() }) {
             Text(if (creating) "Já tenho conta" else "Tenho um convite", color = Ink.PaperDim)
+        }
+        // Servidor próprio: mostra onde o app está ligado e permite trocar.
+        if (editingServer) {
+            Field("Endereço do servidor", serverText, { serverText = it; serverError = false })
+            if (serverError) Text("Endereço inválido. Use https://app.seudominio.com", color = MaterialTheme.colorScheme.error)
+            Button(
+                onClick = { if (vm.setServer(serverText)) editingServer = false else serverError = true },
+                enabled = serverText.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Ink.Ink3, contentColor = Ink.Paper),
+            ) { Text("Usar este servidor") }
+        } else {
+            TextButton(onClick = { serverText = state.serverUrl; editingServer = true }) {
+                Text("Servidor: ${state.serverUrl.removePrefix("https://")}", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

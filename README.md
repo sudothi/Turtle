@@ -11,7 +11,7 @@ Chat privado no estilo Discord, em preto e branco de xilogravura (linocut), feit
 ![TypeScript](https://img.shields.io/badge/TypeScript-f5f3ee?style=flat-square&labelColor=0b0b0b&logo=typescript&logoColor=white)
 ![LiveKit](https://img.shields.io/badge/voz-LiveKit-f5f3ee?style=flat-square&labelColor=0b0b0b)
 ![Docker Compose](https://img.shields.io/badge/deploy-Docker_Compose-f5f3ee?style=flat-square&labelColor=0b0b0b&logo=docker&logoColor=white)
-![Web · Windows · Android · iPhone](https://img.shields.io/badge/web_%C2%B7_Windows_%C2%B7_Android_%C2%B7_iPhone-f5f3ee?style=flat-square&labelColor=0b0b0b)
+![Web · Windows · Android · iPhone](https://img.shields.io/badge/Web_%C2%B7_Windows_%C2%B7_Android_%C2%B7_iPhone-f5f3ee?style=flat-square&labelColor=0b0b0b)
 
 </div>
 

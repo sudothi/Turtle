@@ -36,9 +36,15 @@
 	import app
 }
 
-# Domínio antigo: apps desktop e APK já instalados ainda apontam para ele (carregam a interface e procuram
-# atualização aqui). Remova este bloco quando todo mundo estiver na versão nova.
+# Domínio antigo: apps desktop e APK já instalados ainda apontam para ele. Quem abre no navegador (navegação de
+# página, exceto /desktop/) vai para o domínio novo; a API, o WebSocket e /desktop/ continuam respondendo aqui
+# para o APK e para o auto-update do desktop antigo. Remova este bloco quando todo mundo estiver na versão nova.
 {$DOMAIN_APP_LEGACY} {
+	@pagina {
+		header Sec-Fetch-Mode navigate
+		not path /desktop/*
+	}
+	redir @pagina https://{$DOMAIN_APP}{uri} 308
 	import app
 }
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRoute, useIsFocused, type RouteProp } from "@react-navigation/native";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { shownName, splitMentions, type Message, type Person } from "@turtle/protocol";
 import { useConversation, usePresence, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation, type RootRoutes } from "../navigation/types";
@@ -11,6 +10,7 @@ import { Notice } from "../ui/components";
 import { styles as text, colors, fonts } from "../ui/theme";
 import { Icon } from "../ui/Icon";
 import Composer from "../chat/Composer";
+import KeyboardViewport from "../ui/KeyboardViewport";
 import type { PendingSend } from "../chat/conversation";
 
 const timestamp = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -24,7 +24,6 @@ export default function ConversationScreen() {
   const { params } = useRoute<RouteProp<RootRoutes, "Conversation">>();
   const navigation = useAppNavigation();
   const joinCall = useJoinCall();
-  const headerHeight = useHeaderHeight();
   const { workspace, user } = useWorkspace();
   const presence = usePresence();
   const state = useConversation(params.channelId);
@@ -50,7 +49,7 @@ export default function ConversationScreen() {
     ...state.outbox.map(value => ({ kind: "pending" as const, id: value.id, value })),
   ].reverse(), [state.messages, state.outbox]);
   const jumpLatest = () => { setAtLatest(true); conversation.setAtLatest(true); list.current?.scrollToOffset({ offset: 0, animated: true }); };
-  return <Page><KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+  return <Page><KeyboardViewport>
     {!params.serverId && <ToolbarButton label="Entrar na chamada" onPress={() => joinCall(params.channelId, params.title)} />}
     {!presence.connected && <Text accessibilityLiveRegion="polite" style={s.connection}>Sem conexão. Você pode continuar escrevendo.</Text>}
     <Notice>{state.storageError || state.error}</Notice>
@@ -98,7 +97,7 @@ export default function ConversationScreen() {
     {!!people.error && <View style={{ paddingHorizontal: 16 }}><Text style={text.caption}>Não foi possível carregar as pessoas para menções.</Text><ToolbarButton label="Atualizar pessoas" onPress={people.refresh} /></View>}
     <CallDock onOpen={() => navigation.navigate("Call")} />
     <Composer key={`composer:${params.channelId}`} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />
-  </KeyboardAvoidingView></Page>;
+  </KeyboardViewport></Page>;
 }
 const s = StyleSheet.create({
   messages: { flexGrow: 1, paddingBottom: 16, paddingTop: 16 },

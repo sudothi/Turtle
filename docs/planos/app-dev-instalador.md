@@ -1,6 +1,13 @@
 # Plano: "Download DEV" (instalador para quem hospeda o próprio Turtle)
 
-Status: proposta para decisão. Nada disso foi implementado.
+Status: decidido em 2026-11-11 pelo thiago (CLI, Fase 1 primeiro). Passo 1 em andamento (Android).
+
+## Decisões de 2026-11-11
+
+- Assistente será um **CLI** (não Electron).
+- "Assinado com o domínio" = instalador **já configurado** para o servidor da pessoa, não certificado de código (continua sem assinatura). Proposta: o servidor entrega o .exe genérico com a configuração anexada; plano B é build no Actions do fork.
+- O link de convite configura tudo: `https://app.dominio/convite/<código>` com botão "Abrir no Turtle" (`turtle://convite?server=<url>&code=<código>`); o app guarda o servidor e abre o cadastro preenchido.
+- Ordem: (1) servidor em runtime + `turtle://` nos apps (Android, depois desktop), (2) `/download` servindo o instalador configurado, (3) CLI.
 
 ## Opinião honesta
 

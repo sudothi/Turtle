@@ -37,6 +37,12 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DrawerValue
@@ -344,7 +350,7 @@ private fun Sidebar(
             HorizontalDivider(color = Ink.Line)
             Box(Modifier.weight(1f)) {
                 if (server == null) DmSidebar(state, vm, unread, onFriends, onOpen)
-                else ChannelSidebar(server, state.channels[server.id].orEmpty(), unread, state.voiceStates, vm, onOpen)
+                else ChannelSidebar(server, state.channels[server.id].orEmpty(), unread, state.voiceStates, vm, onOpen, server.id in state.mutedServers, state.mutedChannels)
             }
             UserPanel(state, vm)
         }
@@ -391,6 +397,8 @@ private fun ChannelSidebar(
     voiceStates: List<VoiceState>,
     vm: AppViewModel,
     onOpen: (String) -> Unit,
+    serverMuted: Boolean,
+    mutedChannels: Set<String>,
 ) {
     val text = channels.filter { !it.isVoice }
     val voice = channels.filter { it.isVoice }
@@ -404,6 +412,13 @@ private fun ChannelSidebar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SectionLabel("Canais de texto", Modifier.weight(1f))
+                IconButton(onClick = { vm.toggleServerMuted(server.id) }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (serverMuted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                        contentDescription = if (serverMuted) "Reativar som do servidor" else "Silenciar servidor",
+                        tint = if (serverMuted) Ink.Paper else Ink.Muted, modifier = Modifier.size(18.dp),
+                    )
+                }
                 if (canManage) {
                     IconButton(onClick = { showCreateChannel = true }, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Filled.Add, contentDescription = "Criar canal", tint = Ink.Muted, modifier = Modifier.size(18.dp))
@@ -411,7 +426,20 @@ private fun ChannelSidebar(
                 }
             }
         }
-        items(text, key = { it.id }) { c -> ChannelRow(c.name, Icons.Filled.Tag, unread[c.id]?.count ?: 0) { onOpen(c.id) } }
+        items(text, key = { it.id }) { c ->
+            // Segurar o canal abre o menu de silenciar (como o clique direito no desktop).
+            val muted = c.id in mutedChannels
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                ChannelRow(c.name, Icons.Filled.Tag, unread[c.id]?.count ?: 0, muted = muted || serverMuted, onLongClick = { menu = true }) { onOpen(c.id) }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (muted) "Reativar som do canal" else "Silenciar canal") },
+                        onClick = { vm.toggleChannelMuted(c.id); menu = false },
+                    )
+                }
+            }
+        }
         item { SectionLabel("Canais de voz", Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp)) }
         items(voice, key = { it.id }) { c ->
             ChannelRow(c.name, Icons.AutoMirrored.Filled.VolumeUp, 0) { onOpen(c.id) }
@@ -441,15 +469,18 @@ private fun ChannelSidebar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChannelRow(name: String, icon: ImageVector, unread: Int, onClick: () -> Unit) {
+private fun ChannelRow(name: String, icon: ImageVector, unread: Int, muted: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 10.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = Ink.Muted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
-        Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(name, style = MaterialTheme.typography.bodyLarge, color = if (muted) Ink.Muted else Color.Unspecified, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (muted) Icon(Icons.Filled.NotificationsOff, contentDescription = "Silenciado", tint = Ink.Faint, modifier = Modifier.padding(horizontal = 6.dp).size(14.dp))
         Badge(unread)
     }
 }
@@ -457,7 +488,7 @@ private fun ChannelRow(name: String, icon: ImageVector, unread: Int, onClick: ()
 @Composable
 private fun DmSidebar(state: UiState, vm: AppViewModel, unread: Map<String, Unread>, onFriends: () -> Unit, onOpen: (String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        item { ChannelRow("Amigos", Icons.Filled.Group, state.friends.count { it.status == "incoming" }, onFriends) }
+        item { ChannelRow("Amigos", Icons.Filled.Group, state.friends.count { it.status == "incoming" }, onClick = onFriends) }
         item { SectionLabel("Conversas", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)) }
         items(state.dms, key = { it.channelId }) { d ->
             Row(
@@ -487,6 +518,7 @@ private fun UserPanel(state: UiState, vm: AppViewModel) {
     val me = state.user ?: return
     var statusMenuOpen by remember { mutableStateOf(false) }
     var showEditProfile by remember { mutableStateOf(false) }
+    var showSounds by remember { mutableStateOf(false) }
 
     Column(Modifier.background(Ink.Ink0).navigationBarsPadding()) {
         HorizontalDivider(color = Ink.Line)
@@ -514,6 +546,9 @@ private fun UserPanel(state: UiState, vm: AppViewModel) {
                     onPick = { vm.setStatus(it) },
                 )
             }
+            IconButton(onClick = { showSounds = true }) {
+                Icon(Icons.Filled.Notifications, contentDescription = "Sons", tint = Ink.Muted)
+            }
             IconButton(onClick = { showEditProfile = true }) {
                 Icon(Icons.Filled.Edit, contentDescription = "Editar perfil", tint = Ink.Muted)
             }
@@ -522,6 +557,8 @@ private fun UserPanel(state: UiState, vm: AppViewModel) {
             }
         }
     }
+
+    if (showSounds) SoundSettingsDialog(state.sounds, vm::setSounds) { showSounds = false }
 
     if (showEditProfile) {
         EditProfileDialog(

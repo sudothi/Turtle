@@ -25,6 +25,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { TurtleTheme { Root(vm) } }
     }
+
+    override fun onStart() {
+        super.onStart()
+        AppViewModel.foreground = true
+    }
+
+    override fun onStop() {
+        AppViewModel.foreground = false
+        super.onStop()
+    }
 }
 
 @Composable

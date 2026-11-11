@@ -135,6 +135,13 @@ class Api(
 
     suspend fun createServer(name: String): Server = TurtleJson.decodeFromString(Server.serializer(), call("POST", "/servers", obj("name" to name)))
 
+    /** Servidor em que o convite de conta já coloca a pessoa (null = nenhum ou convite inválido). */
+    suspend fun accountInviteServer(code: String): String? {
+        val encoded = URLEncoder.encode(code, "UTF-8").replace("+", "%20")
+        val body = runCatching { call("GET", "/account-invites/$encoded") }.getOrNull() ?: return null
+        return runCatching { TurtleJson.parseToJsonElement(body).jsonObject["serverName"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+    }
+
     suspend fun joinInvite(code: String): Server {
         val encoded = URLEncoder.encode(code, "UTF-8").replace("+", "%20")
         return TurtleJson.decodeFromString(Server.serializer(), call("POST", "/invites/$encoded/join", "{}"))

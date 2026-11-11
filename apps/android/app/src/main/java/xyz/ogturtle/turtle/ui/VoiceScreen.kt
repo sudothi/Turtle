@@ -8,6 +8,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -164,12 +169,29 @@ private fun InCall(state: UiState, vm: AppViewModel, call: xyz.ogturtle.turtle.d
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PersonTile(state: UiState, vm: AppViewModel, p: ParticipantUi) {
     val who = whoIs(state, vm, p.identity)
     val shape = RoundedCornerShape(12.dp)
+    // Segurar o quadro de outra pessoa abre o volume dela (até 200%, como no web).
+    var volumeOpen by remember { mutableStateOf(false) }
+    if (volumeOpen) {
+        var v by remember { mutableStateOf(p.volume) }
+        TurtleDialog(title = "Volume de ${who.name}", confirmText = "Fechar", onDismiss = { volumeOpen = false }, onConfirm = { volumeOpen = false }) {
+            Column {
+                Text("${(v * 100).roundToInt()}%", color = Ink.Paper)
+                Slider(
+                    value = v, valueRange = 0f..2f,
+                    onValueChange = { v = it; vm.voice.setVolume(p.identity, it) },
+                    colors = SliderDefaults.colors(thumbColor = Ink.Paper, activeTrackColor = Ink.Paper, inactiveTrackColor = Ink.Ink2),
+                )
+            }
+        }
+    }
     Box(
         Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(shape).background(Ink.Ink1)
+            .combinedClickable(enabled = !p.isLocal, onClick = {}, onLongClick = { volumeOpen = true })
             .border(if (p.speaking) 3.dp else 1.dp, if (p.speaking) Ink.Paper else Ink.Line, shape),
         contentAlignment = Alignment.Center,
     ) {

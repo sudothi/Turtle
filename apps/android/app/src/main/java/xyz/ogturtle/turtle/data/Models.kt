@@ -126,6 +126,24 @@ data class Message(
     val createdAt: String,
     val editedAt: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    val pinned: Boolean = false,
+    /** Mensagem a que esta responde. Com `replyToId` e sem `replyTo`, a original foi apagada. */
+    val replyToId: String? = null,
+    val replyTo: ReplyPreview? = null,
+) {
+    val author get() = displayName?.takeIf { it.isNotBlank() } ?: username
+}
+
+/** Prévia da mensagem respondida (ver replyPreviewSchema em packages/protocol). */
+@Serializable
+data class ReplyPreview(
+    val id: String,
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatar: String? = null,
+    val content: String = "",
+    val attachments: Int = 0,
 ) {
     val author get() = displayName?.takeIf { it.isNotBlank() } ?: username
 }

@@ -7,6 +7,7 @@ import io.livekit.android.events.RoomEvent
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
+import io.livekit.android.room.track.RemoteAudioTrack
 import io.livekit.android.room.track.RemoteTrackPublication
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
@@ -31,6 +32,8 @@ data class ParticipantUi(
     val screenAvailable: Boolean,
     /** Vídeo da tela, só depois de tocar em "Assistir". */
     val screen: VideoTrack?,
+    /** Volume que eu escolhi para esta pessoa (1 = 100%, até 2 = 200%). */
+    val volume: Float = 1f,
 )
 
 data class CallUi(
@@ -46,7 +49,21 @@ data class CallUi(
  * Chamada de voz/vídeo pelo LiveKit. Entra sem assinar nada automaticamente: áudio e câmera são
  * assinados na hora; a tela compartilhada só quando a pessoa toca em "Assistir" (como no desktop).
  */
+private val NO_RETRY = setOf("CLIENT_INITIATED", "DUPLICATE_IDENTITY", "PARTICIPANT_REMOVED", "ROOM_DELETED", "ROOM_CLOSED")
+
 class VoiceController(private val app: Context, private val scope: CoroutineScope) {
+    /** Volume por pessoa (id do usuário), salvo no aparelho como no web. */
+    private val volumePrefs = app.getSharedPreferences("turtle-volume", Context.MODE_PRIVATE)
+
+    fun volumeOf(identity: String): Float = volumePrefs.getFloat(identity, 1f)
+
+    /** Muda o volume de uma pessoa (0 a 2). O ganho do WebRTC aceita valores acima de 1. */
+    fun setVolume(identity: String, volume: Float) {
+        val v = volume.coerceIn(0f, 2f)
+        volumePrefs.edit().apply { if (v == 1f) remove(identity) else putFloat(identity, v) }.apply()
+        refresh()
+    }
+
     private val _call = MutableStateFlow<CallUi?>(null)
     val call: StateFlow<CallUi?> = _call.asStateFlow()
 
@@ -58,6 +75,9 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     /** Até quando ignorar entradas e saídas dos outros (ao reconectar o LiveKit reanuncia todo mundo). */
     private var presenceQuietUntil = 0L
     private var lastPresenceSound = 0L
+
+    /** A chamada caiu por um motivo de que dá para voltar (rede, servidor reiniciando). Recebe o canal. */
+    var onDropped: ((String) -> Unit)? = null
 
     /** Liga um renderizador de vídeo à sala atual (necessário antes de mostrar vídeo). */
     fun initRenderer(renderer: TextureViewRenderer) {
@@ -101,7 +121,13 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     private fun onEvent(r: Room, e: RoomEvent) {
         if (room !== r) return
         when (e) {
-            is RoomEvent.Disconnected -> leave()
+            is RoomEvent.Disconnected -> {
+                val channelId = _call.value?.channelId
+                // Igual ao NO_RETRY do web (apps/client/src/voice/client.ts): sair, ser removido ou entrar em outro lugar não volta.
+                val retry = joined && channelId != null && e.reason?.name !in NO_RETRY
+                leave()
+                if (retry) onDropped?.invoke(channelId!!)
+            }
             is RoomEvent.ParticipantConnected -> { subscribeDefaults(e.participant); presenceSound(r, CallSound.UserJoin); refresh() }
             is RoomEvent.ParticipantDisconnected -> { presenceSound(r, CallSound.UserLeave); refresh() }
             is RoomEvent.Reconnected -> { presenceQuietUntil = System.currentTimeMillis() + 2000; refresh() }
@@ -147,12 +173,18 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
                 camera = if (cam != null && !cam.muted) cam.track as? VideoTrack else null,
                 screenAvailable = !local && scr != null,
                 screen = if (local) null else scr?.track as? VideoTrack,
+                volume = if (local) 1f else volumeOf(p.identity?.value.orEmpty()),
             )
         }
         val status = when (r.state) {
             Room.State.CONNECTED -> CallStatus.Connected
             Room.State.RECONNECTING -> CallStatus.Reconnecting
             else -> CallStatus.Connecting
+        }
+        // Aplica o volume de cada pessoa (também vale para áudio assinado depois de entrar).
+        for (p in r.remoteParticipants.values) {
+            val track = p.getTrackPublication(Track.Source.MICROPHONE)?.track as? RemoteAudioTrack ?: continue
+            runCatching { track.setVolume(volumeOf(p.identity?.value.orEmpty()).toDouble()) }
         }
         _call.value = cur.copy(
             status = status,
@@ -170,6 +202,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
             return
         }
         _call.value = cur.copy(muted = muted)
+        if (muted != cur.muted) CallSounds.play(if (muted) CallSound.Mute else CallSound.Unmute)
         scope.launch { runCatching { r.localParticipant.setMicrophoneEnabled(!muted) }; refresh() }
     }
 
@@ -179,6 +212,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
         if (deafened) mutedBeforeDeafen = cur.muted
         val muted = if (deafened) true else mutedBeforeDeafen
         _call.value = cur.copy(deafened = deafened, muted = muted)
+        if (deafened != cur.deafened) CallSounds.play(if (deafened) CallSound.Deafen else CallSound.Undeafen)
         for (p in r.remoteParticipants.values) {
             (p.getTrackPublication(Track.Source.MICROPHONE) as? RemoteTrackPublication)?.setSubscribed(!deafened)
         }

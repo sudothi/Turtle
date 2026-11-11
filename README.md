@@ -70,6 +70,29 @@ git clone https://github.com/sudothi/turtle.git && cd turtle/infra/selfhost
 
 O script gera todas as senhas, cria o `.env` e a configuração do LiveKit e sobe tudo. Depois abra `https://app.seudominio.com/convite/<código que o script mostrou>` para criar a conta admin. Guia completo, com firewall, backup e atualização: [docs/hospedar-em-vps.md](docs/hospedar-em-vps.md).
 
+## ✦ Instalar o app no celular
+
+O site do seu servidor já funciona no navegador do celular. Se quiser o app nativo, ele precisa apontar para o **seu** servidor (`https://app.seudominio.com`); os instaladores prontos do mantenedor apontam para a instância dele.
+
+### Android (nativo, Kotlin)
+
+1. **Baixar o APK pronto para testar:** no GitHub, abra **Actions > Android nativo (APK)**, escolha a execução mais recente e baixe o artefato `turtle-android-nativo` (zip com `turtle-nativo.apk`). No celular, abra o APK e permita a instalação de fontes desconhecidas.
+2. **Compilar apontando para o seu servidor** (precisa de JDK 17+ e Android SDK, ou Android Studio):
+   ```bash
+   cd apps/android
+   ./gradlew assembleRelease -PserverUrl=https://app.seudominio.com
+   ```
+   O APK sai em `app/build/outputs/apk/release/`. Para atualizar um app já instalado, assine sempre com a mesma chave (veja [apps/android/README.md](apps/android/README.md)).
+
+### iPhone (React Native, em evolução)
+
+O app de iPhone é mantido por outra pessoa e ainda está em fase inicial: texto, voz, câmera e recepção de telas funcionam, mas o aceite em aparelho real continua em andamento e não há publicação na App Store. Hoje há dois caminhos, ambos com **conta Apple gratuita** (o app expira em 7 dias e precisa ser renovado):
+
+- **Pelo Xcode** (precisa de Mac com Xcode e CocoaPods, e iPhone com Modo Desenvolvedor): `pnpm install`, `pnpm --filter @turtle/protocol build` e `pnpm ios:device`.
+- **Pela AltStore Classic** (instalador `.ipa` sem Xcode no dia a dia): `pnpm ios:ipa` gera o IPA, que você importa pelo AltServer e pela AltStore no iPhone.
+
+Na tela de login, **Configurar servidor** deixa trocar para `https://app.seudominio.com`. Passo a passo completo e limites conhecidos: [apps/ios/README.md](apps/ios/README.md).
+
 ## ✦ Rodar para desenvolver
 
 ```bash

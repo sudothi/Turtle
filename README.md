@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/img/banner.png" alt="Turtle: voz, tela e câmera entre amigos" width="100%">
+</p>
+
 <div align="center">
 
 <picture>

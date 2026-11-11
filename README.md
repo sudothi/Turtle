@@ -36,6 +36,18 @@ Pensado para grupos pequenos: cerca de **30 contas** e até **6 pessoas por cham
   <img src="docs/img/chamada.png" alt="Chamada de voz com tela, câmera e música" width="860">
 </p>
 
+## ✦ Mais capturas
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/discoteca.png" alt="Discoteca: busca e fila de músicas na chamada"><br><sub><b>Discoteca</b>: bot de música na chamada, com busca e fila.</sub></td>
+    <td width="50%"><img src="docs/img/convite-musica.png" alt="Convite para ouvir música junto, no chat"><br><sub><b>Convite pro chat</b>: chame alguém para a discoteca com um cartão de música.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/img/celular-chat.png" alt="Chat no celular" height="420">&nbsp;&nbsp;<img src="docs/img/celular-chamada.png" alt="Chamada com tela e câmera no celular" height="420"><br><sub><b>No celular</b>: o mesmo app, responsivo, no navegador ou no app Android.</sub></td>
+  </tr>
+</table>
+
 ## ✦ O que tem
 
 | | |

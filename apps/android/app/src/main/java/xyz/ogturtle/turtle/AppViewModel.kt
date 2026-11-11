@@ -141,7 +141,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(connected = true) }
             pushVoice() // o servidor esquece a chamada se a conexão cai; avisa de novo
             // Reenvia o que não foi confirmado (o servidor ignora nonce repetido).
-            synchronized(pending) { pending.toMap() }.forEach { (nonce, p) -> realtime.send(p.channelId, p.content, p.attachments, p.replyTo, nonce) }
+            resendPending()
             // Reabriu a conexão (ou abriu agora): pode ter perdido mensagens enquanto estava fora.
             refresh()
             _state.value.openChannelId?.let { id -> reloadMessages(id) }
@@ -342,6 +342,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(error = e.message) }
             }
         }
+    }
+
+    private fun resendPending() {
+        synchronized(pending) { pending.toMap() }.forEach { (nonce, p) -> realtime.send(p.channelId, p.content, p.attachments, p.replyTo, nonce) }
     }
 
     /** Guarda o envio até o servidor confirmar; sem conexão, sai quando o socket voltar. */

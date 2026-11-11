@@ -37,7 +37,7 @@ O build de desenvolvimento usa Metro no Mac. Para reiniciar Metro, rode `pnpm io
 
 Ao atualizar para 0.4, execute `pnpm ios:device` novamente: armazenamento, criptografia e seleção/recorte de imagens incluem módulos nativos. Só reiniciar o Metro não instala esses módulos no app antigo. Ao usar `pnpm ios`, o simulador selecionado deve já conter o build de desenvolvimento.
 
-O endereço padrão é `https://app.ogturtle.xyz`. Na tela de login, **Configurar servidor** permite outra origem HTTPS. Para definir outro padrão no build, copie `.env.example` para `.env.local` nesta pasta e altere `EXPO_PUBLIC_API_ORIGIN`. As variáveis `EXPO_PUBLIC_*` entram no app; use apenas endereços públicos. O LiveKit vem da resposta autenticada do backend. Não há credenciais Apple nem chaves secretas LiveKit no app.
+O endereço padrão é o servidor padrão definido no build (`EXPO_PUBLIC_API_ORIGIN`). Na tela de login, **Configurar servidor** permite outra origem HTTPS. Para definir outro padrão no build, copie `.env.example` para `.env.local` nesta pasta e altere `EXPO_PUBLIC_API_ORIGIN`. As variáveis `EXPO_PUBLIC_*` entram no app; use apenas endereços públicos. O LiveKit vem da resposta autenticada do backend. Não há credenciais Apple nem chaves secretas LiveKit no app.
 
 ## Testar pela AltStore Classic
 

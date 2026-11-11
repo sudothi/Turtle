@@ -7,6 +7,7 @@ Versões editáveis (com comentários) ficam no Claude Docs; aqui fica uma cópi
 - [Marco 3: tela e câmera](marco-3-tela-camera.md) ([doc](https://claude.ai/artifact/VfqwuCuuW3xZfCP2YgqbSr))
 - [Servidores](servidores.md) ([doc](https://claude.ai/artifact/Y2e12ZKPRi8UXzt26YrWkf))
 - [Instalador do desktop (Windows)](instalador-desktop.md)
+- [Hospedar em uma VPS](../hospedar-em-vps.md) e [instalar com ajuda de uma IA](../instalar-com-ia.md)
 - [iOS: prioridades, distribuição gratuita e aceite físico](ios.md)
 
 Status em 2026-11-03: marcos 0, 1 e 2 (voz) e o redesign linocut estão na main. Tela/câmera e servidores estão só planejados.

@@ -65,7 +65,7 @@ No primeiro boot (ou via workflow `Deploy (VPS)` depois de configurar a chave SS
 docker build -t turtle-app:latest ~/turtle/src
 cd ~/turtle && docker compose up -d
 docker compose ps
-curl -fsSI https://app.ogturtle.xyz/health
+curl -fsSI https://app.seudominio.com/health
 ```
 
 ### 5. Cron de backup diário (07:00 UTC / 04:00 BRT)
@@ -93,5 +93,5 @@ Fluxo: **Actions > Deploy (VPS) > Run workflow**. O job confere que o CI do comm
 ## #14 — chaves do LiveKit e TURN TLS (concluído)
 
 - **Chaves do LiveKit**: rotacionadas na VPS e backups antigos `.env.bak*` removidos.
-- **TURN TLS na porta 5349**: ativo (`tls_port: 5349` em `livekit.yaml`), reutilizando em modo somente leitura (`caddy_data:/caddy_data:ro`) o certificado Let's Encrypt de `lk.ogturtle.xyz` emitido pelo Caddy.
+- **TURN TLS na porta 5349**: ativo (`tls_port: 5349` em `livekit.yaml`), reutilizando em modo somente leitura (`caddy_data:/caddy_data:ro`) o certificado Let's Encrypt de `lk.seudominio.com` emitido pelo Caddy.
 - **Backup fora da VPS**: deixado fora do escopo por decisão do dono (mantido o backup diário automático local em `~/turtle/backups/` com retenção de 14 dias).

@@ -1,7 +1,7 @@
 # Turtle para Android (nativo)
 
 App Android **nativo** (Kotlin + Jetpack Compose), sem WebView. Toda a interface, o visual e o comportamento
-estão neste app; o servidor (`https://app.ogturtle.xyz`) é usado só para dados: login, mensagens, voz e arquivos.
+estão neste app; o servidor (`https://app.seudominio.com`, configurável com `-PserverUrl=...`) é usado só para dados: login, mensagens, voz e arquivos.
 O visual segue o do site (preto e branco, estilo linogravura), com a barra lateral como gaveta: arraste da
 borda esquerda para abrir; arraste para o lado, toque fora ou use "voltar" para fechar.
 

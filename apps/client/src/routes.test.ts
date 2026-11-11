@@ -12,7 +12,7 @@ describe("public and app entry routes", () => {
     expect(appSurface("/", false, true)).toBe("auth");
     expect(appSurface("/", true, true)).toBe("workspace");
   });
-  it.each(["/app", "/entrar", "/entrar/", "/login", "/convite/test-code"])("keeps %s behind authentication", route => {
+  it.each(["/app", "/entrar", "/entrar/", "/login", "/convite/test-code", "/discoteca/abc"])("keeps %s behind authentication", route => {
     expect(appSurface(route, false, false)).toBe("auth");
     expect(appSurface(route, true, false)).toBe("workspace");
   });

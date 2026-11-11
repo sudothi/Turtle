@@ -17,6 +17,11 @@ asarUnpack:
   - dist/native/**
 electronLanguages: [pt-BR, en-US]
 
+# Registra turtle:// (links de convite) no Windows.
+protocols:
+  name: Turtle
+  schemes: [turtle]
+
 win:
   target:
     - target: nsis

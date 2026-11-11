@@ -1,12 +1,19 @@
 import { app, Notification } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { Splash } from "./splash.js";
+import { DEFAULT_SERVER } from "./server-config.js";
 
 // O endereço das atualizações vem do electron-builder.yml (publish: generic). O instalador grava
 // esse endereço no app-update.yml; a cada versão nova basta subir o Setup, o .blockmap e o latest.yml.
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.logger = null;
+
+/** Servidor próprio: as atualizações vêm dele (/desktop/), que o instalador de quem hospeda publica. */
+export function setUpdateServer(origin: string) {
+  if (!app.isPackaged || origin === DEFAULT_SERVER) return;
+  autoUpdater.setFeedURL({ provider: "generic", url: `${origin}/desktop/`, channel: "latest" });
+}
 
 const enabled = () => app.isPackaged && !process.env.TURTLE_NO_UPDATE;
 const CHECK_TIMEOUT_MS = 6000;

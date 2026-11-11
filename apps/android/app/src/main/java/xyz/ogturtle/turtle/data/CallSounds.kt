@@ -10,19 +10,43 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.random.Random
 
-enum class CallSound { Join, Leave, UserJoin, UserLeave }
+enum class CallSound { Join, Leave, UserJoin, UserLeave, Mute, Unmute, Deafen, Undeafen, Message, DmMessage }
+
+private val PRESENCE = setOf(CallSound.Join, CallSound.Leave, CallSound.UserJoin, CallSound.UserLeave)
+private val MESSAGES = setOf(CallSound.Message, CallSound.DmMessage)
+private const val MESSAGE_COOLDOWN_MS = 800L
 
 /**
- * Sons de entrar e sair da chamada, sintetizados na hora (sem arquivos), iguais aos do web/desktop
+ * Sons do app (chamada, mudo/ensurdecer e mensagens), sintetizados na hora (sem arquivos), iguais aos do web/desktop
  * (`apps/client/src/sounds.ts`): bolhas (seno com o tom deslizando) e ondas (ruído filtrado).
  */
 object CallSounds {
     private const val RATE = 44_100
-    private const val VOLUME = 0.6f * 0.5f
     private val cache = mutableMapOf<CallSound, ShortArray>()
+    private val lastMessage = mutableMapOf<CallSound, Long>()
 
-    fun play(sound: CallSound) {
-        val pcm = synchronized(cache) { cache.getOrPut(sound) { render(sound) } }
+    /** Preferências atuais (ligado pelo AppViewModel; sem ele vale o padrão). */
+    @Volatile var prefs: () -> SoundPrefs = { SoundPrefs() }
+
+    /** [force]: botão "ouvir" das configurações (ignora o interruptor do tipo e o cooldown). */
+    fun play(sound: CallSound, force: Boolean = false) {
+        val p = prefs()
+        if (!p.enabled || p.volume <= 0f) return
+        val isMessage = sound in MESSAGES
+        if (!force) {
+            if (sound in PRESENCE && !p.callPresence) return
+            if (isMessage) {
+                if (!p.messages || p.messageVolume <= 0f) return
+                val now = System.currentTimeMillis()
+                synchronized(lastMessage) {
+                    if (now - (lastMessage[sound] ?: 0L) < MESSAGE_COOLDOWN_MS) return
+                    lastMessage[sound] = now
+                }
+            }
+        }
+        val gain = p.volume * (if (isMessage) p.messageVolume else 1f) * 0.5f
+        val raw = synchronized(cache) { cache.getOrPut(sound) { render(sound) } }
+        val pcm = ShortArray(raw.size) { i -> (raw[i] * gain * 2).toInt().coerceIn(-32768, 32767).toShort() }
         thread(isDaemon = true, name = "turtle-call-sound") {
             runCatching {
                 val track = AudioTrack.Builder()
@@ -56,6 +80,7 @@ object CallSounds {
 
     private fun render(sound: CallSound): ShortArray {
         val out = FloatArray((RATE * 0.75).toInt())
+        // Mesmas curvas do web (`playSound` em sounds.ts).
         when (sound) {
             CallSound.Join -> {
                 wave(out, 0.0, 260.0, 1500.0, 0.4, 0.35)
@@ -75,8 +100,27 @@ object CallSounds {
                 bubble(out, 0.0, 2000.0, 1200.0, 0.08, 0.35)
                 bubble(out, 0.08, 1500.0, 900.0, 0.09, 0.4)
             }
+            CallSound.Mute -> bubble(out, 0.0, 820.0, 360.0, 0.15, 0.5)
+            CallSound.Unmute -> bubble(out, 0.0, 360.0, 820.0, 0.15, 0.5)
+            CallSound.Deafen -> {
+                bubble(out, 0.0, 760.0, 420.0, 0.11, 0.45)
+                bubble(out, 0.1, 560.0, 260.0, 0.13, 0.45)
+            }
+            CallSound.Undeafen -> {
+                bubble(out, 0.0, 260.0, 560.0, 0.11, 0.45)
+                bubble(out, 0.1, 420.0, 760.0, 0.13, 0.45)
+            }
+            CallSound.Message -> {
+                bubble(out, 0.0, 520.0, 1300.0, 0.11, 0.55)
+                bubble(out, 0.09, 900.0, 1700.0, 0.07, 0.25)
+            }
+            CallSound.DmMessage -> {
+                bubble(out, 0.0, 380.0, 760.0, 0.13, 0.6)
+                bubble(out, 0.12, 560.0, 1100.0, 0.16, 0.5)
+            }
         }
-        return ShortArray(out.size) { i -> ((out[i] * VOLUME).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort() }
+        // Sem volume aqui: o ganho entra em `play`, para o volume das configurações valer na hora.
+        return ShortArray(out.size) { i -> (out[i].coerceIn(-2f, 2f) * Short.MAX_VALUE / 2).toInt().toShort() }
     }
 
     /** Rampa exponencial de `a` até `b` (como `exponentialRampToValueAtTime` do Web Audio). */

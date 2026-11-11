@@ -49,6 +49,8 @@ data class CallUi(
  * Chamada de voz/vídeo pelo LiveKit. Entra sem assinar nada automaticamente: áudio e câmera são
  * assinados na hora; a tela compartilhada só quando a pessoa toca em "Assistir" (como no desktop).
  */
+private val NO_RETRY = setOf("CLIENT_INITIATED", "DUPLICATE_IDENTITY", "PARTICIPANT_REMOVED", "ROOM_DELETED", "ROOM_CLOSED")
+
 class VoiceController(private val app: Context, private val scope: CoroutineScope) {
     /** Volume por pessoa (id do usuário), salvo no aparelho como no web. */
     private val volumePrefs = app.getSharedPreferences("turtle-volume", Context.MODE_PRIVATE)
@@ -73,6 +75,9 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     /** Até quando ignorar entradas e saídas dos outros (ao reconectar o LiveKit reanuncia todo mundo). */
     private var presenceQuietUntil = 0L
     private var lastPresenceSound = 0L
+
+    /** A chamada caiu por um motivo de que dá para voltar (rede, servidor reiniciando). Recebe o canal. */
+    var onDropped: ((String) -> Unit)? = null
 
     /** Liga um renderizador de vídeo à sala atual (necessário antes de mostrar vídeo). */
     fun initRenderer(renderer: TextureViewRenderer) {
@@ -116,7 +121,13 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
     private fun onEvent(r: Room, e: RoomEvent) {
         if (room !== r) return
         when (e) {
-            is RoomEvent.Disconnected -> leave()
+            is RoomEvent.Disconnected -> {
+                val channelId = _call.value?.channelId
+                // Igual ao NO_RETRY do web (apps/client/src/voice/client.ts): sair, ser removido ou entrar em outro lugar não volta.
+                val retry = joined && channelId != null && e.reason?.name !in NO_RETRY
+                leave()
+                if (retry) onDropped?.invoke(channelId!!)
+            }
             is RoomEvent.ParticipantConnected -> { subscribeDefaults(e.participant); presenceSound(r, CallSound.UserJoin); refresh() }
             is RoomEvent.ParticipantDisconnected -> { presenceSound(r, CallSound.UserLeave); refresh() }
             is RoomEvent.Reconnected -> { presenceQuietUntil = System.currentTimeMillis() + 2000; refresh() }
@@ -191,6 +202,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
             return
         }
         _call.value = cur.copy(muted = muted)
+        if (muted != cur.muted) CallSounds.play(if (muted) CallSound.Mute else CallSound.Unmute)
         scope.launch { runCatching { r.localParticipant.setMicrophoneEnabled(!muted) }; refresh() }
     }
 
@@ -200,6 +212,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
         if (deafened) mutedBeforeDeafen = cur.muted
         val muted = if (deafened) true else mutedBeforeDeafen
         _call.value = cur.copy(deafened = deafened, muted = muted)
+        if (deafened != cur.deafened) CallSounds.play(if (deafened) CallSound.Deafen else CallSound.Undeafen)
         for (p in r.remoteParticipants.values) {
             (p.getTrackPublication(Track.Source.MICROPHONE) as? RemoteTrackPublication)?.setSubscribed(!deafened)
         }

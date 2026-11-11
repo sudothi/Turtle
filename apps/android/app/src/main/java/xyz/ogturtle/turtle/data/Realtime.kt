@@ -22,7 +22,8 @@ import java.util.concurrent.TimeUnit
 
 /** Eventos que o servidor manda pelo WebSocket (ver serverEvent em packages/protocol). */
 sealed interface ServerEvent {
-    data class NewMessage(val message: Message) : ServerEvent
+    /** `nonce`: o envio meu que esta mensagem confirma. */
+    data class NewMessage(val message: Message, val nonce: String? = null) : ServerEvent
     data class MessageUpdate(val message: Message) : ServerEvent
     data class MessageDelete(val channelId: String, val id: String) : ServerEvent
     data class Read(val channelId: String) : ServerEvent
@@ -31,7 +32,8 @@ sealed interface ServerEvent {
     /** ids das pessoas conectadas; `busy` = as que estão em Não perturbe. */
     data class Presence(val online: Set<String>, val busy: Set<String>, val activities: Map<String, Activity> = emptyMap()) : ServerEvent
     data class VoiceStates(val states: List<VoiceState>) : ServerEvent
-    data class Error(val text: String) : ServerEvent
+    /** `nonce`: o envio que falhou. */
+    data class Error(val text: String, val nonce: String? = null) : ServerEvent
     /** Alguém está te ligando numa DM ou grupo. `silent` = você está em Não perturbe (só notificar). */
     data class Ring(val channelId: String, val fromId: String, val fromName: String, val silent: Boolean) : ServerEvent
     data class RingEnd(val channelId: String) : ServerEvent
@@ -51,7 +53,7 @@ fun parseServerEvent(text: String): ServerEvent? {
     fun str(k: String) = o[k]?.jsonPrimitive?.contentOrNull
     return runCatching {
         when (str("t")) {
-            "message" -> ServerEvent.NewMessage(TurtleJson.decodeFromJsonElement(Message.serializer(), o["message"]!!))
+            "message" -> ServerEvent.NewMessage(TurtleJson.decodeFromJsonElement(Message.serializer(), o["message"]!!), str("nonce"))
             "messageUpdate" -> ServerEvent.MessageUpdate(TurtleJson.decodeFromJsonElement(Message.serializer(), o["message"]!!))
             "messageDelete" -> ServerEvent.MessageDelete(str("channelId")!!, str("id")!!)
             "read" -> ServerEvent.Read(str("channelId")!!)
@@ -60,7 +62,7 @@ fun parseServerEvent(text: String): ServerEvent? {
             "voiceStates" -> ServerEvent.VoiceStates(
                 TurtleJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(VoiceState.serializer()), o["states"]!!),
             )
-            "error" -> ServerEvent.Error(str("error") ?: "erro")
+            "error" -> ServerEvent.Error(str("error") ?: "erro", str("nonce"))
             "ring" -> {
                 val from = o["from"]!!.jsonObject
                 fun f(k: String) = from[k]?.jsonPrimitive?.contentOrNull
@@ -97,10 +99,12 @@ class Realtime(
             while (isActive) {
                 val t = token() ?: return@launch
                 val closed = kotlinx.coroutines.CompletableDeferred<Boolean>()
-                val url = baseUrl.trimEnd('/').replaceFirst("http", "ws") + "/ws?token=" + java.net.URLEncoder.encode(t, "UTF-8")
+                // O token vai na primeira mensagem, não na URL (não aparece em logs de proxy).
+                val url = baseUrl.trimEnd('/').replaceFirst("http", "ws") + "/ws"
                 socket = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         wait = 1_000L
+                        webSocket.send(JsonObject(mapOf("t" to JsonPrimitive("auth"), "token" to JsonPrimitive(t))).toString())
                         onOpen()
                     }
 
@@ -141,16 +145,20 @@ class Realtime(
         socket = null
     }
 
-    /** Envia uma mensagem (texto e/ou ids de anexos já enviados). Devolve false se não está conectado. */
-    fun send(channelId: String, content: String, attachments: List<String> = emptyList()): Boolean {
-        val json = JsonObject(
-            mapOf(
-                "t" to JsonPrimitive("send"),
-                "channelId" to JsonPrimitive(channelId),
-                "content" to JsonPrimitive(content),
-                "attachments" to kotlinx.serialization.json.JsonArray(attachments.map { JsonPrimitive(it) }),
-            ),
+    /**
+     * Envia uma mensagem (texto e/ou ids de anexos já enviados). Devolve false se não está conectado.
+     * `nonce` deixa reenviar sem duplicar: o servidor ignora o mesmo nonce repetido.
+     */
+    fun send(channelId: String, content: String, attachments: List<String> = emptyList(), replyTo: String? = null, nonce: String? = null): Boolean {
+        val fields = mutableMapOf<String, kotlinx.serialization.json.JsonElement>(
+            "t" to JsonPrimitive("send"),
+            "channelId" to JsonPrimitive(channelId),
+            "content" to JsonPrimitive(content),
+            "attachments" to kotlinx.serialization.json.JsonArray(attachments.map { JsonPrimitive(it) }),
         )
+        replyTo?.let { fields["replyTo"] = JsonPrimitive(it) }
+        nonce?.let { fields["nonce"] = JsonPrimitive(it) }
+        val json = JsonObject(fields)
         return socket?.send(json.toString()) ?: false
     }
 

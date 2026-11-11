@@ -126,6 +126,7 @@ fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String, onProfile: (
 
     var editingMessage by remember { mutableStateOf<Message?>(null) }
     var deletingMessage by remember { mutableStateOf<Message?>(null) }
+    var replyingTo by remember(channelId) { mutableStateOf<Message?>(null) }
 
     val listState = rememberLazyListState()
 
@@ -163,15 +164,28 @@ fun ChatScreen(state: UiState, vm: AppViewModel, channelId: String, onProfile: (
                                 onProfile = onProfile,
                                 onEdit = { editingMessage = m },
                                 onDelete = { deletingMessage = m },
+                                onReply = { replyingTo = m },
                             )
                         }
                     }
                 }
             }
         }
+        replyingTo?.let { r ->
+            Row(
+                Modifier.fillMaxWidth().background(Ink.Ink2).padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Respondendo a ${r.author}", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Filled.Close, contentDescription = "Cancelar resposta", tint = Ink.Muted, modifier = Modifier.size(18.dp).clickable { replyingTo = null })
+            }
+        }
         Composer(
             uploading = state.uploading,
-            onSend = { text, files -> vm.send(channelId, text, files) },
+            onSend = { text, files ->
+                vm.send(channelId, text, files, replyingTo?.id)
+                replyingTo = null
+            },
         )
     }
 
@@ -209,6 +223,7 @@ private fun MessageRow(
     onProfile: (String) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onReply: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
@@ -234,6 +249,16 @@ private fun MessageRow(
                         Spacer(Modifier.width(4.dp))
                         Text("FIXADA", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Ink.Muted)
                     }
+                }
+                // Linha da mensagem respondida, acima do texto (como no web).
+                if (m.replyToId != null) {
+                    val r = m.replyTo
+                    Text(
+                        if (r == null) "↪ mensagem apagada"
+                        else "↪ ${r.author}: " + (r.content.takeIf { it.isNotBlank() }?.let { readable(it, names) } ?: if (r.attachments > 0) "anexo" else ""),
+                        color = Ink.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = if (header) 0.dp else 4.dp),
+                    )
                 }
                 if (header) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -285,6 +310,13 @@ private fun MessageRow(
             onDismissRequest = { menuOpen = false },
             modifier = Modifier.background(Ink.Ink2).border(1.dp, Ink.Line, RoundedCornerShape(4.dp)),
         ) {
+            DropdownMenuItem(
+                text = { Text("Responder", color = Ink.Paper) },
+                onClick = {
+                    menuOpen = false
+                    onReply()
+                },
+            )
             if (m.content.isNotEmpty()) {
                 DropdownMenuItem(
                     text = { Text("Copiar texto", color = Ink.Paper) },

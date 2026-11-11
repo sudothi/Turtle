@@ -1,0 +1,53 @@
+name: Site público
+# Compila apps/site e publica SÓ o resultado (HTML/CSS/JS) no repositório público do site, que serve o
+# GitHub Pages em https://ogturtle.xyz. O código-fonte do Turtle continua privado.
+#
+# Configuração única (ver docs/planos/site-publico.md):
+#  1. Repositório público SITE_REPO (variável do repositório, ex.: sudothi/turtle-site) com Pages ligado na branch main.
+#  2. Chave de deploy com escrita nesse repositório guardada no secret SITE_DEPLOY_KEY.
+on:
+  push:
+    branches: [main]
+    paths: ["apps/site/**", "packages/ui/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: vars.SITE_REPO != ''
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile --filter "@turtle/site..."
+      - run: pnpm --filter @turtle/site build
+        env:
+          VITE_APP_URL: https://turtlechat.tech
+          SITE_DOMAIN: ogturtle.xyz
+      - name: Publicar no repositório do site
+        env:
+          SITE_REPO: ${{ vars.SITE_REPO }}
+          SITE_DEPLOY_KEY: ${{ secrets.SITE_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SITE_DEPLOY_KEY" > ~/.ssh/site && chmod 600 ~/.ssh/site
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/site -o IdentitiesOnly=yes"
+          git clone --depth 1 "git@github.com:${SITE_REPO}.git" publicado
+          find publicado -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a apps/site/dist/. publicado/
+          cd publicado
+          git config user.name "turtle-site"
+          git config user.email "turtle-site@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "Nada mudou."; exit 0; }
+          git commit -m "site: ${GITHUB_SHA::7}"
+          git push origin HEAD:main

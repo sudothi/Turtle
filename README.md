@@ -18,7 +18,7 @@ O servidor lê o `.env` da raiz sozinho. Com `DATABASE_URL` definido o servidor 
 - ⚙ abre as configurações: microfone, saída de áudio, supressão de ruído (GTCRN, RNNoise, Speex, do navegador ou desligada), porta de ruído (noise gate), ganho e teste de microfone com retorno e medidor comparativo.
 - Áudio Opus 48 kHz mono a 64 kb/s com DTX e RED; cancelamento de eco e ganho automático sempre ligados.
 - O servidor emite o token LiveKit em `POST /voice/:canal/token` usando `LIVEKIT_URL`, `LIVEKIT_API_KEY` e `LIVEKIT_API_SECRET`. Sem essas variáveis, a voz fica desativada.
-- Sem Docker, dá para usar o LiveKit de produção no dev local (`LIVEKIT_URL=wss://lk.ogturtle.xyz` e as chaves de produção) e o banco em memória (sem `DATABASE_URL`). Chamada com amigos de outra rede só depois do deploy do backend.
+- Sem Docker, dá para usar o LiveKit de produção no dev local (`LIVEKIT_URL=wss://lk.turtlechat.tech` e as chaves de produção) e o banco em memória (sem `DATABASE_URL`). Chamada com amigos de outra rede só depois do deploy do backend.
 
 O primeiro cadastro usa o `BOOTSTRAP_INVITE` e vira admin; admins geram convites e criam canais.
 Plano de desenvolvimento: marcos 0 a 5 (fundação, chat, voz, tela/câmera, design, extras).

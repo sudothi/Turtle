@@ -1,14 +1,15 @@
 import type { MouseEvent } from "react";
 import { TurtleMark } from "@turtle/ui";
-import { DesktopDownload } from "../components/DesktopDownload";
+import { DesktopDownload } from "./DesktopDownload";
+import { APP_URL } from "./config";
 import { SwimmingTurtle } from "./SwimmingTurtle";
 import { WaitlistForm } from "./WaitlistForm";
 
-export type LandingTab = "waitlist" | "home" | "download";
+export type LandingTab = "waitlist" | "download";
 
-/** Shared public design: waiting list at /, entry page at /inicio. */
-export function Landing({ tab, loggedIn, go }: { tab: LandingTab; loggedIn: boolean; go: (path: string) => void }) {
-  const home = tab === "waitlist" ? "/" : "/inicio";
+/** Site público: fila de espera em / e download em /download. O app fica em outro domínio. */
+export function Landing({ tab, go }: { tab: LandingTab; go: (path: string) => void }) {
+  const home = "/";
   const link = (path: string) => (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
@@ -21,14 +22,12 @@ export function Landing({ tab, loggedIn, go }: { tab: LandingTab; loggedIn: bool
           <TurtleMark size={30} />
           <span className="t-display">Turtle</span>
         </a>
-        {tab !== "waitlist" && <nav className="landing-nav" aria-label="Site">
+        <nav className="landing-nav" aria-label="Site">
           <a href="/download" className={`landing-tab${tab === "download" ? " active" : ""}`} aria-current={tab === "download" ? "page" : undefined} onClick={link("/download")}>
             Download
           </a>
-          <a href={loggedIn ? "/app" : "/entrar"} className="t-btn lino sm landing-login" onClick={link(loggedIn ? "/app" : "/entrar")}>
-            {loggedIn ? "Abrir o app" : "Entrar"}
-          </a>
-        </nav>}
+          <a href={APP_URL} className="t-btn lino sm landing-login">Entrar</a>
+        </nav>
       </header>
 
       {tab === "waitlist" && <WaitlistForm />}

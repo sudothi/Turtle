@@ -8,7 +8,7 @@ import { watchGames } from "./games.js";
 import { rememberPicked, shareAudioSupported, startShareAudio, stopShareAudio } from "./screen-audio.js";
 
 /** O instalado abre o site publicado; no dev (`pnpm desktop`), o Vite local. */
-const PROD_URL = "https://app.ogturtle.xyz";
+const PROD_URL = "https://turtlechat.tech";
 const clientUrl = process.env.TURTLE_CLIENT_URL ?? (app.isPackaged ? PROD_URL : "http://localhost:5173");
 const clientOrigin = new URL(clientUrl).origin;
 let win: BrowserWindow | undefined;

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Button, TextField } from "@turtle/ui";
-import { api } from "../api";
+import { APP_URL } from "./config";
 
 export function WaitlistForm() {
   const [busy, setBusy] = useState(false);
@@ -13,7 +13,8 @@ export function WaitlistForm() {
     setBusy(true);
     setError(undefined);
     try {
-      await api.joinWaitlist(email);
+      const res = await fetch(`${APP_URL}/waitlist`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
+      if (!res.ok) throw new Error(String(res.status));
       setSaved(true);
     } catch {
       setError("Não foi possível entrar na lista agora. Aguarde alguns minutos e tente novamente.");

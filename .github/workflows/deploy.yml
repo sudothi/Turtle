@@ -77,4 +77,4 @@ jobs:
           echo "Deploy de ${SHA:0:7} concluído." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Conferir de fora
-        run: curl -fsS --retry 5 --retry-delay 3 https://app.ogturtle.xyz/health
+        run: curl -fsS --retry 5 --retry-delay 3 https://turtlechat.tech/health

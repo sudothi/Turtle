@@ -11,13 +11,13 @@ Chat privado no estilo Discord, em preto e branco de xilogravura (linocut), feit
 ![TypeScript](https://img.shields.io/badge/TypeScript-f5f3ee?style=flat-square&labelColor=0b0b0b&logo=typescript&logoColor=white)
 ![LiveKit](https://img.shields.io/badge/voz-LiveKit-f5f3ee?style=flat-square&labelColor=0b0b0b)
 ![Docker Compose](https://img.shields.io/badge/deploy-Docker_Compose-f5f3ee?style=flat-square&labelColor=0b0b0b&logo=docker&logoColor=white)
-![Web · Windows · Android](https://img.shields.io/badge/web_%C2%B7_Windows_%C2%B7_Android-f5f3ee?style=flat-square&labelColor=0b0b0b)
+![Web · Windows · Android · iPhone](https://img.shields.io/badge/web_%C2%B7_Windows_%C2%B7_Android_%C2%B7_iPhone-f5f3ee?style=flat-square&labelColor=0b0b0b)
 
 </div>
 
 ---
 
-## ✦ A ideia
+## · A ideia
 
 Você baixa o Turtle, aluga uma VPS pequena e sobe o seu próprio servidor em uns 15 minutos. Os dados são seus, o domínio é seu, os amigos que entram são os que você convidar. Sem plano, sem anúncio, sem ninguém olhando.
 
@@ -28,7 +28,7 @@ Pensado para grupos pequenos: cerca de **30 contas** e até **6 pessoas por cham
   <img src="docs/img/chamada.png" alt="Chamada de voz com tela, câmera e música" width="860">
 </p>
 
-## ✦ Mais capturas
+## · Mais capturas
 
 <table>
   <tr>
@@ -40,19 +40,19 @@ Pensado para grupos pequenos: cerca de **30 contas** e até **6 pessoas por cham
   </tr>
 </table>
 
-## ✦ O que tem
+## · O que tem
 
 | | |
 |---|---|
-| 💬 **Chat** | Servidores, canais de texto e voz, mensagens diretas, grupos, amigos, fotos e anexos |
-| 🎙️ **Voz** | Opus 48 kHz, supressão de ruído (GTCRN, RNNoise, Speex), porta de ruído, volume por pessoa e indicador de quem fala |
-| 🖥️ **Tela e câmera** | 1080p30, 720p60 ou 1080p60, com H.264 por hardware (NVENC) e áudio do computador (no Windows, sem capturar o próprio Turtle) |
-| 🎵 **Discoteca** | Bot de música na chamada (YouTube, SoundCloud, Bandcamp), cartões de música no chat e soundboard |
-| 👤 **Perfil** | Avatar, banner, apelidos e presença (o que você está jogando) |
-| 🔒 **Privado** | Cadastro só por convite do admin, sem listagem pública |
-| 📱 **Onde roda** | Navegador (também no celular), app desktop para Windows com atualização automática, app Android nativo (Kotlin) e prova inicial para iPhone |
+| **Chat** | Servidores, canais de texto e voz, mensagens diretas, grupos, amigos, fotos e anexos |
+| **Voz** | Opus 48 kHz, supressão de ruído (GTCRN, RNNoise, Speex), porta de ruído, volume por pessoa e indicador de quem fala |
+| **Tela e câmera** | 1080p30, 720p60 ou 1080p60, com H.264 por hardware (NVENC) e áudio do computador (no Windows, sem capturar o próprio Turtle) |
+| **Discoteca** | Bot de música na chamada (YouTube, SoundCloud, Bandcamp), cartões de música no chat e soundboard |
+| **Perfil** | Avatar, banner, apelidos e presença (o que você está jogando) |
+| **Privado** | Cadastro só por convite do admin, sem listagem pública |
+| **Onde roda** | Navegador (também no celular), app desktop para Windows com atualização automática, app Android nativo (Kotlin) e prova inicial para iPhone |
 
-## ✦ Instalar no seu servidor
+## · Instalar no seu servidor
 
 Você precisa de: uma **VPS** Ubuntu 24.04 (2 vCPU e 4 GB de RAM já servem; Hostinger, Hetzner, DigitalOcean, Oracle…), um **domínio** seu e uns 15 minutos.
 
@@ -70,7 +70,7 @@ git clone https://github.com/sudothi/turtle.git && cd turtle/infra/selfhost
 
 O script gera todas as senhas, cria o `.env` e a configuração do LiveKit e sobe tudo. Depois abra `https://app.seudominio.com/convite/<código que o script mostrou>` para criar a conta admin. Guia completo, com firewall, backup e atualização: [docs/hospedar-em-vps.md](docs/hospedar-em-vps.md).
 
-## ✦ Instalar o app no celular
+## · Instalar o app no celular
 
 O site do seu servidor já funciona no navegador do celular. Se quiser o app nativo, ele precisa apontar para o **seu** servidor (`https://app.seudominio.com`); os instaladores prontos do mantenedor apontam para a instância dele.
 
@@ -93,7 +93,7 @@ O app de iPhone é mantido por outra pessoa e ainda está em fase inicial: texto
 
 Na tela de login, **Configurar servidor** deixa trocar para `https://app.seudominio.com`. Passo a passo completo e limites conhecidos: [apps/ios/README.md](apps/ios/README.md).
 
-## ✦ Rodar para desenvolver
+## · Rodar para desenvolver
 
 ```bash
 pnpm install
@@ -105,7 +105,7 @@ pnpm desktop    # app Electron, em outro terminal, com o dev rodando
 
 Sem `DATABASE_URL` o servidor usa um banco em memória (some ao reiniciar). O primeiro cadastro usa o `BOOTSTRAP_INVITE` do `.env`. Antes de abrir um PR: `pnpm typecheck` e `pnpm test`.
 
-## ✦ Como é feito
+## · Como é feito
 
 TypeScript, pnpm + Turborepo. Servidor em Node/Fastify com WebSocket próprio, PostgreSQL (Drizzle), voz e vídeo pelo [LiveKit](https://livekit.io) (SFU auto-hospedado), Caddy para HTTPS, imagens com sharp.
 
@@ -117,10 +117,10 @@ packages/protocol   tipos compartilhados      packages/db    banco e migrações
 infra/         compose, Caddy, LiveKit, backup, deploy      docs/   guias e planos
 ```
 
-## ✦ Contribuir
+## · Contribuir
 
 Issues e PRs são bem-vindos. Uma branch por mudança (`feat/`, `fix/`, `docs/`…), commits pequenos, `pnpm typecheck` e `pnpm test` passando. O estilo visual é preto e branco, entalhado: leia [packages/ui](packages/ui) antes de mexer na interface. Contexto para agentes de código em [AGENTS.md](AGENTS.md).
 
-## ✦ Licença
+## · Licença
 
 [MIT](LICENSE). Faça o que quiser, sem garantias.

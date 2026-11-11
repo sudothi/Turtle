@@ -28,7 +28,7 @@ export function SoundboardVolume({ compact }: { compact?: boolean }) {
         <Icon name={prefs.muted ? "speaker-off" : "speaker"} size={18} />
       </IconButton>
       <input
-        type="range" min={0} max={2} step={0.05} aria-label="Volume do soundboard"
+        type="range" min={0} max={2} step={0.01} aria-label="Volume do soundboard"
         value={prefs.muted ? 0 : prefs.volume}
         onChange={(e) => {
           const v = Number(e.target.value);
@@ -345,7 +345,7 @@ export function SoundModal({ serverId, sound, canDelete, onClose }: { serverId: 
         <label className="sb-vol-field">
           <span className="t-field-label">Volume do som {pct(volume)}</span>
           <div className="sb-vol-row">
-            <input type="range" min={0} max={1} step={0.05} value={volume} onChange={(e) => setVolume(Number(e.target.value))} aria-label="Volume do som" />
+            <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(e) => setVolume(Number(e.target.value))} aria-label="Volume do som" />
             <Button size="sm" variant="secondary" disabled={!sound && !buf} onClick={preview}>
               <Icon name="headphones" size={16} /> Ouvir
             </Button>

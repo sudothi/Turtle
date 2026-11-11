@@ -276,7 +276,7 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
             type="range"
             min={0.25}
             max={2.5}
-            step={0.05}
+            step={0.01}
             aria-label="Ganho do microfone"
             value={prefs.inputGain}
             onChange={(e) => void voice.setInputGain(Number(e.target.value))}

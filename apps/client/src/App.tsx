@@ -7,6 +7,7 @@ import { Workspace } from "./screens/Workspace";
 import { Landing } from "./screens/Landing";
 import { desktop } from "./desktop";
 import { appSurface } from "./routes";
+import { discoIdFromPath } from "./jukebox";
 
 /** Dentro de um app (desktop, APK ou PWA instalado) não tem página inicial: abre direto no login. */
 const insideApp = () => !!desktop() || matchMedia("(display-mode: standalone)").matches;
@@ -50,7 +51,8 @@ export function App() {
   }, [clearSession, go]);
   const onAuth = useCallback((u: User) => {
     setUser(u);
-    go(insideApp() ? "/" : "/app", true);
+    // Quem entrou por um link de discoteca continua nele (o Workspace mostra o convite).
+    go(discoIdFromPath(location.pathname) ? location.pathname : insideApp() ? "/" : "/app", true);
   }, [go]);
   const surface = appSurface(path, !!user, insideApp());
   const landing = surface === "waitlist" || surface === "home" || surface === "download" ? surface : null;

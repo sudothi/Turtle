@@ -1191,6 +1191,13 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
 .jb-face:hover { z-index: 2; }
 .jb-face:hover::after, .jb-face:focus-visible::after { opacity: 1; }
 .jb-invite-join { flex: none; padding: 6px 14px; border: 0; border-radius: 8px; background: var(--paper); color: var(--ink-0); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.jb-link { font-size: var(--fs-sm, 13px) !important; letter-spacing: 0 !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jb-pick { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.jb-pick-list { display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto; }
+.jb-pick-group { display: flex; flex-direction: column; gap: 2px; }
+.jb-pick-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 0; }
+.jb-pick-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.jb-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jb-invite-join:hover { filter: brightness(0.92); }
 .jb-invite.is-playing .music-vinyl-disc { animation-play-state: running; }
 .jb-invite-btn { margin-left: auto; }

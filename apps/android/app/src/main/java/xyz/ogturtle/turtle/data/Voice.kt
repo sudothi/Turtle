@@ -181,6 +181,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
             return
         }
         _call.value = cur.copy(muted = muted)
+        if (muted != cur.muted) CallSounds.play(if (muted) CallSound.Mute else CallSound.Unmute)
         scope.launch { runCatching { r.localParticipant.setMicrophoneEnabled(!muted) }; refresh() }
     }
 
@@ -190,6 +191,7 @@ class VoiceController(private val app: Context, private val scope: CoroutineScop
         if (deafened) mutedBeforeDeafen = cur.muted
         val muted = if (deafened) true else mutedBeforeDeafen
         _call.value = cur.copy(deafened = deafened, muted = muted)
+        if (deafened != cur.deafened) CallSounds.play(if (deafened) CallSound.Deafen else CallSound.Undeafen)
         for (p in r.remoteParticipants.values) {
             (p.getTrackPublication(Track.Source.MICROPHONE) as? RemoteTrackPublication)?.setSubscribed(!deafened)
         }

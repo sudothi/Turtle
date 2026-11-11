@@ -1,11 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/turtle-logo-white.svg">
-  <img src="docs/img/turtle-logo-black.svg" alt="Turtle" width="140">
-</picture>
-
-# Turtle
+<img src="docs/img/banner.png" alt="Turtle: um canto só pra amigos" width="100%">
 
 **Um canto só pra amigos: texto, voz e tela, sem pressa e sem plateia.**
 
@@ -18,8 +13,6 @@ Chat privado no estilo Discord, em preto e branco de xilogravura (linocut), feit
 ![Docker Compose](https://img.shields.io/badge/deploy-Docker_Compose-f5f3ee?style=flat-square&labelColor=0b0b0b&logo=docker&logoColor=white)
 ![Web · Windows · Android](https://img.shields.io/badge/web_%C2%B7_Windows_%C2%B7_Android-f5f3ee?style=flat-square&labelColor=0b0b0b)
 
-<img src="docs/img/tartaruga-nadando.gif" alt="Tartaruga nadando" width="360">
-
 </div>
 
 ---
@@ -31,10 +24,21 @@ Você baixa o Turtle, aluga uma VPS pequena e sobe o seu próprio servidor em un
 Pensado para grupos pequenos: cerca de **30 contas** e até **6 pessoas por chamada**.
 
 <p align="center">
-  <img src="docs/img/login.png" alt="Tela de login do Turtle" width="860"><br>
   <img src="docs/img/chat.png" alt="Chat do Turtle com canais de texto e voz" width="860"><br>
   <img src="docs/img/chamada.png" alt="Chamada de voz com tela, câmera e música" width="860">
 </p>
+
+## ✦ Mais capturas
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/discoteca.png" alt="Discoteca: busca e fila de músicas na chamada"><br><sub><b>Discoteca</b>: bot de música na chamada, com busca e fila.</sub></td>
+    <td width="50%"><img src="docs/img/convite-musica.png" alt="Convite para ouvir música junto, no chat"><br><sub><b>Convite pro chat</b>: chame alguém para a discoteca com um cartão de música.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/img/celular-chat.png" alt="Chat no celular" height="420">&nbsp;&nbsp;<img src="docs/img/celular-chamada.png" alt="Chamada com tela e câmera no celular" height="420"><br><sub><b>No celular</b>: o mesmo app, responsivo, no navegador ou no app Android.</sub></td>
+  </tr>
+</table>
 
 ## ✦ O que tem
 

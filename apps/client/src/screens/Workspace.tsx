@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
-import { MENTION_RE, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Activity, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
+import { MENTION_RE, canManageJukebox, REPLY_PREVIEW_CHARS, dmTitle, mentionedIds, serverEvent, shownName, type ServerEvent, type Activity, type Channel, type ChannelKind, type Dm, type Friend, type Member, type Message, type Server, type Unread, type User, type UserStatus, type VoiceState } from "@turtle/protocol";
 import { Avatar, Button, Icon, IconButton } from "@turtle/ui";
 import { api, fileUrl, getToken } from "../api";
 import { loadSoundPrefs, playSound, setSoundOutput } from "../sounds";
@@ -843,6 +843,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
     voiceStates: named.voiceStates,
     meId: user.id,
     nameOf: whoIs,
+    canManage: (serverId) => canManageJukebox(user.isAdmin, servers.find((x) => x.id === serverId)?.role),
     join: (id) => { setHome(false); setVoiceView(id); setView("voice"); showContent(); void voice.join(id); },
     // Convite: vai para o chat de texto aberto (se for do mesmo servidor da chamada) ou para o primeiro canal de texto dele.
     invite: (voiceId) => {
@@ -856,7 +857,7 @@ export function Workspace({ user: initialUser, onLogout }: { user: User; onLogou
       transmit(o);
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [named.voiceStates, user.id, whoIs, known, activeId, transmit, voice, showContent]);
+  }), [named.voiceStates, user.id, user.isAdmin, servers, whoIs, known, activeId, transmit, voice, showContent]);
 
   return (
     <PresenceContext.Provider value={presence}>

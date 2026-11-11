@@ -108,7 +108,11 @@ Postgres, LiveKit e Caddy não reiniciam; só o `app`. Se algo der errado: `git 
 
 ## 8. App desktop e celular
 
-O site funciona direto no navegador, inclusive no celular. Os instaladores oficiais (Windows e Android) apontam para o servidor do mantenedor. Para usar o app desktop no **seu** servidor, rode a partir do código com `TURTLE_CLIENT_URL=https://app.seudominio.com pnpm desktop`. No Android, compile com `-PserverUrl=https://app.seudominio.com` ([apps/android/README.md](../apps/android/README.md)).
+O site funciona direto no navegador, inclusive no celular. Os instaladores oficiais (Windows, Android e iPhone) apontam para o servidor do mantenedor. Para usar app nativo no **seu** servidor:
+
+- **Desktop:** a partir do código, `TURTLE_CLIENT_URL=https://app.seudominio.com pnpm desktop`.
+- **Android:** compile com `./gradlew assembleRelease -PserverUrl=https://app.seudominio.com` (em `apps/android`) e instale o APK; ou baixe o APK de teste em Actions > Android nativo (APK). Veja [apps/android/README.md](../apps/android/README.md).
+- **iPhone:** o app é mantido por outra pessoa e está em fase inicial. Instale pelo Xcode (`pnpm ios:device`, precisa de Mac) ou pela AltStore Classic (`pnpm ios:ipa` e importar o IPA), com conta Apple gratuita (renovação a cada 7 dias). Na tela de login, **Configurar servidor** aponta para o seu domínio. Veja [apps/ios/README.md](../apps/ios/README.md).
 
 ## Segurança, em uma lista
 

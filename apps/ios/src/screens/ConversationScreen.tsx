@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRoute, useIsFocused, type RouteProp } from "@react-navigation/native";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { shownName, splitMentions, type Message, type Person } from "@turtle/protocol";
-import { useConversation, usePresence, useRead, useWorkspace } from "../workspace-context";
+import { useConversation, useDirectory, usePresence, useRead, useWorkspace } from "../workspace-context";
 import { useAppNavigation, type RootRoutes } from "../navigation/types";
 import { CallDock, useJoinCall } from "../navigation/call-access";
 import { Avatar, Empty, layout, Page, ToolbarButton } from "../ui/layout";
@@ -12,6 +11,9 @@ import { styles as text, colors, fonts } from "../ui/theme";
 import { Icon } from "../ui/Icon";
 import Composer from "../chat/Composer";
 import type { PendingSend } from "../chat/conversation";
+import KeyboardViewport from "../ui/KeyboardViewport";
+import MessageEditor from "../chat/MessageEditor";
+import { ReactionPicker, showMessageActions } from "../chat/MessageActions";
 
 const timestamp = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 function stamp(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : timestamp.format(date); }
@@ -24,13 +26,23 @@ export default function ConversationScreen() {
   const { params } = useRoute<RouteProp<RootRoutes, "Conversation">>();
   const navigation = useAppNavigation();
   const joinCall = useJoinCall();
-  const headerHeight = useHeaderHeight();
   const { workspace, user } = useWorkspace();
   const presence = usePresence();
+  const directory = useDirectory();
   const state = useConversation(params.channelId);
   const { conversation } = state;
   const focused = useIsFocused();
   const [atLatest, setAtLatest] = useState(true);
+  const [editing, setEditing] = useState<string>();
+  const [reacting, setReacting] = useState<string>();
+  const editingMessage = state.messages.find(message => message.id === editing);
+  const reactingMessage = state.messages.find(message => message.id === reacting);
+  const role = directory.data.find(entry => entry.server.id === params.serverId)?.server.role;
+  const canModerate = role === "owner" || role === "admin";
+  useEffect(() => {
+    if (editing && !editingMessage) setEditing(undefined);
+    if (reacting && !reactingMessage) setReacting(undefined);
+  }, [editing, editingMessage, reacting, reactingMessage]);
   const latestId = state.messages.at(-1)?.id;
   useEffect(() => { if (focused && atLatest && latestId) void workspace.api.markRead(params.channelId).then(() => workspace.gateway.invalidate()).catch(() => {}); }, [workspace, params.channelId, latestId, atLatest, focused]);
   const list = useRef<FlatList<Row>>(null);
@@ -50,10 +62,20 @@ export default function ConversationScreen() {
     ...state.outbox.map(value => ({ kind: "pending" as const, id: value.id, value })),
   ].reverse(), [state.messages, state.outbox]);
   const jumpLatest = () => { setAtLatest(true); conversation.setAtLatest(true); list.current?.scrollToOffset({ offset: 0, animated: true }); };
-  return <Page><KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+  const openActions = (message: Message) => {
+    conversation.clearActionError();
+    showMessageActions({ mine: message.userId === user.id, canDelete: message.userId === user.id || canModerate,
+      onReact: () => setReacting(message.id), onEdit: () => setEditing(message.id),
+      onDelete: () => Alert.alert("Excluir mensagem?", "A mensagem será removida para todos. Essa ação não pode ser desfeita.", [
+        { text: "Cancelar", style: "cancel" }, { text: "Excluir", style: "destructive", onPress: () => { void conversation.deleteMessage(message.id); } },
+      ]),
+    });
+  };
+  return <Page><KeyboardViewport>
     {!params.serverId && <ToolbarButton label="Entrar na chamada" onPress={() => joinCall(params.channelId, params.title)} />}
     {!presence.connected && <Text accessibilityLiveRegion="polite" style={s.connection}>Sem conexão. Você pode continuar escrevendo.</Text>}
     <Notice>{state.storageError || state.error}</Notice>
+    {!editingMessage && !reactingMessage && <Notice>{state.actionError}</Notice>}
     {state.error && <ToolbarButton label="Atualizar conversa" onPress={() => { void conversation.refresh(); }} />}
     <FlatList key={`history:${params.channelId}`} ref={list} data={rows} inverted style={{ flex: 1 }} keyExtractor={item => item.id}
       contentContainerStyle={s.messages} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
@@ -83,22 +105,33 @@ export default function ConversationScreen() {
         const previous = older?.kind === "message" ? older.value : undefined;
         const gap = Date.parse(message.createdAt) - Date.parse(previous?.createdAt || "");
         const grouped = previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
-        return <View style={[s.message, !grouped && { marginTop: 16 }]}>
+        return <Pressable accessible={false} onLongPress={() => openActions(message)} disabled={!!state.acting} style={[s.message, !grouped && { marginTop: 16 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={`Ver perfil de ${shownName(message)}`} onPress={() => navigation.navigate("Profile", { userId: message.userId })} style={{ width: 40, minHeight: 44 }}>{!grouped && <Avatar name={shownName(message)} uri={workspace.api.fileUrl(message.avatar)} />}</Pressable>
           <View style={[layout.rowText, { gap: 2 }]}>
             {!grouped && <Text style={[text.label, { fontFamily: fonts.bold }]}>{shownName(message)} <Text style={[text.caption, { color: colors.faint }]}>{stamp(message.createdAt)}</Text></Text>}
             {!!message.content && <MessageBody content={message.content} names={names} />}
             {!!message.editedAt && <Text style={text.caption}>(editado)</Text>}
             {message.attachments.map(attachment => <View key={attachment.id} style={s.attachment}><Icon name="file" /><Text style={[text.caption, { flex: 1 }]}>{attachment.name}</Text></View>)}
+            {!!message.reactions.length && <View style={s.reactions}>{message.reactions.map(reaction => {
+              const selected = reaction.userIds.includes(user.id), disabled = !presence.connected || !!state.acting;
+              return <Pressable key={reaction.emoji} accessibilityRole="button" accessibilityLabel={`${selected ? "Remover" : "Adicionar"} reação ${reaction.emoji}, ${reaction.userIds.length} ${reaction.userIds.length === 1 ? "pessoa" : "pessoas"}`} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => { void conversation.setReaction(message.id, reaction.emoji, !selected); }}
+                style={[s.reaction, selected && { borderColor: colors.paper }, disabled && { opacity: 0.4 }]}><Text style={text.label}>{reaction.emoji} {reaction.userIds.length}</Text></Pressable>;
+            })}</View>}
           </View>
-        </View>;
+          <Pressable accessibilityRole="button" accessibilityLabel={`Opções da mensagem de ${shownName(message)}`} disabled={!!state.acting} accessibilityState={{ disabled: !!state.acting }} onPress={() => openActions(message)} style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}><Text style={[text.label, { fontSize: 24 }]}>⋯</Text></Pressable>
+        </Pressable>;
       }}
     />
     {!!state.newCount && <Pressable accessibilityRole="button" onPress={jumpLatest} style={s.newMessages}><Text style={text.label}>{state.newCount === 1 ? "Nova mensagem" : `${state.newCount} novas mensagens`} ↓</Text></Pressable>}
     {!!people.error && <View style={{ paddingHorizontal: 16 }}><Text style={text.caption}>Não foi possível carregar as pessoas para menções.</Text><ToolbarButton label="Atualizar pessoas" onPress={people.refresh} /></View>}
     <CallDock onOpen={() => navigation.navigate("Call")} />
-    <Composer key={`composer:${params.channelId}`} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />
-  </KeyboardAvoidingView></Page>;
+    {editingMessage ? <MessageEditor key={editingMessage.id} message={editingMessage} names={names} conversation={conversation} busy={!!state.acting} error={state.actionError} online={presence.connected} onClose={() => { setEditing(undefined); conversation.clearActionError(); }} /> :
+      <Composer key={`composer:${params.channelId}`} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />}
+    {reactingMessage && <ReactionPicker selected={reactingMessage.reactions.filter(reaction => reaction.userIds.includes(user.id)).map(reaction => reaction.emoji)} busy={!!state.acting} error={state.actionError} onClose={() => { setReacting(undefined); conversation.clearActionError(); }} onPick={emoji => {
+      const selected = reactingMessage.reactions.some(reaction => reaction.emoji === emoji && reaction.userIds.includes(user.id));
+      void conversation.setReaction(reactingMessage.id, emoji, !selected).then(saved => { if (saved) setReacting(undefined); });
+    }} />}
+  </KeyboardViewport></Page>;
 }
 const s = StyleSheet.create({
   messages: { flexGrow: 1, paddingBottom: 16, paddingTop: 16 },
@@ -109,5 +142,7 @@ const s = StyleSheet.create({
   attachment: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 4, backgroundColor: colors.panel, padding: 10, marginTop: 4 },
   connection: { ...text.caption, backgroundColor: colors.input, paddingHorizontal: 16, paddingVertical: 8 },
   retry: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  reactions: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  reaction: { minWidth: 44, minHeight: 44, paddingHorizontal: 10, justifyContent: "center", borderWidth: 1, borderColor: colors.line, borderRadius: 16, backgroundColor: colors.input },
   newMessages: { alignSelf: "center", minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.input, marginTop: 4 },
 });

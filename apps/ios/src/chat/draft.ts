@@ -1,8 +1,22 @@
-import { mentionToken, shownName, type Person } from "@turtle/protocol";
+import { mentionToken, shownName, splitMentions, type Person } from "@turtle/protocol";
 
 export interface Mention { start: number; end: number; userId: string; label: string }
 export interface Draft { text: string; mentions: Mention[] }
 export const emptyDraft = (): Draft => ({ text: "", mentions: [] });
+
+export function decodeDraft(content: string, names: Map<string, string>): Draft {
+  const draft = emptyDraft();
+  for (const part of splitMentions(content)) {
+    if ("text" in part) draft.text += part.text;
+    else {
+      const label = `@${names.get(part.userId) || "pessoa"}`;
+      const start = draft.text.length;
+      draft.text += label;
+      draft.mentions.push({ start, end: draft.text.length, userId: part.userId, label });
+    }
+  }
+  return draft;
+}
 
 /** Edits preserve only complete selected mentions outside the replaced range. */
 export function editDraft(draft: Draft, text: string): Draft {

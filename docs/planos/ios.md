@@ -97,7 +97,7 @@ Atualizar/renovar pela mesma identidade e bundle ID. Se expirar, tentar renovar 
 
 ## Aceite físico e evidências (#59)
 
-Primeiro aparelho indicado pelo grupo em 10/11/2026: **iPhone 15 (base), iOS 27.2**, com conta Apple gratuita. Isso define o alvo do roteiro; instalação, assinatura e cenários ainda precisam ser executados. O aceite desse aparelho não comprova o mínimo iOS 26; manter um segundo aparelho nessa versão na matriz quando disponível.
+Primeiro aparelho indicado pelo grupo em 10/11/2026: **iPhone 15 (base), iOS 27.2**, com conta Apple gratuita. O app de desenvolvimento foi instalado pelo Xcode/Expo, inclusive por conexão sem fio. Kaique informou como concluídos os demais cenários da checklist de #50–#52, exceto teclado/ações de mensagem e envio de foto, detalhados abaixo. Isso não valida instalação/renovação pela AltStore nem o mínimo iOS 26; manter um segundo aparelho nessa versão na matriz quando disponível.
 
 Use o IPA importado pelo mesmo caminho dos amigos e outra conta no web/desktop. A mesma identidade LiveKit em dois aparelhos encerra a conexão anterior.
 
@@ -106,10 +106,10 @@ Use o IPA importado pelo mesmo caminho dos amigos e outra conta no web/desktop. 
 | Automação | Typecheck/testes do monorepo, export JS, build nativo Release | Conferidos; resultados específicos nas PRs |
 | Visual | Telas reais com dados locais no simulador | Evidências locais; não substituem testes de interação |
 | Instalação | Instalação limpa, atualização, renovação, expiração e rollback compatível | Pendente em instalação Classic real |
-| Conta/social | Convite/login, pedidos, DM nova, grupo/limite, bloqueio nos dois sentidos | Backend/testes de contrato; interação cruzada física pendente |
-| Servidores | Dois próprios, cargos, expulsão, convite de conta versus servidor, transferência e exclusão | Fluxos implementados; exercício físico pendente |
-| Perfil | Edição, HEIC/EXIF, seletor negado/cancelado, gesto de recorte e remoção entre clientes | Geometria testada; seletor/gestos/captura física pendentes |
-| Chat | Teclado, paginação, rascunhos, falhas ambíguas e retomada após mais de 50 mensagens | Estado/contratos testados; teclado/rolagem/VoiceOver físicos pendentes |
+| Conta/social | Convite/login, pedidos, DM nova, grupo/limite, bloqueio nos dois sentidos | Checklist social da #50 concluída conforme relato de Kaique; demais cenários de conta mantêm seu aceite próprio |
+| Servidores | Dois próprios, cargos, expulsão, convite de conta versus servidor, transferência e exclusão | Checklist de cargos/convites/transferência/exclusão e revogação de acesso da #51 concluída conforme relato de Kaique |
+| Perfil | Edição, HEIC/EXIF, seletor negado/cancelado, gesto de recorte e remoção entre clientes | Demais itens da checklist informados como concluídos; upload falhou com `Unsupported FormDataPart implementation` (#52); envio/remoção/sincronização precisam de reteste após correção |
+| Chat | Teclado, paginação, rascunhos, falhas ambíguas e retomada após mais de 50 mensagens | Teclado cobrindo compositor e ausência de editar/excluir/reagir relatados; correções em desenvolvimento na #49 reaberta, com reteste físico pendente |
 | Voz | 30 min bloqueado, escuta/silêncio, Bluetooth, Siri/ligação e sair/logout | Lógica testada; áudio e duração físicos pendentes |
 | Rede | Wi-Fi/celular, modo avião, backend reiniciado, TURN/rede restrita | Recuperação testada; redes físicas pendentes |
 | Vídeo/tela | Permissão, troca de câmera, orientação, foco, tela/áudio e ensurdecer | Política de assinaturas/volumes testada; mídia física pendente |

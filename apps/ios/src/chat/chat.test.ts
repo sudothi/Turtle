@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { messageSchema, sentMessageId, type Message, type Person } from "@turtle/protocol";
 import { ApiError } from "../api";
 import { ChatStore } from "./store";
-import { chooseMention, editDraft, emptyDraft, encodeDraft, mentionQuery } from "./draft";
+import { chooseMention, decodeDraft, editDraft, emptyDraft, encodeDraft, mentionQuery } from "./draft";
 
 const uuid = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc";
 const message = (n: number, patch: Partial<Message> = {}): Message => messageSchema.parse({ id: String(n).padStart(4, "0"), channelId: "a", userId: "other", username: "friend", displayName: "Amiga", avatar: null, staff: false, content: `texto ${n}`, createdAt: new Date(1_700_000_000_000 + n * 1000).toISOString(), editedAt: null, attachments: [], ...patch });
@@ -11,7 +11,13 @@ const stores: ChatStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.dispose(); });
 function setup(disk = new Map<string, string>(), origin = "https://chat.test", userId = "self") {
   const storage = { getItem: vi.fn(async (key: string) => disk.get(key) ?? null), setItem: vi.fn(async (key: string, value: string) => { disk.set(key, value); }), removeItem: vi.fn(async (key: string) => { disk.delete(key); }) };
-  const api = { origin, messages: vi.fn(async (_id: string, _page?: { before?: string; beforeId?: string; limit?: number }): Promise<Message[]> => []), sendText: vi.fn(async (channelId: string, body: { requestId: string; content: string }) => message(100, { id: sentMessageId(userId, body.requestId), channelId, content: body.content, userId })) };
+  const api = {
+    origin, messages: vi.fn(async (_id: string, _page?: { before?: string; beforeId?: string; limit?: number }): Promise<Message[]> => []),
+    sendText: vi.fn(async (channelId: string, body: { requestId: string; content: string }) => message(100, { id: sentMessageId(userId, body.requestId), channelId, content: body.content, userId })),
+    editMessage: vi.fn(async (id: string, content: string) => message(1, { id, content, userId, editedAt: new Date().toISOString() })),
+    deleteMessage: vi.fn(async (_id: string) => ({ ok: true as const })),
+    setReaction: vi.fn(async (id: string, emoji: string, add: boolean) => message(1, { id, reactions: add ? [{ emoji, userIds: [userId] }] : [] })),
+  };
   const reject = vi.fn(async () => false);
   const store = new ChatStore(api, { userId, storage, id: () => uuid }, reject);
   stores.push(store);
@@ -175,6 +181,14 @@ describe("conversation state", () => {
 
 describe("selected mentions", () => {
   const person = { id: "person-id", username: "joao", displayName: "João Pessoa", avatar: null } satisfies Person;
+  it("edits display names without losing the original mention identities or plain typed names", () => {
+    const content = "Oi <@first> e <@second>, @Alex";
+    const draft = decodeDraft(content, new Map([["first", "Alex"], ["second", "Alex"]]));
+    expect(draft.text).toBe("Oi @Alex e @Alex, @Alex");
+    expect(encodeDraft(draft)).toBe(content);
+    expect(encodeDraft(editDraft(draft, draft.text + "!"))).toBe(content + "!");
+    expect(encodeDraft(decodeDraft("Oi <@unknown>", new Map()))).toBe("Oi <@unknown>");
+  });
   it("inserts display names by touch while retaining the selected identity", () => {
     const draft = { text: "Oi @jo!", mentions: [] };
     const range = mentionQuery(draft.text, 6)!;
@@ -192,5 +206,88 @@ describe("selected mentions", () => {
   it("never assigns a repeated display name to the wrong selected person after deletion", () => {
     const draft = { text: "@Alex @Alex ", mentions: [{ start: 0, end: 5, userId: "first", label: "@Alex" }, { start: 6, end: 11, userId: "second", label: "@Alex" }] };
     expect(encodeDraft(editDraft(draft, "@Alex "))).toBe("@Alex");
+  });
+});
+
+describe("message actions", () => {
+  async function opened() {
+    const result = setup(); await result.store.ready; result.store.setConnected(true);
+    const conversation = result.store.get("a");
+    result.api.messages.mockResolvedValueOnce([message(1, { userId: "self" }), message(2)]);
+    await conversation.refresh();
+    return { ...result, conversation };
+  }
+  it("edits only the author's valid text, preserves an unrelated draft and works without a WS echo", async () => {
+    const { api, conversation: c } = await opened();
+    c.edit("outro rascunho");
+    expect(await c.editMessage(message(2).id, "outra pessoa")).toBe(false);
+    expect(await c.editMessage(message(1).id, " ")).toBe(false);
+    expect(await c.editMessage(message(1).id, "x".repeat(4001))).toBe(false);
+    expect(api.editMessage).not.toHaveBeenCalled();
+    expect(await c.editMessage(message(1).id, "editada")).toBe(true);
+    expect(c.getSnapshot().messages[0]).toMatchObject({ content: "editada", editedAt: expect.any(String) });
+    expect(c.getSnapshot().draft.text).toBe("outro rascunho");
+  });
+  it("does not overwrite a live edit/reaction or resurrect a deleted message with late HTTP", async () => {
+    const { api, store, conversation: c } = await opened();
+    const response = deferred<Message>(); api.editMessage.mockReturnValueOnce(response.promise);
+    const editing = c.editMessage(message(1).id, "minha edição");
+    store.receive({ t: "messageUpdate", message: message(1, { userId: "self", content: "mais recente", reactions: [{ emoji: "🔥", userIds: ["other"] }] }) });
+    response.resolve(message(1, { userId: "self", content: "minha edição" })); await editing;
+    expect(c.getSnapshot().messages[0]).toMatchObject({ content: "mais recente", reactions: [{ emoji: "🔥", userIds: ["other"] }] });
+    const reaction = deferred<Message>(); api.setReaction.mockReturnValueOnce(reaction.promise);
+    const reacting = c.setReaction(message(2).id, "👍", true);
+    store.receive({ t: "messageDelete", channelId: "a", id: message(2).id });
+    reaction.resolve(message(2)); await reacting;
+    expect(c.getSnapshot().messages).toHaveLength(1);
+  });
+  it("preserves a confirmed mutation when a previously started history request returns", async () => {
+    const { api, conversation: c } = await opened();
+    const history = deferred<Message[]>(); api.messages.mockReturnValueOnce(history.promise);
+    const refreshing = c.refresh();
+    await c.editMessage(message(1).id, "editada");
+    history.resolve([message(1, { userId: "self" }), message(2)]); await refreshing;
+    expect(c.getSnapshot().messages[0]?.content).toBe("editada");
+  });
+  it("adds/removes reactions and confirms deletion without requiring a gateway event", async () => {
+    const { api, conversation: c } = await opened();
+    await c.setReaction(message(2).id, "👍", true);
+    expect(c.getSnapshot().messages[1]?.reactions).toEqual([{ emoji: "👍", userIds: ["self"] }]);
+    await c.setReaction(message(2).id, "👍", false);
+    expect(c.getSnapshot().messages[1]?.reactions).toEqual([]);
+    await c.deleteMessage(message(1).id);
+    api.messages.mockResolvedValueOnce([message(1), message(2)]); await c.refresh();
+    expect(c.getSnapshot().messages.map(m => m.id)).toEqual([message(2).id]);
+  });
+  it("prevents duplicate actions and retains content and draft when a mutation fails", async () => {
+    const { api, conversation: c } = await opened();
+    c.edit("rascunho");
+    const failed = deferred<Message>(); api.editMessage.mockReturnValueOnce(failed.promise);
+    const editing = c.editMessage(message(1).id, "editar");
+    expect(await c.editMessage(message(1).id, "duplicar")).toBe(false);
+    expect(api.editMessage).toHaveBeenCalledOnce();
+    failed.reject(new Error("rede caiu")); expect(await editing).toBe(false);
+    expect(c.getSnapshot()).toMatchObject({ draft: { text: "rascunho" }, actionError: "rede caiu", acting: undefined });
+    expect(c.getSnapshot().messages[0]?.content).toBe("texto 1");
+  });
+  it("does not clear history for a moderator permission error and does not act offline", async () => {
+    const { api, store, conversation: c } = await opened();
+    const messages = c.getSnapshot().messages;
+    api.messages.mockResolvedValue(messages);
+    api.deleteMessage.mockRejectedValueOnce(new ApiError(403, "sem permissão"));
+    expect(await c.deleteMessage(message(2).id)).toBe(false);
+    expect(c.getSnapshot().messages).toEqual(messages);
+    store.setConnected(false);
+    expect(await c.setReaction(message(2).id, "👍", true)).toBe(false);
+    expect(api.setReaction).not.toHaveBeenCalled();
+  });
+  it("does not restore content after access is revoked during a mutation", async () => {
+    const { api, conversation: c } = await opened();
+    const response = deferred<Message>(); api.editMessage.mockReturnValueOnce(response.promise);
+    const editing = c.editMessage(message(1).id, "privado");
+    api.messages.mockRejectedValueOnce(new ApiError(403, "sem acesso")); await c.refresh();
+    response.resolve(message(1, { userId: "self", content: "privado" }));
+    expect(await editing).toBe(false);
+    expect(c.getSnapshot().messages).toEqual([]);
   });
 });

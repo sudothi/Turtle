@@ -1,4 +1,4 @@
-import { sentMessageId, sendTextBody, type Message, type ServerEvent } from "@turtle/protocol";
+import { editMessageBody, sentMessageId, sendTextBody, type Message, type ServerEvent } from "@turtle/protocol";
 import { ApiError, type Api } from "../api";
 import { errorText } from "../session";
 import { editDraft, emptyDraft, encodeDraft, type Draft } from "./draft";
@@ -7,7 +7,7 @@ export interface PendingSend { id: string; requestId: string; content: string; d
 export interface ConversationState {
   messages: Message[]; draft: Draft; outbox: PendingSend[]; restoring: boolean;
   loading: boolean; loadingOlder: boolean; hasMore: boolean; newCount: number;
-  error?: string; storageError?: string;
+  error?: string; storageError?: string; acting?: string; actionError?: string;
 }
 export interface ConversationDisk { draft: Draft; outbox: PendingSend[] }
 export const compareMessages = (a: Pick<Message, "createdAt" | "id">, b: Pick<Message, "createdAt" | "id">) => a.createdAt === b.createdAt ? a.id < b.id ? -1 : a.id > b.id ? 1 : 0 : a.createdAt < b.createdAt ? -1 : 1;
@@ -27,7 +27,7 @@ export class Conversation {
   private refreshing?: Promise<void>;
   private refreshQueued = false;
   private older?: Promise<void>;
-  constructor(readonly channelId: string, private readonly userId: string, private readonly api: Pick<Api, "messages" | "sendText">, private readonly connected: () => boolean, private readonly id: () => string, private readonly changed: () => void, private readonly persist: () => Promise<void>, private readonly reject: (error: unknown) => Promise<boolean>) {}
+  constructor(readonly channelId: string, private readonly userId: string, private readonly api: ConversationApi, private readonly connected: () => boolean, private readonly id: () => string, private readonly changed: () => void, private readonly persist: () => Promise<void>, private readonly reject: (error: unknown) => Promise<boolean>) {}
   getSnapshot = () => this.state;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private set(patch: Partial<ConversationState>) { if (!this.stopped) { this.state = { ...this.state, ...patch }; this.listeners.forEach(fn => fn()); } }
@@ -37,6 +37,44 @@ export class Conversation {
   setDraft = (draft: Draft) => { if (!this.state.restoring) { this.set({ draft }); this.changed(); } };
   edit = (text: string) => this.setDraft(editDraft(this.state.draft, text));
   setAtLatest = (value: boolean) => { this.atLatest = value; if (value && this.state.newCount) this.set({ newCount: 0 }); };
+
+  clearActionError = () => this.set({ actionError: undefined });
+  editMessage = (id: string, content: string) => {
+    if (!editMessageBody.safeParse({ content }).success) {
+      this.set({ actionError: "Use de 1 a 4000 caracteres na mensagem." });
+      return Promise.resolve(false);
+    }
+    if (this.state.messages.find(message => message.id === id)?.userId !== this.userId) return Promise.resolve(false);
+    return this.mutateMessage(id, () => this.api.editMessage(id, content));
+  };
+  deleteMessage = (id: string) => this.mutateMessage(id, async () => { await this.api.deleteMessage(id); });
+  setReaction = (id: string, emoji: string, add: boolean) => this.mutateMessage(id, () => this.api.setReaction(id, emoji, add));
+  private async mutateMessage(id: string, operation: () => Promise<Message | void>) {
+    if (this.stopped || this.denied || this.state.acting || !this.state.messages.some(message => message.id === id)) return false;
+    if (!this.connected()) { this.set({ actionError: "Sem conexão. Tente novamente quando voltar à rede." }); return false; }
+    this.set({ acting: id, actionError: undefined });
+    const started = this.revision, epoch = this.accessEpoch;
+    try {
+      const result = await operation();
+      if (this.stopped || this.denied || epoch !== this.accessEpoch) return false;
+      if (result) {
+        if (result.id !== id || result.channelId !== this.channelId) throw new Error("A resposta não confirmou esta alteração. Atualize a conversa.");
+        if ((this.versions.get(id) ?? 0) <= started && !this.deleted.has(id)) {
+          this.versions.set(id, ++this.revision);
+          this.merge([result]);
+        }
+      } else this.receive({ t: "messageDelete", channelId: this.channelId, id });
+      return true;
+    } catch (error) {
+      if (!this.stopped) {
+        try { if (!await this.reject(error)) this.set({ actionError: errorText(error) }); }
+        catch (cause) { this.set({ actionError: errorText(cause) }); }
+        // A mutation can be forbidden without revoking access to the conversation.
+        if (error instanceof ApiError && (error.status === 403 || error.status === 404)) void this.refresh(true);
+      }
+      return false;
+    } finally { this.set({ acting: undefined }); }
+  }
 
   private merge(items: Message[], started = this.revision) {
     const all = new Map(this.state.messages.map(m => [m.id, m]));
@@ -157,3 +195,5 @@ export class Conversation {
   }
   dispose() { this.stopped = true; this.listeners.clear(); }
 }
+
+export type ConversationApi = Pick<Api, "messages" | "sendText" | "editMessage" | "deleteMessage" | "setReaction">;

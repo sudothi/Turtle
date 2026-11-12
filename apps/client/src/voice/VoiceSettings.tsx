@@ -59,6 +59,28 @@ function ShowGameSetting() {
   );
 }
 
+/** Iniciar o Turtle junto com o Windows (abre direto na bandeja). Só no app instalado. */
+function StartupSetting() {
+  const [state, setState] = useState<{ supported: boolean; on: boolean }>({ supported: false, on: false });
+  useEffect(() => {
+    void desktop()?.startup?.get().then(setState).catch(() => {});
+  }, []);
+  if (!state.supported) return null;
+  return (
+    <>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={state.on}
+          onChange={(e) => void desktop()?.startup?.set(e.target.checked).then((on) => setState({ supported: true, on })).catch(() => {})}
+        />
+        Iniciar o Turtle com o Windows
+      </label>
+      <span className="field-note">Abre minimizado na bandeja, sem janela.</span>
+    </>
+  );
+}
+
 function ShortcutSettings() {
   const [keys, setKeys] = useState<Shortcuts>(loadShortcuts);
   const [rec, setRec] = useState<keyof Shortcuts | null>(null);
@@ -290,6 +312,7 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
         <MicTest prefs={prefs} />
         {desktop()?.setShortcuts && <ShortcutSettings />}
         {desktop()?.setActivityEnabled && <ShowGameSetting />}
+        {desktop()?.startup && <StartupSetting />}
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>
       </div>
     </div>

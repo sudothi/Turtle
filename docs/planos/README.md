@@ -10,5 +10,6 @@ Versões editáveis (com comentários) ficam no Claude Docs; aqui fica uma cópi
 - [Hospedar em uma VPS](../hospedar-em-vps.md) e [instalar com ajuda de uma IA](../instalar-com-ia.md)
 - [iOS: prioridades, distribuição gratuita e aceite físico](ios.md)
 - [App "Download DEV" para quem hospeda](app-dev-instalador.md): proposta, sem implementação
+- [Game Automations (desktop, LoL)](game-automations.md): proposta, sem implementação
 
 Status em 2026-11-03: marcos 0, 1 e 2 (voz) e o redesign linocut estão na main. Tela/câmera e servidores estão só planejados.

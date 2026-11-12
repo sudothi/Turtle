@@ -1,6 +1,6 @@
 # Plano: "Download DEV" (instalador para quem hospeda o próprio Turtle)
 
-Status: decidido em 2026-11-11 pelo thiago (CLI, Fase 1 primeiro). Passo 1 em andamento (Android).
+Status: decidido em 2026-11-11 pelo thiago (CLI, Fase 1 primeiro). Passos 1 a 3 mesclados (#215, #216); o CLI está em `apps/cli` (Turtle Setup).
 
 ## Decisões de 2026-11-11
 

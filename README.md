@@ -56,6 +56,10 @@ Pensado para grupos pequenos: cerca de **30 contas** e até **6 pessoas por cham
 
 Você precisa de: uma **VPS** Ubuntu 24.04 (2 vCPU e 4 GB de RAM já servem; Hostinger, Hetzner, DigitalOcean, Oracle…), um **domínio** seu e uns 15 minutos.
 
+### Jeito mais fácil: Turtle Setup (Download DEV)
+
+Baixe o executável do seu sistema nas [Releases](https://github.com/sudothi/turtle/releases), aponte `app.` e `lk.` do seu domínio para a VPS e rode `turtle-setup instalar`. Ele entra na VPS por SSH (só com chave), instala Docker, firewall, o Turtle e o backup, e te entrega o link do primeiro convite. Depois: `turtle-setup atualizar`, `status`, `desktop publicar`. Guia: [apps/cli/README.md](apps/cli/README.md).
+
 ### Jeito fácil: peça para uma IA fazer
 
 Abra [docs/instalar-com-ia.md](docs/instalar-com-ia.md), copie o prompt pronto e cole no Claude, ChatGPT ou outro assistente com acesso ao terminal da sua VPS. Ele instala tudo, configura DNS, HTTPS, firewall e backup, e te entrega o link do primeiro convite.

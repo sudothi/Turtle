@@ -16,7 +16,7 @@ Chat privado estilo Discord para o grupo de amigos do thiago, otimizado para **c
 
 ## Stack e estrutura
 TypeScript, pnpm + Turborepo. Node/Fastify + WebSocket próprio, PostgreSQL (Drizzle), LiveKit auto-hospedado (SFU), Docker Compose + Caddy, sharp (imagens).
-- `apps/server` API + gateway WebSocket · `apps/client` React (web, só login e app) ·  · `apps/desktop` Electron · `apps/android` nativo Kotlin/Compose · `apps/ios` prova inicial React Native
+- `apps/server` API + gateway WebSocket · `apps/client` React (web, só login e app) ·  · `apps/desktop` Electron · `apps/cli` Turtle Setup (executável para quem hospeda: instala/atualiza a VPS por SSH) · `apps/android` nativo Kotlin/Compose · `apps/ios` prova inicial React Native
 - `packages/protocol` tipos compartilhados · `packages/db` banco/migrações · `packages/ui` design system linocut
 - `infra/` compose, Caddyfile, LiveKit, backup e deploy · `docs/planos/` planos de cada frente
 

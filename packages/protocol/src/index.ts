@@ -55,8 +55,9 @@ export const messageSchema = z.object({
 });
 export type Message = z.infer<typeof messageSchema>;
 
-/** Confirmed text sends. Reuse requestId only for the exact same conversation/text. */
-export const sendTextBody = z.object({ requestId: z.string().uuid(), content: z.string().trim().min(1).max(4000) });
+const messageId = z.string().min(1).max(128);
+/** Confirmed sends. Reuse requestId only for the same conversation, text and reply target. */
+export const sendTextBody = z.object({ requestId: z.string().uuid(), content: z.string().trim().min(1).max(4000), replyTo: messageId.optional() });
 export const sentMessageId = (userId: string, requestId: string) => `send:${userId}:${requestId}`;
 
 export const channelKind = z.enum(["text", "voice"]);
@@ -428,7 +429,7 @@ export const clientEvent = z.discriminatedUnion("t", [
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
     /** Responder a uma mensagem do mesmo canal. */
-    replyTo: z.string().max(64).optional(),
+    replyTo: messageId.optional(),
     /**
      * Id gerado pelo cliente: volta no evento `message` (ou `error`) para confirmar o envio, e o servidor
      * ignora o reenvio do mesmo nonce (quando a conexão caiu antes da confirmação).

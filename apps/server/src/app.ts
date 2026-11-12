@@ -1584,32 +1584,47 @@ export async function buildApp({
       return { ok: true };
     });
 
-    authed.post<{ Params: { id: string } }>("/channels/:id/messages", async (req, reply) => {
+    class ReplyUnavailable extends Error {}
+    const sendConfirmedText = (requireReply = false) => async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const body = sendTextBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "mensagem inválida (1 a 4000 caracteres)" });
+      if (requireReply && !body.data.replyTo) return reply.code(400).send({ error: "escolha a mensagem que deseja responder" });
       const channel = await findChannel(req.params.id);
       const user = me(req);
       if (!channel || !(await canUseText(channel, user.id))) return reply.code(404).send({ error: "canal não existe" });
       if (channel.kind === "dm" && await dmBlocked(channel.id)) return reply.code(403).send({ error: "não é possível enviar mensagem para essa pessoa" });
-      const { requestId, content } = body.data;
+      const { requestId, content, replyTo } = body.data;
       const id = sentMessageId(user.id, requestId);
-      const bodyHash = createHash("sha256").update(content).digest("hex");
-      const result = await db.transaction(async tx => {
+      // Preserve pre-existing receipts for plain text, and distinguish replies from any raw text.
+      const bodyHash = replyTo ? `reply-v1:${createHash("sha256").update(JSON.stringify([content, replyTo])).digest("hex")}` : createHash("sha256").update(content).digest("hex");
+      let result: "created" | "replay" | "conflict";
+      try { result = await db.transaction(async tx => {
         const inserted = await tx.insert(messageReceipts).values({ userId: user.id, requestId, channelId: channel.id, bodyHash }).onConflictDoNothing().returning();
         if (!inserted.length) {
           const [receipt] = await tx.select().from(messageReceipts).where(and(eq(messageReceipts.userId, user.id), eq(messageReceipts.requestId, requestId)));
           return receipt?.channelId === channel.id && receipt.bodyHash === bodyHash ? "replay" : "conflict";
         }
-        await tx.insert(messages).values({ id, channelId: channel.id, userId: user.id, content, createdAt: new Date() });
+        // Check only new sends: a confirmed reply remains replayable after its original is deleted.
+        if (replyTo) {
+          const [target] = await tx.select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, replyTo)).limit(1);
+          if (!target || target.channelId !== channel.id) throw new ReplyUnavailable();
+        }
+        await tx.insert(messages).values({ id, channelId: channel.id, userId: user.id, content, createdAt: new Date(), replyTo: replyTo ?? null });
         return "created";
-      });
+      }); } catch (error) {
+        if (error instanceof ReplyUnavailable) return reply.code(400).send({ error: "a mensagem respondida não existe mais neste canal", code: "REPLY_UNAVAILABLE" });
+        throw error;
+      }
       if (result === "conflict") return reply.code(409).send({ error: "identificador de envio já usado com outra mensagem" });
       const message = await loadMessage(id);
       if (!message) return reply.code(410).send({ error: "esta mensagem já foi enviada e apagada" });
       if (result === "created") await toChannel(channel, { t: "message", message });
       await markRead(user.id, channel.id);
       return message;
-    });
+    };
+    authed.post("/channels/:id/messages", sendConfirmedText());
+    // Old backends return 404 for this route instead of silently stripping the replyTo field.
+    authed.post("/channels/:id/messages/replies", sendConfirmedText(true));
 
     authed.get<{ Params: { id: string }; Querystring: { before?: string; beforeId?: string; limit?: string } }>(
       "/channels/:id/messages",

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { clientEvent, encodeMentions, mentionedIds, registerBody, splitMentions } from "./index.js";
+import { clientEvent, encodeMentions, mentionedIds, registerBody, sendTextBody, splitMentions } from "./index.js";
 
 describe("protocol", () => {
+  it("preserva o envio HTTP antigo e valida referências de resposta em HTTP e WebSocket", () => {
+    const body = { requestId: "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc", content: "texto" };
+    expect(sendTextBody.parse(body)).toEqual(body);
+    const replyTo = `send:${"u".repeat(36)}:${body.requestId}`;
+    expect(sendTextBody.parse({ ...body, replyTo }).replyTo).toBe(replyTo);
+    expect(clientEvent.safeParse({ t: "send", channelId: "c", content: "resposta", replyTo }).success).toBe(true);
+    for (const replyTo of ["", "x".repeat(129), null, 42]) {
+      expect(sendTextBody.safeParse({ ...body, replyTo }).success).toBe(false);
+    }
+  });
   it("aceita ping e send", () => {
     expect(clientEvent.parse({ t: "ping" })).toEqual({ t: "ping" });
     expect(clientEvent.parse({ t: "send", channelId: "c", content: " oi " }).t).toBe("send");

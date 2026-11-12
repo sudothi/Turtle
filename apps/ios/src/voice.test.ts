@@ -195,6 +195,64 @@ describe("call recovery", () => {
 
 
 describe("camera and screen subscriptions", () => {
+  it.each(["local", "remote"])("removes muted %s video even when its track is retained, then resumes on unmute", async side => {
+    const { voice } = setup();
+    await voice.join("voice1", "Amigos", false);
+    const room = fake.Room.instances[0]!;
+    const camera = { source: "camera", trackSid: "camera", isMuted: false, videoTrack: {} as object | undefined, setSubscribed: vi.fn() };
+    const participant = side === "local" ? room.localParticipant : {
+      identity: "friend", name: "Amigo", getTrackPublication: vi.fn((source: string) => source === "camera" ? camera : undefined),
+      trackPublications: new Map([[camera.trackSid, camera]]), audioTrackPublications: new Map(), isMicrophoneEnabled: true,
+    };
+    if (side === "local") room.localParticipant.getTrackPublication.mockImplementation(source => source === "camera" ? camera : undefined);
+    else room.remoteParticipants.set(participant.identity, participant);
+    room.emit(side === "local" ? "localTrackPublished" : "trackSubscribed", camera.videoTrack, camera, participant);
+    const member = () => voice.getSnapshot().members.find(member => member.id === participant.identity)!;
+    expect(member().video?.publication).toBe(camera);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      camera.isMuted = true;
+      room.emit("trackMuted", camera, participant);
+      expect(camera.videoTrack).toBeDefined();
+      expect(member().video).toBeUndefined();
+      camera.isMuted = false;
+      room.emit("trackUnmuted", camera, participant);
+      expect(member().video?.publication).toBe(camera);
+    }
+    camera.videoTrack = undefined;
+    room.emit("trackUnsubscribed", undefined, camera, participant);
+    expect(member().video).toBeUndefined();
+    camera.videoTrack = {};
+    room.emit(side === "local" ? "localTrackPublished" : "trackSubscribed", camera.videoTrack, camera, participant);
+    expect(member().video).toBeDefined();
+    participant.getTrackPublication.mockReturnValue(undefined);
+    room.emit(side === "local" ? "localTrackUnpublished" : "trackUnpublished", camera, participant);
+    expect(member().video).toBeUndefined();
+    await voice.leave();
+  });
+  it("removes the local video in background when disabling capture retains a muted track", async () => {
+    let active = true;
+    const { voice } = setup(() => active);
+    await voice.join("voice1", "Amigos", false);
+    const room = fake.Room.instances[0]!;
+    const camera = { isMuted: false, videoTrack: {} };
+    room.localParticipant.getTrackPublication.mockImplementation(source => source === "camera" ? camera : undefined);
+    room.localParticipant.setCameraEnabled.mockImplementation(async enabled => {
+      room.localParticipant.isCameraEnabled = enabled;
+      camera.isMuted = !enabled;
+    });
+    await voice.toggleCamera();
+    expect(voice.getSnapshot().members[0]!.video).toBeDefined();
+    active = false;
+    await voice.background();
+    expect(camera.videoTrack).toBeDefined();
+    expect(voice.getSnapshot()).toMatchObject({ camera: false, members: [expect.objectContaining({ video: undefined })] });
+    active = true;
+    voice.foreground();
+    expect(voice.getSnapshot().members[0]!.video).toBeUndefined();
+    await voice.toggleCamera();
+    expect(voice.getSnapshot().members[0]!.video).toBeDefined();
+    await voice.leave();
+  });
   it("keeps the camera off after a brief inactive/active transition during camera startup", async () => {
     let active = true;
     const { voice } = setup(() => active);

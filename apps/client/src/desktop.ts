@@ -15,6 +15,11 @@ export interface TurtleDesktop {
   onPickScreen(cb: (req: PickRequest) => void): () => void;
   pickScreen(id: string | null): void;
   openWebrtcInternals(): void;
+  /** Iniciar com o Windows (versões novas do app instalado). */
+  startup?: {
+    get(): Promise<{ supported: boolean; on: boolean }>;
+    set(on: boolean): Promise<boolean>;
+  };
   /** Áudio da transmissão por processo (versões novas do app, Windows). */
   shareAudio?: {
     supported(): Promise<boolean>;

@@ -1142,3 +1142,94 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
 .jb-invite.is-playing .music-vinyl-disc { animation-play-state: running; }
 .jb-invite-btn { margin-left: auto; }
 .jb-invite-btn + .sb-volume { margin-left: 0; }
+
+/* ===================== Game Automations (desktop) ===================== */
+.ga-panel { width: min(440px, calc(100vw - 32px)); max-height: min(680px, 82vh); }
+.ga-body, .ga-picker { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; margin: 0 -4px; padding: 0 4px 2px; }
+.ga-status { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border: 1px solid var(--ink-4); border-radius: 999px; font-size: var(--fs-xs); font-weight: 700; color: var(--paper-dim, #9a9790); white-space: nowrap; }
+.ga-status.open { color: var(--paper); border-color: var(--paper); }
+.ga-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-5); }
+.ga-status.open .ga-dot { background: var(--paper); box-shadow: 0 0 0 3px color-mix(in srgb, var(--paper) 25%, transparent); animation: ga-pulse 2.4s ease-in-out infinite; }
+@keyframes ga-pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+.ga-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--ink-1); }
+.ga-tab { flex: 1; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--paper-dim, #9a9790); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer; }
+.ga-tab.on { background: var(--paper); color: var(--ink-0); }
+.ga-tab:disabled { cursor: default; opacity: 0.6; }
+.ga-tab small { font-weight: 600; font-size: var(--fs-xs); opacity: 0.8; }
+.ga-me { margin: 2px 2px 0; font-size: var(--fs-xs); }
+.ga-me b { color: var(--paper); }
+.ga-sub { margin: 6px 2px 0; font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.ga-card { --lino-bg: var(--ink-3); --lino-radius: 10px; --slash-gap: var(--ink-3); display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; transition: transform 0.12s; }
+.ga-card.on { --lino-bg: var(--ink-4); --slash-gap: var(--ink-4); }
+.ga-row { display: flex; align-items: center; gap: 10px; }
+.ga-row-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--ink-1); color: var(--paper); }
+.ga-card.on .ga-row-icon { background: var(--paper); color: var(--ink-0); }
+.ga-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ga-row-text b { font-size: var(--fs-md, 0.95rem); }
+.ga-row-text .t-muted { font-size: var(--fs-xs); }
+.ga-card-body { display: flex; flex-direction: column; gap: 8px; padding-left: 42px; }
+.ga-switch { position: relative; flex: none; width: 42px; height: 24px; padding: 0; border: 2px solid var(--ink-5); border-radius: 999px; background: var(--ink-1); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.ga-switch-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--paper-dim, #9a9790); transition: transform 0.18s cubic-bezier(.3,1.4,.5,1), background 0.15s; }
+.ga-switch.on { background: var(--paper); border-color: var(--paper); }
+.ga-switch.on .ga-switch-knob { transform: translateX(18px); background: var(--ink-0); }
+.ga-switch:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+.ga-delay { display: flex; align-items: center; gap: 10px; font-size: var(--fs-xs); color: var(--paper-dim, #9a9790); }
+.ga-delay input { flex: 1; accent-color: var(--paper); }
+.ga-delay b { min-width: 3em; text-align: right; color: var(--paper); font-variant-numeric: tabular-nums; }
+.ga-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+.ga-slot { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 8px 5px 5px; border: 1px solid var(--ink-5); border-radius: 8px; background: var(--ink-1); color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.ga-slot:hover:not(:disabled), .ga-slot:focus-visible { border-color: var(--paper); outline: none; }
+.ga-slot.empty { border-style: dashed; color: var(--paper-dim, #9a9790); }
+.ga-slot-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.2; }
+.ga-slot-text small { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--paper-dim, #9a9790); }
+.ga-slot-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.ga-champ-icon { display: grid; place-items: center; flex: none; border-radius: 6px; background: var(--ink-2); color: var(--paper); font-weight: 800; font-size: 0.8rem; text-transform: uppercase; object-fit: cover; filter: grayscale(1) contrast(1.1); box-shadow: 0 0 0 2px var(--ink-0); }
+.ga-slot:hover .ga-champ-icon, .ga-tile:hover .ga-champ-icon, .ga-tile.on .ga-champ-icon, .ga-card.on .ga-champ-icon { filter: none; }
+.ga-random { background: var(--paper); color: var(--ink-0); font-family: var(--font-display, inherit); font-size: 1.3rem; }
+.ga-none { background: transparent; outline: 2px dashed var(--ink-5); outline-offset: -2px; box-shadow: none; color: var(--paper-dim, #9a9790); }
+.ga-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ga-tool { --lino-bg: var(--ink-3); --lino-radius: 10px; --slash-gap: var(--ink-3); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px 10px; border: 0; color: var(--paper); font: inherit; text-align: center; cursor: pointer; transition: transform 0.12s; }
+.ga-tool b { font-size: var(--fs-sm); }
+.ga-tool small { font-size: 0.7rem; color: var(--paper-dim, #9a9790); line-height: 1.2; }
+.ga-tool:hover:not(:disabled) { --lino-bg: var(--ink-4); --slash-gap: var(--ink-4); transform: rotate(-1.5deg); }
+.ga-tool:active:not(:disabled) { --lino-bg: var(--paper); --slash-gap: var(--paper); color: var(--ink-0); }
+.ga-tool:disabled { opacity: 0.42; cursor: not-allowed; }
+.ga-tool.danger, .ga-tool.danger:hover:not(:disabled) { --lino-bg: var(--paper); --slash-gap: var(--paper); color: var(--ink-0); animation: ga-shake 0.35s; }
+.ga-tool.danger small { color: var(--ink-2); }
+@keyframes ga-shake { 25% { transform: translateX(-2px) rotate(-1deg); } 75% { transform: translateX(2px) rotate(1deg); } }
+.ga-reveal { --lino-bg: var(--ink-1); --lino-radius: 10px; --slash-gap: var(--ink-1); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.ga-reveal-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-sm); }
+.ga-players { margin: 0; padding: 0; list-style: none; counter-reset: ga; display: flex; flex-direction: column; gap: 2px; }
+.ga-players li { counter-increment: ga; display: flex; align-items: baseline; gap: 2px; padding: 4px 6px; border-radius: 4px; font-size: var(--fs-sm); min-width: 0; }
+.ga-players li::before { content: counter(ga); width: 1.4em; color: var(--paper-dim, #9a9790); font-weight: 800; font-size: var(--fs-xs); }
+.ga-players li:nth-child(odd) { background: var(--ink-2); }
+.ga-players b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-reveal-act { display: flex; align-items: center; gap: 6px; }
+.ga-seg { display: flex; flex: 1; gap: 2px; padding: 2px; border-radius: 6px; background: var(--ink-2); }
+.ga-seg button { flex: 1; padding: 5px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--paper-dim, #9a9790); font: inherit; font-size: var(--fs-xs); font-weight: 700; cursor: pointer; }
+.ga-seg button.on { background: var(--paper); color: var(--ink-0); }
+.ga-picker .jb-search:focus-within { outline-offset: -2px; }
+.ga-picker-head { display: flex; align-items: center; gap: 6px; }
+.ga-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; overflow-y: auto; max-height: 380px; padding: 2px; }
+.ga-tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border: 0; border-radius: 8px; background: transparent; color: var(--paper); font: inherit; font-size: 0.7rem; cursor: pointer; min-width: 0; }
+.ga-tile span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-tile:hover, .ga-tile:focus-visible { background: var(--ink-3); outline: none; }
+.ga-tile.on { background: var(--paper); color: var(--ink-0); }
+.ga-empty { grid-column: 1 / -1; margin: 10px 2px; font-size: var(--fs-sm); }
+.ga-error { color: var(--paper); }
+.ga-error::before { content: "! "; font-weight: 900; }
+.t-icon-btn.ga-live { position: relative; }
+.t-icon-btn.ga-live::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--paper); box-shadow: 0 0 0 2px var(--bg-panel, var(--ink-2)); }
+.t-icon-btn.ga-live.is-on::after { background: var(--ink-0); box-shadow: 0 0 0 2px var(--paper); }
+@media (prefers-reduced-motion: reduce) { .ga-status.open .ga-dot, .ga-tool.danger { animation: none; } }
+.ga-strip { border-bottom: 2px solid var(--ink-3); }
+.ga-strip-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; background: transparent; color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.ga-strip-btn:hover, .ga-strip-btn:focus-visible, .ga-strip.open .ga-strip-btn { background: var(--ink-2); outline: none; }
+.ga-strip-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--ink-1); }
+.ga-strip.lol-open .ga-strip-icon { background: var(--paper); color: var(--ink-0); }
+.ga-strip-text { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: var(--fs-sm); line-height: 1.25; }
+.ga-strip-text b { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ga-strip-text .t-muted { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-strip .ga-dot { width: 6px; height: 6px; }
+.ga-strip.lol-open .ga-dot { background: var(--paper); }
+.ga-setting { --lino-bg: var(--ink-3); --lino-radius: 10px; --slash-gap: var(--ink-3); display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 12px 0; }

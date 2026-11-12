@@ -10,6 +10,34 @@ export interface PickRequest {
   audio: boolean;
   sources: PickSource[];
 }
+/** Game Automations do LoL (espelha apps/desktop/src/lcu/automations.ts). */
+export type RevealProvider = "porofessor" | "opgg" | "ugg";
+export interface AutoConfig {
+  accept: { on: boolean; delayMs: number };
+  /** champion: id do campeão ou -1 (aleatório). */
+  pick: { on: boolean; champion: number | null; fallback: number | null; delayMs: number };
+  ban: { on: boolean; champion: number | null; delayMs: number };
+  reveal: { provider: RevealProvider };
+}
+export interface AutoLogLine { at: number; kind: "ok" | "info" | "warn" | "error"; text: string }
+export interface AutoStatus { client: "closed" | "open"; phase: string | null; me: { name: string; icon: number } | null; log: AutoLogLine[] }
+export interface Champion { id: number; name: string; alias: string }
+export interface RevealResult { players: string[]; region: string; links: Record<RevealProvider, string> }
+export type ToolResult<T = unknown> = { ok: true; result: T } | { ok: false; error: string };
+export interface DesktopAutomations {
+  get(): Promise<{ config: AutoConfig; status: AutoStatus } | null>;
+  set(patch: { [K in keyof AutoConfig]?: Partial<AutoConfig[K]> }): Promise<AutoConfig | null>;
+  watch(on: boolean): void;
+  /** Acompanha o cliente devagar (faixa fora da chamada). Versões novas do app. */
+  background?(on: boolean): void;
+  champions(): Promise<Champion[]>;
+  icon(id: number): Promise<string | null>;
+  tool(which: "reveal"): Promise<ToolResult<RevealResult>>;
+  tool(which: "dodge" | "restart"): Promise<ToolResult>;
+  open(url: string): Promise<boolean>;
+  onStatus(cb: (s: AutoStatus) => void): () => void;
+}
+
 export interface TurtleDesktop {
   platform: string;
   onPickScreen(cb: (req: PickRequest) => void): () => void;
@@ -38,6 +66,8 @@ export interface TurtleDesktop {
   /** Detector de jogos (versões novas do app): ligar reenvia o estado atual. */
   setActivityEnabled?(on: boolean): void;
   onActivity?(cb: (a: { game: string; phase: string | null; detail: string | null } | null) => void): () => void;
+  /** Game Automations do LoL (versões novas do app). */
+  automations?: DesktopAutomations;
 }
 
 /** Mostrar o jogo que estou jogando (só o desktop detecta). Começa ligado. */

@@ -229,6 +229,25 @@ const icons = {
       <path d="M4.3 10.6h15.4M4.3 16h15.4M12 5.1v16.4M8.4 5.9c-1.7 2.1-2.5 4.6-2.5 7.4s.8 5.3 2.5 7.4M15.6 5.9c1.7 2.1 2.5 4.6 2.5 7.4s-.8 5.3-2.5 7.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
     </>
   ),
+  /** Controle de videogame (Game Automations): corpo cheio com o direcional e os botões vazados. */
+  gamepad: (
+    <path
+      fillRule="evenodd"
+      fill="currentColor"
+      d="M7.2 6.5h9.6a5.2 5.2 0 0 1 5.1 4.3l.95 5.3a2.7 2.7 0 0 1-4.6 2.35L15.6 15.8H8.4l-2.65 2.65a2.7 2.7 0 0 1-4.6-2.35l.95-5.3A5.2 5.2 0 0 1 7.2 6.5zM6.3 9.4v1.9H4.4v1.9h1.9v1.9h1.9v-1.9h1.9v-1.9H8.2V9.4zM17.3 9.6a1.15 1.15 0 1 0 0 2.3a1.15 1.15 0 1 0 0-2.3zM15.1 11.9a1.15 1.15 0 1 0 0 2.3a1.15 1.15 0 1 0 0-2.3z"
+    />
+  ),
+  /** Recarregar / reiniciar. */
+  refresh: (
+    <>
+      <path d="M19.4 13.2A7.5 7.5 0 1 1 17 6.6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M20.3 3.2v5.6h-5.6z" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </>
+  ),
+  /** Espadas cruzadas (ban/pick da seleção de campeões). */
+  swords: (
+    <path d="M4 4l9.5 9.5M20 4l-9.5 9.5M4 4h3.2l.2 3.4M20 4h-3.2l-.2 3.4M6.2 15.4l2.4 2.4M17.8 15.4l-2.4 2.4M5 19l2.4-2.4M19 19l-2.4-2.4" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+  ),
 } as const;
 
 export type IconName = keyof typeof icons;

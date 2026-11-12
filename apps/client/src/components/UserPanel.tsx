@@ -7,6 +7,7 @@ import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 import { desktop } from "../desktop";
 import { SoundboardButton } from "./Soundboard";
 import { JukeboxButton } from "./Jukebox";
+import { GameAutomationsButton } from "./GameAutomations";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
   idle: "",
@@ -91,6 +92,7 @@ export function UserPanel({
               </IconButton>
               {callServer && <SoundboardButton server={callServer} meId={user.id} deafened={snap.deafened} compact />}
               {callServer && snap.channelId && <JukeboxButton channelId={snap.channelId} nameOf={nameOf ?? (() => "alguém")} deafened={snap.deafened} compact />}
+              <GameAutomationsButton compact />
             </div>
           )}
           {snap.needsAudioUnlock && (
@@ -100,6 +102,7 @@ export function UserPanel({
           )}
         </div>
       )}
+      {snap.status === "idle" && <GameAutomationsButton strip />}
       {snap.error && (
         <div className="voice-error" role="alert">
           {snap.error}

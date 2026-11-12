@@ -8,8 +8,9 @@ import { ProfileSettings } from "./ProfileSettings";
 import { AccountSettings } from "./AccountSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { DesktopDownload } from "./DesktopDownload";
+import { GameAutomationsSetting, hasAutomations } from "./GameAutomations";
 
-export type SettingsTab = "profile" | "account" | "admin" | "voice" | "notifications" | "shortcuts" | "activity" | "desktop";
+export type SettingsTab = "profile" | "account" | "admin" | "voice" | "notifications" | "shortcuts" | "activity" | "games" | "desktop";
 
 interface Tab { id: SettingsTab; label: string; subtitle: string; group: string; show?: () => boolean }
 
@@ -23,6 +24,7 @@ const tabs: Tab[] = [
   { id: "notifications", label: "Notificações", subtitle: "Sons do app e avisos de mensagem", group: APP },
   { id: "shortcuts", label: "Atalhos", subtitle: "Mutar e ensurdecer de qualquer lugar", group: APP, show: () => !!desktop()?.setShortcuts },
   { id: "activity", label: "Atividade", subtitle: "O que os outros veem que você está fazendo", group: APP, show: () => !!desktop()?.setActivityEnabled },
+  { id: "games", label: "Game Automations", subtitle: "Aceitar partida, pick e ban no League of Legends", group: APP, show: hasAutomations },
   { id: "desktop", label: "App desktop", subtitle: "Início com o Windows e download do Turtle", group: APP },
 ];
 
@@ -65,6 +67,7 @@ export function SettingsModal({ user, voice, prefs, tab, onTab, onChanged, onLog
           {current.id === "notifications" && <NotificationSettings />}
           {current.id === "shortcuts" && <ShortcutSettings />}
           {current.id === "activity" && <ShowGameSetting />}
+          {current.id === "games" && <GameAutomationsSetting />}
           {current.id === "desktop" && (
             <>
               <StartupSetting />

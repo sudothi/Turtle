@@ -39,6 +39,14 @@ O deployment target configurado é **iOS 26.0**. O mínimo é o do projeto gerad
 
 A migração de mensagens confirmadas da #113 precisa estar no backend antes de usar os envios HTTP. Nenhum deploy é feito pela criação do IPA ou merge de PR.
 
+## Respostas no próximo build (#112)
+
+O código acrescenta Responder ao menu, prévia no compositor/histórico, cancelamento sem perder texto e referência persistida no rascunho e no envio pendente. Citações de mensagens apagadas são limpas quando o cliente recebe a exclusão ou a confirma pelo histórico/erro de envio. Retentativas mantêm o destino original e não duplicam a mensagem.
+
+O backend estende o envio HTTP confirmado com referência opcional e oferece `/channels/:id/messages/replies`, usada pelo iOS para falhar de forma segura em servidores anteriores. O recibo inclui o destino; recibos de texto sem resposta mantêm a impressão digital anterior. Referências de outro canal/inexistentes são recusadas e não consomem a identificação do envio. O autor da original recebe contagem de menção conforme o contrato existente. Não há mudança de banco nem deploy automático.
+
+O IPA build 7 anterior permanece inalterado; a entrega pertence ao próximo build, junto do domínio `turtlechat.tech` já presente na main (#208/#58). Antes de distribuir: publicar o backend com autorização e testar respostas entre iPhone/web/desktop em canal/DM/grupo, menções, rascunhos, cancelamento, queda de rede e exclusão/edição da original. A #112 mantém seu restante de escopo, incluindo a diferença entre retentativa manual HTTP e reenvio automático WS.
+
 ## Assinatura e capacidades (#46/#56/#57)
 
 Caminho a validar: **AltStore Classic com contas gratuitas**, cada amigo usando sua própria conta Apple. O roteiro inicial usa AltServer no computador. PAL instala apps notarizados, enquanto Classic permite importar o IPA; disponibilidade regional de PAL não comprova compatibilidade com este artefato ([comparação oficial](https://github.com/altstoreio/FAQ/blob/main/altstore-pal-v.-altstore-classic.md)). A documentação atual também oferece [Remote AltServers](https://faq.altstore.io/altstore-classic/remote-altservers), com pareamento e Wi-Fi/VPN; esse caminho ainda não foi exercitado pelo grupo. Uma conta paga fica fora do requisito do núcleo inicial. A escolha gratuita está confirmada; a instalação e as capacidades efetivas continuam pendentes.

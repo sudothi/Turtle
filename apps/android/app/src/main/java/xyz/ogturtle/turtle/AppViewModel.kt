@@ -37,6 +37,9 @@ import xyz.ogturtle.turtle.data.VoiceState
 
 data class UiState(
     val booting: Boolean = true,
+    /** Servidor a que o app está ligado e convite vindo de um link (preenche o cadastro). */
+    val serverUrl: String = "",
+    val inviteDraft: String? = null,
     val user: User? = null,
     val busy: Boolean = false,
     val error: String? = null,
@@ -124,16 +127,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         @Volatile var foreground = false
     }
 
-    private val session = Session(app)
+    private val session = Session(app, BuildConfig.SERVER_URL)
     private val soundStore = SoundStore(app)
-    val api = Api(BuildConfig.SERVER_URL, onUnauthorized = ::clearSession) { session.token }
+    val api = Api({ session.serverUrl }, onUnauthorized = ::clearSession) { session.token }
 
-    private val _state = MutableStateFlow(UiState(sounds = soundStore.load(), mutedServers = soundStore.mutedServers(), mutedChannels = soundStore.mutedChannels()))
+    private val _state = MutableStateFlow(UiState(serverUrl = session.serverUrl, sounds = soundStore.load(), mutedServers = soundStore.mutedServers(), mutedChannels = soundStore.mutedChannels()))
     private val pending = LinkedHashMap<String, PendingSend>()
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val realtime = Realtime(
-        baseUrl = BuildConfig.SERVER_URL,
+        serverUrl = { session.serverUrl },
         token = { session.token },
         scope = viewModelScope,
         onEvent = ::onEvent,
@@ -183,6 +186,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    /** Troca o servidor (só na tela de entrada, sem sessão). Devolve false se o endereço for inválido. */
+    fun setServer(text: String): Boolean {
+        val url = normalizeServerUrl(text) ?: return false
+        if (session.token != null) return false
+        session.serverUrl = url
+        _state.update { it.copy(serverUrl = url, error = null) }
+        return true
+    }
+
+    /** Link de convite aberto no app: ajusta o servidor e guarda o código para o cadastro. */
+    fun openLink(uri: String?) {
+        val link = parseServerLink(uri ?: return) ?: return
+        if (session.token != null) return
+        link.server?.let { setServer(it) }
+        link.code?.let { c -> _state.update { it.copy(inviteDraft = c) } }
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
@@ -276,7 +296,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         leaveCall()
         realtime.stop()
         session.token = null
-        _state.value = UiState(booting = false)
+        _state.value = UiState(booting = false, serverUrl = session.serverUrl)
     }
 
     fun logout() {

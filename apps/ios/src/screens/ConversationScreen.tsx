@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRoute, useIsFocused, type RouteProp } from "@react-navigation/native";
 import { shownName, splitMentions, type Message, type Person } from "@turtle/protocol";
 import { useConversation, useDirectory, usePresence, useRead, useWorkspace } from "../workspace-context";
@@ -13,13 +13,14 @@ import Composer from "../chat/Composer";
 import type { PendingSend } from "../chat/conversation";
 import KeyboardViewport from "../ui/KeyboardViewport";
 import MessageEditor from "../chat/MessageEditor";
-import { ReactionPicker, showMessageActions } from "../chat/MessageActions";
+import MessageActions from "../chat/MessageActions";
+import ReplyQuote from "../chat/ReplyQuote";
 
 const timestamp = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 function stamp(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : timestamp.format(date); }
 type Row = { kind: "message"; id: string; value: Message } | { kind: "pending"; id: string; value: PendingSend };
-function MessageBody({ content, names }: { content: string; names: Map<string, string> }) {
-  return <Text selectable style={s.body}>{splitMentions(content).map((part, i) => "text" in part ? part.text : <Text key={i} style={s.mention}>@{names.get(part.userId) || "pessoa"}</Text>)}</Text>;
+function MessageBody({ content, names, onActions }: { content: string; names: Map<string, string>; onActions?: () => void }) {
+  return <Text selectable={!onActions} onLongPress={onActions} accessibilityActions={onActions ? [{ name: "longpress", label: "Opções da mensagem" }] : undefined} onAccessibilityAction={onActions ? () => onActions() : undefined} style={s.body}>{splitMentions(content).map((part, i) => "text" in part ? part.text : <Text key={i} style={s.mention}>@{names.get(part.userId) || "pessoa"}</Text>)}</Text>;
 }
 
 export default function ConversationScreen() {
@@ -34,15 +35,15 @@ export default function ConversationScreen() {
   const focused = useIsFocused();
   const [atLatest, setAtLatest] = useState(true);
   const [editing, setEditing] = useState<string>();
-  const [reacting, setReacting] = useState<string>();
+  const [actions, setActions] = useState<string>();
   const editingMessage = state.messages.find(message => message.id === editing);
-  const reactingMessage = state.messages.find(message => message.id === reacting);
+  const actionsMessage = state.messages.find(message => message.id === actions);
   const role = directory.data.find(entry => entry.server.id === params.serverId)?.server.role;
   const canModerate = role === "owner" || role === "admin";
   useEffect(() => {
     if (editing && !editingMessage) setEditing(undefined);
-    if (reacting && !reactingMessage) setReacting(undefined);
-  }, [editing, editingMessage, reacting, reactingMessage]);
+    if (actions && !actionsMessage) setActions(undefined);
+  }, [editing, editingMessage, actions, actionsMessage]);
   const latestId = state.messages.at(-1)?.id;
   useEffect(() => { if (focused && atLatest && latestId) void workspace.api.markRead(params.channelId).then(() => workspace.gateway.invalidate()).catch(() => {}); }, [workspace, params.channelId, latestId, atLatest, focused]);
   const list = useRef<FlatList<Row>>(null);
@@ -64,18 +65,13 @@ export default function ConversationScreen() {
   const jumpLatest = () => { setAtLatest(true); conversation.setAtLatest(true); list.current?.scrollToOffset({ offset: 0, animated: true }); };
   const openActions = (message: Message) => {
     conversation.clearActionError();
-    showMessageActions({ mine: message.userId === user.id, canDelete: message.userId === user.id || canModerate,
-      onReact: () => setReacting(message.id), onEdit: () => setEditing(message.id),
-      onDelete: () => Alert.alert("Excluir mensagem?", "A mensagem será removida para todos. Essa ação não pode ser desfeita.", [
-        { text: "Cancelar", style: "cancel" }, { text: "Excluir", style: "destructive", onPress: () => { void conversation.deleteMessage(message.id); } },
-      ]),
-    });
+    Keyboard.dismiss(); setActions(message.id);
   };
   return <Page><KeyboardViewport>
     {!params.serverId && <ToolbarButton label="Entrar na chamada" onPress={() => joinCall(params.channelId, params.title)} />}
     {!presence.connected && <Text accessibilityLiveRegion="polite" style={s.connection}>Sem conexão. Você pode continuar escrevendo.</Text>}
     <Notice>{state.storageError || state.error}</Notice>
-    {!editingMessage && !reactingMessage && <Notice>{state.actionError}</Notice>}
+    {!editingMessage && <Notice>{state.actionError}</Notice>}
     {state.error && <ToolbarButton label="Atualizar conversa" onPress={() => { void conversation.refresh(); }} />}
     <FlatList key={`history:${params.channelId}`} ref={list} data={rows} inverted style={{ flex: 1 }} keyExtractor={item => item.id}
       contentContainerStyle={s.messages} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
@@ -92,33 +88,35 @@ export default function ConversationScreen() {
       renderItem={({ item, index }) => {
         if (item.kind === "pending") return <View style={[s.message, { marginTop: 16 }]}>
           <Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} />
-          <View style={layout.rowText}><Text style={text.label}>{shownName(user)}</Text><MessageBody content={item.value.content} names={names} />
+          <View style={layout.rowText}><Text style={text.label}>{shownName(user)}</Text>
+            {item.value.draft.reply && <ReplyQuote reply={item.value.draft.reply} names={names} fileUrl={workspace.api.fileUrl} />}
+            <MessageBody content={item.value.content} names={names} />
             <Text accessibilityLiveRegion="polite" style={text.caption}>{item.value.status === "sending" ? "Enviando…" : item.value.status === "uncertain" ? "Envio sem confirmação" : "Não enviada"}</Text>
             {!!item.value.error && <Text style={text.caption}>{item.value.error}</Text>}
             {item.value.status !== "sending" && <View style={s.retry}>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: !presence.connected }} disabled={!presence.connected} onPress={() => { void conversation.retry(item.id); }} style={[layout.toolbar, !presence.connected && { opacity: 0.4 }]}><Text style={text.label}>Tentar novamente</Text></Pressable>
-              {item.value.status === "failed" && !state.draft.text && <ToolbarButton label="Editar rascunho" onPress={() => conversation.restoreDraft(item.id)} />}
+              {item.value.status === "failed" && !state.draft.text && !state.draft.reply && <ToolbarButton label="Editar rascunho" onPress={() => conversation.restoreDraft(item.id)} />}
             </View>}
           </View>
         </View>;
         const message = item.value, older = rows[index + 1];
         const previous = older?.kind === "message" ? older.value : undefined;
         const gap = Date.parse(message.createdAt) - Date.parse(previous?.createdAt || "");
-        const grouped = previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
+        const grouped = !message.replyToId && previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
         return <Pressable accessible={false} onLongPress={() => openActions(message)} disabled={!!state.acting} style={[s.message, !grouped && { marginTop: 16 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={`Ver perfil de ${shownName(message)}`} onPress={() => navigation.navigate("Profile", { userId: message.userId })} style={{ width: 40, minHeight: 44 }}>{!grouped && <Avatar name={shownName(message)} uri={workspace.api.fileUrl(message.avatar)} />}</Pressable>
           <View style={[layout.rowText, { gap: 2 }]}>
             {!grouped && <Text style={[text.label, { fontFamily: fonts.bold }]}>{shownName(message)} <Text style={[text.caption, { color: colors.faint }]}>{stamp(message.createdAt)}</Text></Text>}
-            {!!message.content && <MessageBody content={message.content} names={names} />}
+            {message.replyToId && <ReplyQuote reply={{ id: message.replyToId, preview: message.replyTo }} names={names} fileUrl={workspace.api.fileUrl} />}
+            {!!message.content && <MessageBody content={message.content} names={names} onActions={() => openActions(message)} />}
             {!!message.editedAt && <Text style={text.caption}>(editado)</Text>}
-            {message.attachments.map(attachment => <View key={attachment.id} style={s.attachment}><Icon name="file" /><Text style={[text.caption, { flex: 1 }]}>{attachment.name}</Text></View>)}
+            {message.attachments.map(attachment => <View key={attachment.id} style={s.attachment}><Icon name="file" /><Text onLongPress={() => openActions(message)} accessibilityActions={[{ name: "longpress", label: "Opções da mensagem" }]} onAccessibilityAction={() => openActions(message)} style={[text.caption, { flex: 1 }]}>{attachment.name}</Text></View>)}
             {!!message.reactions.length && <View style={s.reactions}>{message.reactions.map(reaction => {
               const selected = reaction.userIds.includes(user.id), disabled = !presence.connected || !!state.acting;
               return <Pressable key={reaction.emoji} accessibilityRole="button" accessibilityLabel={`${selected ? "Remover" : "Adicionar"} reação ${reaction.emoji}, ${reaction.userIds.length} ${reaction.userIds.length === 1 ? "pessoa" : "pessoas"}`} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => { void conversation.setReaction(message.id, reaction.emoji, !selected); }}
                 style={[s.reaction, selected && { borderColor: colors.paper }, disabled && { opacity: 0.4 }]}><Text style={text.label}>{reaction.emoji} {reaction.userIds.length}</Text></Pressable>;
             })}</View>}
           </View>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Opções da mensagem de ${shownName(message)}`} disabled={!!state.acting} accessibilityState={{ disabled: !!state.acting }} onPress={() => openActions(message)} style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}><Text style={[text.label, { fontSize: 24 }]}>⋯</Text></Pressable>
         </Pressable>;
       }}
     />
@@ -127,10 +125,15 @@ export default function ConversationScreen() {
     <CallDock onOpen={() => navigation.navigate("Call")} />
     {editingMessage ? <MessageEditor key={editingMessage.id} message={editingMessage} names={names} conversation={conversation} busy={!!state.acting} error={state.actionError} online={presence.connected} onClose={() => { setEditing(undefined); conversation.clearActionError(); }} /> :
       <Composer key={`composer:${params.channelId}`} conversation={conversation} state={state} people={people.data} online={presence.connected} title={params.title} fileUrl={workspace.api.fileUrl} onSend={jumpLatest} />}
-    {reactingMessage && <ReactionPicker selected={reactingMessage.reactions.filter(reaction => reaction.userIds.includes(user.id)).map(reaction => reaction.emoji)} busy={!!state.acting} error={state.actionError} onClose={() => { setReacting(undefined); conversation.clearActionError(); }} onPick={emoji => {
-      const selected = reactingMessage.reactions.some(reaction => reaction.emoji === emoji && reaction.userIds.includes(user.id));
-      void conversation.setReaction(reactingMessage.id, emoji, !selected).then(saved => { if (saved) setReacting(undefined); });
-    }} />}
+    {actionsMessage && <MessageActions key={actionsMessage.id} mine={actionsMessage.userId === user.id} canDelete={actionsMessage.userId === user.id || canModerate}
+      selected={actionsMessage.reactions.filter(reaction => reaction.userIds.includes(user.id)).map(reaction => reaction.emoji)} online={presence.connected} busy={!!state.acting}
+      onClose={() => setActions(undefined)} onReply={() => { setEditing(undefined); conversation.replyTo(actionsMessage.id); }} onEdit={() => setEditing(actionsMessage.id)}
+      onDelete={() => Alert.alert("Excluir mensagem?", "A mensagem será removida para todos. Essa ação não pode ser desfeita.", [
+        { text: "Cancelar", style: "cancel" }, { text: "Excluir", style: "destructive", onPress: () => { void conversation.deleteMessage(actionsMessage.id); } },
+      ])} onReact={emoji => {
+        const selected = actionsMessage.reactions.some(reaction => reaction.emoji === emoji && reaction.userIds.includes(user.id));
+        void conversation.setReaction(actionsMessage.id, emoji, !selected);
+      }} />}
   </KeyboardViewport></Page>;
 }
 const s = StyleSheet.create({

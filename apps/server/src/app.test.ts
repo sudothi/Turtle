@@ -898,6 +898,70 @@ describe("chat do dia a dia", () => {
     observer.ws.close();
   });
 
+  it("respostas HTTP confirmadas deduplicam e preservam referência, menção e recibo após exclusão", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-replies" }, dono)).body.id;
+    const url = `/channels/${channel}/messages`;
+    const original = (await post(url, { requestId: randomUUID(), content: "pergunta HTTP" }, membro)).body;
+    const other = (await post(url, { requestId: randomUUID(), content: "outra pergunta" }, membro)).body;
+    await post(`/channels/${channel}/read`, {}, membro);
+    const observer = await listen(membro);
+    const body = { requestId: randomUUID(), content: "resposta confirmada", replyTo: original.id };
+    const results = await Promise.all([post(`${url}/replies`, body, dono), post(`${url}/replies`, body, dono)]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(results[0]!.body).toMatchObject({ id: results[1]!.body.id, replyToId: original.id, replyTo: { userId: membroId, content: "pergunta HTTP" } });
+    await settle();
+    expect(observer.events.filter(e => e.t === "message" && e.message.id === results[0]!.body.id)).toHaveLength(1);
+    expect((await get("/unread", membro)).body.find((u: any) => u.channelId === channel)).toMatchObject({ count: 1, mentions: 1 });
+    expect((await post(`${url}/replies`, { ...body, replyTo: other.id }, dono)).status).toBe(409);
+    expect((await post(url, { requestId: body.requestId, content: body.content }, dono)).status).toBe(409);
+    expect((await get(url, dono)).body.find((m: any) => m.id === results[0]!.body.id).replyTo.id).toBe(original.id);
+    await del(`/messages/${encodeURIComponent(original.id)}`, membro);
+    const replay = await post(`${url}/replies`, body, dono);
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({ id: results[0]!.body.id, replyToId: original.id, replyTo: null });
+    await del(`/messages/${encodeURIComponent(replay.body.id)}`, dono);
+    expect((await post(`${url}/replies`, body, dono)).status).toBe(410);
+    observer.close();
+  });
+
+  it("respostas HTTP não aceitam outro canal ou mensagem inexistente e não consomem o recibo inválido", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "reply-access" }, dono)).body.id;
+    const url = `/channels/${channel}/messages/replies`;
+    const original = (await post(`/channels/${channel}/messages`, { requestId: randomUUID(), content: "pergunta" }, membro)).body;
+    const outside = (await post(`/channels/${geral}/messages`, { requestId: randomUUID(), content: "outro canal" }, membro)).body;
+    const body = { requestId: randomUUID(), content: "resposta", replyTo: "inexistente" };
+    expect((await post(url, body, dono)).body).toMatchObject({ code: "REPLY_UNAVAILABLE" });
+    expect((await post(url, { ...body, replyTo: outside.id }, dono)).status).toBe(400);
+    expect((await post(url, { ...body, replyTo: "" }, dono)).status).toBe(400);
+    expect((await post(url, { requestId: body.requestId, content: body.content }, dono)).status).toBe(400);
+    expect((await post(url, { ...body, replyTo: original.id }, fora)).status).toBe(404);
+    expect((await post(url, { ...body, replyTo: original.id }, dono)).status).toBe(200);
+    const voice = (await channelsOf(serverId, dono)).find((c: any) => c.kind === "voice").id;
+    expect((await post(`/channels/${voice}/messages/replies`, { ...body, requestId: randomUUID(), replyTo: original.id }, dono)).status).toBe(404);
+  });
+
+  it("respostas HTTP funcionam em DM e grupo e respeitam bloqueios e participação", async () => {
+    const dm = (await post(`/dms/${membroId}`, {}, dono)).body.channelId;
+    const original = (await post(`/channels/${dm}/messages`, { requestId: randomUUID(), content: "pergunta DM" }, membro)).body;
+    const body = { requestId: randomUUID(), content: "resposta DM", replyTo: original.id };
+    expect((await post(`/channels/${dm}/messages/replies`, body, dono)).body.replyToId).toBe(original.id);
+    expect((await post(`/channels/${dm}/messages/replies`, { ...body, requestId: randomUUID() }, fora)).status).toBe(404);
+    await post(`/blocks/${membroId}`, {}, dono);
+    expect((await post(`/channels/${dm}/messages/replies`, { ...body, requestId: randomUUID() }, dono)).status).toBe(403);
+    await del(`/blocks/${membroId}`, dono);
+    const foraId = (await get("/me", fora)).body.id;
+    for (const [id, token] of [[membroId, membro], [foraId, fora]]) {
+      await post(`/friends/${id}`, {}, dono);
+      await post(`/friends/${donoId}`, {}, token);
+    }
+    const group = (await post("/dms", { userIds: [membroId, foraId], name: "Respostas HTTP" }, dono)).body.channelId;
+    const question = (await post(`/channels/${group}/messages`, { requestId: randomUUID(), content: "pergunta grupo" }, membro)).body;
+    expect((await post(`/channels/${group}/messages/replies`, { requestId: randomUUID(), content: "resposta grupo", replyTo: question.id }, fora)).body.replyToId).toBe(question.id);
+    for (const token of [dono, membro, fora]) await del(`/dms/${group}/members/me`, token);
+    await del(`/friends/${membroId}`, dono);
+    await del(`/friends/${foraId}`, dono);
+  });
+
   it("envio confirmado mantém autorização e valida os limites", async () => {
     const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-limits" }, dono)).body.id;
     const body = { requestId: randomUUID(), content: "x".repeat(4000) };
@@ -1098,6 +1162,82 @@ describe("chat do dia a dia", () => {
     await post(`/channels/${geral}/read`, {}, membro);
     d.close();
     m.close();
+  });
+
+  it("WebSocket confirmado negocia suporte e compartilha recibos com HTTP sem duplicar broadcasts", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "ws-confirmed" }, dono)).body.id;
+    const d = await listen(dono), observer = await listen(membro);
+    try {
+      d.ws.send(JSON.stringify({ t: "ping" })); await settle();
+      expect(d.events.find(e => e.t === "pong")).toMatchObject({ confirmedText: true });
+      const nonce = randomUUID(), content = "confirmada em dois transportes";
+      d.ws.send(JSON.stringify({ t: "sendConfirmed", channelId: channel, nonce, content }));
+      const http = await post(`/channels/${channel}/messages`, { requestId: nonce, content }, dono);
+      await settle();
+      expect(http.status).toBe(200);
+      expect(d.events.find(e => e.t === "message" && e.nonce === nonce)?.message.id).toBe(http.body.id);
+      expect(observer.events.filter(e => e.t === "message" && e.message.id === http.body.id)).toHaveLength(1);
+      d.ws.send(JSON.stringify({ t: "sendConfirmed", channelId: channel, nonce, content: "mudou" })); await settle();
+      expect(d.events.find(e => e.t === "error" && e.nonce === nonce)).toMatchObject({ status: 409 });
+      expect((await get(`/channels/${channel}/messages`, dono)).body).toHaveLength(1);
+    } finally { d.close(); observer.close(); }
+  });
+  it("reenvio confirmado sobrevive à troca de socket/instância e não recria mensagem apagada", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "ws-durable" }, dono)).body.id;
+    const nonce = randomUUID(), event = { t: "sendConfirmed", channelId: channel, nonce, content: "durável" };
+    const d = await listen(dono); d.ws.send(JSON.stringify(event)); await settle(); d.close();
+    const id = d.events.find(e => e.t === "message" && e.nonce === nonce)?.message.id;
+    expect(id).toBeTruthy();
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const second = await buildApp({ db: handle.db, uploadDir: await mkdtemp(join(tmpdir(), "turtle-ws-")) });
+    const address = await second.listen({ port: 0, host: "127.0.0.1" });
+    const socket = new WebSocket(address.replace("http", "ws") + "/ws");
+    const events: any[] = []; socket.on("message", raw => events.push(JSON.parse(raw.toString())));
+    try {
+      await new Promise<void>(resolve => socket.once("open", resolve));
+      socket.send(JSON.stringify({ t: "auth", token: dono })); socket.send(JSON.stringify(event)); await settle();
+      expect(events.find(e => e.t === "message" && e.nonce === nonce)?.message.id).toBe(id);
+      await del(`/messages/${encodeURIComponent(id)}`, dono);
+      socket.send(JSON.stringify(event)); await settle();
+      expect(events.find(e => e.t === "error" && e.nonce === nonce)).toMatchObject({ status: 410 });
+      expect((await get(`/channels/${channel}/messages`, dono)).body).toHaveLength(0);
+    } finally { socket.close(); await second.close(); }
+  });
+  it("WebSocket confirmado valida referência sem consumir recibo e mantém resposta após apagar a original", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "ws-replies" }, dono)).body.id;
+    const url = `/channels/${channel}/messages`;
+    const original = (await post(url, { requestId: randomUUID(), content: "pergunta" }, membro)).body;
+    const nonce = randomUUID(), event = { t: "sendConfirmed", channelId: channel, nonce, content: "resposta", replyTo: "inexistente" };
+    const d = await listen(dono);
+    try {
+      d.ws.send(JSON.stringify(event)); await settle();
+      expect(d.events.find(e => e.t === "error" && e.nonce === nonce)).toMatchObject({ status: 400, code: "REPLY_UNAVAILABLE" });
+      event.replyTo = original.id;
+      d.ws.send(JSON.stringify(event)); await settle();
+      const reply = d.events.find(e => e.t === "message" && e.nonce === nonce)?.message;
+      expect(reply).toMatchObject({ replyToId: original.id, replyTo: { userId: membroId } });
+      await del(`/messages/${encodeURIComponent(original.id)}`, membro);
+      d.ws.send(JSON.stringify(event)); await settle();
+      expect(d.events.filter(e => e.t === "message" && e.nonce === nonce).at(-1)?.message).toMatchObject({ id: reply.id, replyToId: original.id, replyTo: null });
+    } finally { d.close(); }
+  });
+  it("WebSocket confirmado respeita acesso atual e bloqueios de DM", async () => {
+    const dm = (await post(`/dms/${membroId}`, {}, dono)).body.channelId;
+    const d = await listen(dono), outsider = await listen(fora);
+    try {
+      const nonce = randomUUID(), event = { t: "sendConfirmed", channelId: dm, nonce, content: "DM" };
+      outsider.ws.send(JSON.stringify(event)); await settle();
+      expect(outsider.events.find(e => e.t === "error" && e.nonce === nonce)).toMatchObject({ status: 404 });
+      d.ws.send(JSON.stringify(event)); await settle();
+      expect(d.events.find(e => e.t === "message" && e.nonce === nonce)).toBeTruthy();
+      await post(`/blocks/${membroId}`, {}, dono);
+      const blocked = { ...event, nonce: randomUUID() }; d.ws.send(JSON.stringify(blocked)); await settle();
+      expect(d.events.find(e => e.t === "error" && e.nonce === blocked.nonce)).toMatchObject({ status: 403 });
+      d.ws.send(JSON.stringify(event)); await settle();
+      expect(d.events.find(e => e.t === "error" && e.nonce === nonce)).toMatchObject({ status: 403 });
+    } finally { await del(`/blocks/${membroId}`, dono); d.close(); outsider.close(); }
   });
 
   it("nonce: confirma o envio, reenvio não duplica e erro volta com o nonce", async () => {

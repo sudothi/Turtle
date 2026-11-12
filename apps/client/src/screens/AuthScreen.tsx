@@ -109,6 +109,16 @@ export function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
             {busy ? (mode === "login" ? "Entrando…" : "Criando…") : mode === "login" ? "Entrar" : "Continuar"}
           </Button>
 
+          {mode === "register" && linkCode && !window.turtleDesktop && (
+            // Quem já tem o app instalado: o link configura o servidor e preenche o cadastro lá.
+            <p className="auth-switch t-muted">
+              Já tem o app?{" "}
+              <a className="t-link" href={`turtle://convite?server=${encodeURIComponent(location.origin)}&code=${encodeURIComponent(linkCode)}`}>
+                Abrir no Turtle
+              </a>
+            </p>
+          )}
+
           <p className="auth-switch t-muted">
             {mode === "login" ? (
               <>

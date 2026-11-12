@@ -173,7 +173,7 @@ export class Voice {
 
   private videoReference(participant: Participant, source: Track.Source): VideoTrackProps["trackRef"] {
     const publication = participant.getTrackPublication(source);
-    return publication?.videoTrack ? { participant, publication, source } : undefined;
+    return publication?.videoTrack && !publication.isMuted ? { participant, publication, source } : undefined;
   }
 
   private syncSubscriptions() {

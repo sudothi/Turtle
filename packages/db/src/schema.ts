@@ -118,7 +118,7 @@ export const messages = pgTable(
   ],
 );
 
-/** Idempotent sends survive message deletion; keep only a fingerprint of the original text. */
+/** Idempotent sends survive deletion; keep only a fingerprint of text and reply target. */
 export const messageReceipts = pgTable("message_receipts", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   requestId: text("request_id").notNull(),

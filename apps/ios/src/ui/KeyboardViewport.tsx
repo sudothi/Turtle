@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { Keyboard, View, type KeyboardEvent, type KeyboardMetrics } from "react-native";
+import { Keyboard, View, type KeyboardEvent, type KeyboardMetrics, type ViewProps } from "react-native";
 import { keyboardOverlap } from "./keyboard";
 
 /** Measure in window coordinates: headers, safe areas and call banners can move this view. */
-export default function KeyboardViewport({ children }: { children: ReactNode }) {
+export default function KeyboardViewport({ children, pointerEvents }: { children: ReactNode; pointerEvents?: ViewProps["pointerEvents"] }) {
   const view = useRef<ComponentRef<typeof View>>(null);
   const keyboard = useRef<KeyboardMetrics | undefined>(Keyboard.metrics() ?? undefined);
   const [bottom, setBottom] = useState(0);
@@ -27,5 +27,5 @@ export default function KeyboardViewport({ children }: { children: ReactNode }) 
     measure();
     return () => listeners.forEach(listener => listener.remove());
   }, [measure]);
-  return <View ref={view} collapsable={false} onLayout={measure} style={{ flex: 1, paddingBottom: bottom }}>{children}</View>;
+  return <View ref={view} collapsable={false} pointerEvents={pointerEvents} onLayout={measure} style={{ flex: 1, paddingBottom: bottom }}>{children}</View>;
 }

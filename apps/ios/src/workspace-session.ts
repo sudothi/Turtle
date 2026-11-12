@@ -27,11 +27,11 @@ export class WorkspaceSession {
       const servers = await api.servers();
       return Promise.all(servers.map(async server => ({ server, channels: await api.channels(server.id) })));
     }, this.reject);
-    this.gateway = new Gateway(api, () => { void this.reject(new ApiError(401, "Sessão inválida")).catch(error => this.set({ error: errorText(error) })); }, () => { void this.directory.refresh(); });
+    this.gateway = new Gateway(api, () => { void this.reject(new ApiError(401, "Sessão inválida")).catch(error => this.set({ error: errorText(error) })); }, () => { void this.directory.refresh(); }, chat.userId);
     this.voice = new Voice(api, this.gateway.update, () => AppState.currentState === "active", error => {
       void this.reject(error).catch(error => this.set({ error: errorText(error) }));
     });
-    this.chat = new ChatStore(api, chat, this.reject);
+    this.chat = new ChatStore({ origin: api.origin, messages: api.messages, sendText: this.gateway.sendText, editMessage: api.editMessage, deleteMessage: api.deleteMessage, setReaction: api.setReaction }, chat, this.reject);
     this.stopChatEvents = this.gateway.subscribeEvents(this.chat.receive);
     this.stopChatConnection = this.gateway.subscribe(() => this.chat.setConnected(this.gateway.getSnapshot().connected));
   }

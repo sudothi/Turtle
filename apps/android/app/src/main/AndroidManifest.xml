@@ -30,6 +30,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- turtle://convite?server=https://app.exemplo.com&code=abc (botão "Abrir no Turtle" da página de convite) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="turtle" android:host="convite" />
+            </intent-filter>
         </activity>
         <!-- Mantém a chamada viva (e o microfone ligado) com o app em segundo plano. -->
         <service

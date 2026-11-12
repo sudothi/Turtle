@@ -25,10 +25,11 @@ class ApiException(message: String, val status: Int = 0) : Exception(message)
 
 /** Cliente HTTP do servidor do Turtle. `token` é lido a cada chamada (muda no login/logout). */
 class Api(
-    private val baseUrl: String,
+    private val serverUrl: () -> String,
     private val onUnauthorized: () -> Unit = {},
     private val token: () -> String?,
 ) {
+    private val baseUrl get() = serverUrl()
     private val http = OkHttpClient()
     /** Envio de anexos (até 25 MB) precisa de mais tempo que as chamadas comuns. */
     private val uploadHttp = OkHttpClient.Builder().writeTimeout(60, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()

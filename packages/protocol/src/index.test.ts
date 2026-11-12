@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { clientEvent, encodeMentions, mentionedIds, registerBody, splitMentions } from "./index.js";
+import { clientEvent, serverEvent, encodeMentions, mentionedIds, registerBody, sendTextBody, splitMentions } from "./index.js";
 
 describe("protocol", () => {
+  it("preserva o envio HTTP antigo e valida referências de resposta em HTTP e WebSocket", () => {
+    const body = { requestId: "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc", content: "texto" };
+    expect(sendTextBody.parse(body)).toEqual(body);
+    const replyTo = `send:${"u".repeat(36)}:${body.requestId}`;
+    expect(sendTextBody.parse({ ...body, replyTo }).replyTo).toBe(replyTo);
+    expect(clientEvent.safeParse({ t: "send", channelId: "c", content: "resposta", replyTo }).success).toBe(true);
+    for (const replyTo of ["", "x".repeat(129), null, 42]) {
+      expect(sendTextBody.safeParse({ ...body, replyTo }).success).toBe(false);
+    }
+  });
+  it("negocia confirmação durável sem alterar os eventos antigos", () => {
+    expect(serverEvent.parse({ t: "pong" })).toEqual({ t: "pong" });
+    expect(serverEvent.parse({ t: "pong", confirmedText: true })).toEqual({ t: "pong", confirmedText: true });
+    const event = { t: "sendConfirmed", channelId: "c", nonce: "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc", content: " oi ", replyTo: "original" };
+    expect(clientEvent.parse(event)).toEqual({ ...event, content: "oi" });
+    expect(clientEvent.safeParse({ ...event, nonce: "legado" }).success).toBe(false);
+    expect(clientEvent.safeParse({ ...event, content: " " }).success).toBe(false);
+    expect(serverEvent.parse({ t: "error", nonce: event.nonce, status: 400, code: "REPLY_UNAVAILABLE", error: "apagada" })).toMatchObject({ status: 400, code: "REPLY_UNAVAILABLE" });
+  });
   it("aceita ping e send", () => {
     expect(clientEvent.parse({ t: "ping" })).toEqual({ t: "ping" });
     expect(clientEvent.parse({ t: "send", channelId: "c", content: " oi " }).t).toBe("send");

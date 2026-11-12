@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
       return () => void ipcRenderer.removeListener("screen:audio", h);
     },
   },
+  /** Iniciar com o Windows (só no instalado, Windows). */
+  startup: {
+    get: (): Promise<{ supported: boolean; on: boolean }> => ipcRenderer.invoke("startup:get"),
+    set: (on: boolean): Promise<boolean> => ipcRenderer.invoke("startup:set", on),
+  },
   openWebrtcInternals() {
     ipcRenderer.send("debug:webrtc");
   },
@@ -66,5 +71,25 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
     const h = (_: unknown, a: { game: string; phase: string | null; detail: string | null } | null) => cb(a);
     ipcRenderer.on("activity:changed", h);
     return () => void ipcRenderer.removeListener("activity:changed", h);
+  },
+  /** Game Automations do LoL (só Windows na prática): estado, configurações e ferramentas. */
+  automations: {
+    get: () => ipcRenderer.invoke("auto:get"),
+    set: (patch: unknown) => ipcRenderer.invoke("auto:set", patch),
+    watch(on: boolean) {
+      ipcRenderer.send("auto:watch", on);
+    },
+    background(on: boolean) {
+      ipcRenderer.send("auto:background", on);
+    },
+    champions: () => ipcRenderer.invoke("auto:champions"),
+    icon: (id: number) => ipcRenderer.invoke("auto:icon", id),
+    tool: (which: "reveal" | "dodge" | "restart") => ipcRenderer.invoke("auto:tool", which),
+    open: (url: string) => ipcRenderer.invoke("auto:open", url),
+    onStatus(cb: (s: unknown) => void) {
+      const h = (_: unknown, st: unknown) => cb(st);
+      ipcRenderer.on("auto:status", h);
+      return () => void ipcRenderer.removeListener("auto:status", h);
+    },
   },
 });

@@ -55,8 +55,9 @@ export const messageSchema = z.object({
 });
 export type Message = z.infer<typeof messageSchema>;
 
-/** Confirmed text sends. Reuse requestId only for the exact same conversation/text. */
-export const sendTextBody = z.object({ requestId: z.string().uuid(), content: z.string().trim().min(1).max(4000) });
+const messageId = z.string().min(1).max(128);
+/** Confirmed sends. Reuse requestId only for the same conversation, text and reply target. */
+export const sendTextBody = z.object({ requestId: z.string().uuid(), content: z.string().trim().min(1).max(4000), replyTo: messageId.optional() });
 export const sentMessageId = (userId: string, requestId: string) => `send:${userId}:${requestId}`;
 
 export const channelKind = z.enum(["text", "voice"]);
@@ -428,13 +429,15 @@ export const clientEvent = z.discriminatedUnion("t", [
     t: z.literal("send"), channelId: z.string(), content: z.string().trim().max(4000).default(""),
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS).default([]),
     /** Responder a uma mensagem do mesmo canal. */
-    replyTo: z.string().max(64).optional(),
+    replyTo: messageId.optional(),
     /**
      * Id gerado pelo cliente: volta no evento `message` (ou `error`) para confirmar o envio, e o servidor
      * ignora o reenvio do mesmo nonce (quando a conexão caiu antes da confirmação).
      */
     nonce: z.string().max(64).optional(),
   }),
+  /** Texto confirmado durável. nonce é o requestId HTTP; enviar somente após pong.confirmedText. */
+  sendTextBody.omit({ requestId: true }).extend({ t: z.literal("sendConfirmed"), channelId: z.string(), nonce: z.string().uuid() }),
   /** Tocar um som do soundboard na chamada em que estou (todos na chamada ouvem). */
   z.object({ t: z.literal("soundboardPlay"), soundId: z.string().max(64) }),
   /** channelId null = saiu da voz. */
@@ -448,7 +451,7 @@ export const clientEvent = z.discriminatedUnion("t", [
 export const serverEvent = z.discriminatedUnion("t", [
   /** Discoteca de uma chamada do servidor mudou (null = acabou). Vai para todos do servidor: quem está fora vê o que toca. */
   z.object({ t: z.literal("jukebox"), channelId: z.string(), state: z.lazy(() => jukeboxStateSchema).nullable() }),
-  z.object({ t: z.literal("pong") }),
+  z.object({ t: z.literal("pong"), confirmedText: z.boolean().optional() }),
   z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
   z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
@@ -495,7 +498,7 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** Quem você ligou recusou (`busy`: estava em Não perturbe ou recusou na hora). */
   z.object({ t: z.literal("ringDeclined"), channelId: z.string(), by: z.string() }),
   /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
-  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
+  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional(), status: z.number().int().min(400).max(599).optional(), code: z.string().optional() }),
 ]);
 
 export type ClientEvent = z.infer<typeof clientEvent>;

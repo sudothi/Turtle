@@ -1,7 +1,8 @@
-import { editMessageBody, sentMessageId, sendTextBody, type Message, type ServerEvent } from "@turtle/protocol";
+import { editMessageBody, sentMessageId, sendTextBody, type Message, type ReplyPreview, type ServerEvent } from "@turtle/protocol";
 import { ApiError, type Api } from "../api";
 import { errorText } from "../session";
 import { editDraft, emptyDraft, encodeDraft, type Draft } from "./draft";
+import { replyPreview } from "./reply";
 
 export interface PendingSend { id: string; requestId: string; content: string; draft: Draft; createdAt: string; status: "sending" | "failed" | "uncertain"; error?: string }
 export interface ConversationState {
@@ -24,6 +25,7 @@ export class Conversation {
   private revision = 0;
   private versions = new Map<string, number>();
   private deleted = new Set<string>();
+  private previews = new Map<string, { version: number; value: ReplyPreview | null }>();
   private refreshing?: Promise<void>;
   private refreshQueued = false;
   private older?: Promise<void>;
@@ -36,6 +38,11 @@ export class Conversation {
   storageError(error?: string) { this.set({ storageError: error }); }
   setDraft = (draft: Draft) => { if (!this.state.restoring) { this.set({ draft }); this.changed(); } };
   edit = (text: string) => this.setDraft(editDraft(this.state.draft, text));
+  replyTo = (id: string) => {
+    const message = this.state.messages.find(message => message.id === id);
+    if (message && !this.denied && !this.deleted.has(id)) this.setDraft({ ...this.state.draft, reply: { id, preview: replyPreview(message) } });
+  };
+  cancelReply = () => { this.setDraft({ ...this.state.draft, reply: undefined }); this.set({ error: undefined }); };
   setAtLatest = (value: boolean) => { this.atLatest = value; if (value && this.state.newCount) this.set({ newCount: 0 }); };
 
   clearActionError = () => this.set({ actionError: undefined });
@@ -78,33 +85,71 @@ export class Conversation {
 
   private merge(items: Message[], started = this.revision) {
     const all = new Map(this.state.messages.map(m => [m.id, m]));
+    const accepted: Message[] = [];
     let added = 0;
     for (const item of items) {
       if (item.channelId !== this.channelId || this.deleted.has(item.id) || (this.versions.get(item.id) ?? 0) > started) continue;
+      const pending = this.state.outbox.find(send => send.id === item.id);
+      if (pending && (item.userId !== this.userId || item.replyToId !== (pending.draft.reply?.id ?? null))) continue;
       if (!all.has(item.id) && !this.state.outbox.some(m => m.id === item.id) && (!this.state.messages.length || compareMessages(item, this.state.messages.at(-1)!) > 0)) added++;
-      all.set(item.id, item);
+      const live = item.replyToId ? this.previews.get(item.replyToId) : undefined;
+      all.set(item.id, item.replyToId && this.deleted.has(item.replyToId) ? { ...item, replyTo: null } : live && live.version > started ? { ...item, replyTo: live.value } : item);
+      accepted.push(item);
     }
     const outbox = this.state.outbox.filter(item => !all.has(item.id) && !this.deleted.has(item.id));
     const settled = outbox.length !== this.state.outbox.length;
     this.set({ messages: [...all.values()].sort(compareMessages), outbox, newCount: this.state.newCount + (this.atLatest ? 0 : added) });
+    for (const item of accepted) {
+      this.updateReferences(item.id, replyPreview(item));
+      if (!item.replyToId || this.deleted.has(item.replyToId)) continue;
+      const live = this.previews.get(item.replyToId);
+      const preview = live && live.version > started ? live.value : item.replyTo;
+      if (!preview) this.forgetReply(item.replyToId);
+      else if (live && live.version <= started) this.updateReferences(item.replyToId, preview);
+    }
     if (settled) this.changed();
+  }
+  private updateReferences(id: string, preview: ReplyPreview | null) {
+    const live = this.previews.get(id);
+    if (live) live.value = preview;
+    const draft = (value: Draft): Draft => value.reply?.id === id ? { ...value, reply: { id, preview } } : value;
+    const affected = this.state.draft.reply?.id === id || this.state.outbox.some(item => item.draft.reply?.id === id);
+    if (!affected && !this.state.messages.some(message => message.replyToId === id)) return;
+    this.set({
+      messages: this.state.messages.map(message => message.replyToId === id ? { ...message, replyTo: preview } : message),
+      draft: draft(this.state.draft), outbox: this.state.outbox.map(item => item.draft.reply?.id === id ? { ...item, draft: draft(item.draft) } : item),
+    });
+    if (affected) this.changed();
+  }
+  private forgetReply(id: string) {
+    this.deleted.add(id); this.versions.set(id, ++this.revision);
+    this.previews.set(id, { version: this.revision, value: null });
+    this.updateReferences(id, null);
+    this.set({ messages: this.state.messages.filter(message => message.id !== id) });
   }
   receive(event: ServerEvent) {
     if (this.stopped || this.denied) return;
     if ((event.t === "message" || event.t === "messageUpdate") && event.message.channelId === this.channelId) {
-      if (event.t === "messageUpdate" && !this.state.messages.some(m => m.id === event.message.id)) return;
+      if (this.deleted.has(event.message.id)) return;
       this.versions.set(event.message.id, ++this.revision);
+      this.previews.set(event.message.id, { version: this.revision, value: replyPreview(event.message) });
+      this.updateReferences(event.message.id, replyPreview(event.message));
+      if (event.t === "messageUpdate" && !this.state.messages.some(m => m.id === event.message.id)) return;
       this.merge([event.message]);
       this.changed();
     } else if (event.t === "messageDelete" && event.channelId === this.channelId) {
-      this.deleted.add(event.id); this.versions.set(event.id, ++this.revision);
+      this.forgetReply(event.id);
       this.set({ messages: this.state.messages.filter(m => m.id !== event.id), outbox: this.state.outbox.filter(m => m.id !== event.id) });
       this.changed();
     }
   }
   private failure = async (error: unknown) => {
     if (this.stopped) return;
-    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) { this.denied = true; this.accessEpoch++; this.set({ messages: [], hasMore: false }); }
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+      this.denied = true; this.accessEpoch++;
+      for (const id of new Set([this.state.draft.reply?.id, ...this.state.outbox.map(item => item.draft.reply?.id)])) if (id) this.updateReferences(id, null);
+      this.previews.clear(); this.set({ messages: [], hasMore: false });
+    }
     try { if (!await this.reject(error)) this.set({ error: errorText(error) }); }
     catch (error) { this.set({ error: errorText(error) }); }
   };
@@ -127,7 +172,10 @@ export class Conversation {
         this.denied = false;
         const cutoff = collected.sort(compareMessages)[0], present = new Set(collected.map(m => m.id));
         // The fetched window is authoritative, except events received after the request began.
-        this.set({ messages: this.state.messages.filter(m => (this.versions.get(m.id) ?? 0) > started || present.has(m.id) || (page.length === PAGE && cutoff && compareMessages(m, cutoff) < 0)) });
+        const retained = this.state.messages.filter(m => (this.versions.get(m.id) ?? 0) > started || present.has(m.id) || (page.length === PAGE && cutoff && compareMessages(m, cutoff) < 0));
+        const removed = this.state.messages.filter(message => !retained.includes(message));
+        this.set({ messages: retained });
+        for (const message of removed) this.forgetReply(message.id);
         this.merge(collected, started);
         this.set({ hasMore: page.length === PAGE });
       } catch (error) { if (epoch === this.accessEpoch) await this.failure(error); }
@@ -156,8 +204,9 @@ export class Conversation {
   send = async () => {
     const content = encodeDraft(this.state.draft);
     if (this.stopped || this.state.restoring || !this.connected() || !content) return;
+    if (this.state.draft.reply?.preview === null) { this.set({ error: "A mensagem respondida foi apagada. Cancele a resposta para enviar seu texto." }); return; }
     const requestId = this.id();
-    if (!sendTextBody.safeParse({ content, requestId }).success) { this.set({ error: "Use de 1 a 4000 caracteres na mensagem." }); return; }
+    if (!sendTextBody.safeParse({ content, requestId, replyTo: this.state.draft.reply?.id }).success) { this.set({ error: "Use de 1 a 4000 caracteres na mensagem." }); return; }
     const item: PendingSend = { id: sentMessageId(this.userId, requestId), requestId, content, draft: this.state.draft, createdAt: new Date().toISOString(), status: "sending" };
     this.set({ draft: emptyDraft(), outbox: [...this.state.outbox, item], error: undefined });
     await this.deliver(item);
@@ -170,7 +219,7 @@ export class Conversation {
   };
   restoreDraft = (id: string) => {
     const item = this.state.outbox.find(m => m.id === id && m.status === "failed");
-    if (!item || this.state.draft.text) return;
+    if (!item || this.state.draft.text || this.state.draft.reply) return;
     this.set({ draft: item.draft, outbox: this.state.outbox.filter(m => m.id !== id) }); this.changed();
   };
   private async deliver(item: PendingSend) {
@@ -179,15 +228,16 @@ export class Conversation {
     try {
       await this.persist(); recorded = true;
       if (this.stopped) return;
-      const message = await this.api.sendText(this.channelId, { requestId: item.requestId, content: item.content });
+      const message = await this.api.sendText(this.channelId, { requestId: item.requestId, content: item.content, ...(item.draft.reply ? { replyTo: item.draft.reply.id } : {}) });
       if (this.stopped) return;
-      if (message.id !== item.id || message.channelId !== this.channelId || message.userId !== this.userId) throw new Error("A resposta não confirmou este envio. Atualize a conversa antes de tentar novamente.");
+      if (message.id !== item.id || message.channelId !== this.channelId || message.userId !== this.userId || message.replyToId !== (item.draft.reply?.id ?? null)) throw new Error("A resposta não confirmou este envio. Atualize a conversa antes de tentar novamente.");
       if (this.denied) this.set({ outbox: this.state.outbox.filter(m => m.id !== message.id) });
       else this.merge([message], started);
       this.changed();
     } catch (error) {
       if (this.stopped) return;
-      const definitive = !recorded || (error instanceof ApiError && error.status < 500);
+      if (error instanceof ApiError && error.code === "REPLY_UNAVAILABLE" && item.draft.reply) this.forgetReply(item.draft.reply.id);
+      const definitive = !recorded || (error instanceof ApiError && error.status < 500 && ![408, 425, 429].includes(error.status));
       this.set({ outbox: this.state.outbox.map(m => m.id === item.id ? { ...m, status: definitive ? "failed" : "uncertain", error: recorded ? errorText(error) : "Não foi possível salvar o envio neste iPhone. Tente novamente." } : m) });
       try { await this.reject(error); } catch (error) { this.set({ error: errorText(error) }); }
       this.changed();

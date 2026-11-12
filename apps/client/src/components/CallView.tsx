@@ -4,6 +4,7 @@ import { fileUrl } from "../api";
 import { Avatar, Button, Icon, IconButton, SoundIcon, StaffTag } from "@turtle/ui";
 import { SoundboardButton, useSoundboard } from "./Soundboard";
 import { JukeboxButton, JukeboxNowPlaying, type NameOf } from "./Jukebox";
+import { GameAutomationsButton } from "./GameAutomations";
 import { MAX_VOLUME } from "../voice/prefs";
 import type { CallParticipant, ShareStats, VideoTile, VoiceClient, VoiceSnapshot } from "../voice/client";
 import { ChannelHeader } from "./ChatView";
@@ -337,6 +338,7 @@ export function CallView({ channel, snap, voice, members = [], onProfile, onMenu
             </IconButton>}
             {server && meId && channel.serverId === server.id && <SoundboardButton server={server} meId={meId} deafened={snap.deafened} />}
             {server && channel.serverId === server.id && <JukeboxButton channelId={channel.id} nameOf={whoIs} deafened={snap.deafened} />}
+            <GameAutomationsButton />
             <IconButton label="Sair da chamada" className="big hangup" onClick={() => void voice.leave()}>
               <Icon name="phone-off" size={26} />
             </IconButton>

@@ -39,6 +39,16 @@ O deployment target configurado é **iOS 26.0**. O mínimo é o do projeto gerad
 
 A migração de mensagens confirmadas da #113 precisa estar no backend antes de usar os envios HTTP. Nenhum deploy é feito pela criação do IPA ou merge de PR.
 
+## Respostas e recuperação de envios (#112)
+
+O código acrescenta Responder à sheet aberta ao segurar a mensagem, prévia no compositor/histórico, cancelamento sem perder texto e referência persistida no rascunho e no envio pendente. A sheet segue a referência fornecida do Discord: emojis rápidos e acesso a mais reações no topo, ações agrupadas com ícones abaixo, fundo escurecido, alça e fechamento por arraste. O botão de opções em cada linha foi removido. Citações de mensagens apagadas são limpas quando o cliente recebe a exclusão ou a confirma pelo histórico/erro de envio. Retentativas mantêm o destino original e não duplicam a mensagem.
+
+O backend estende o envio HTTP confirmado com referência opcional e oferece `/channels/:id/messages/replies`, usada pelo iOS para falhar de forma segura em servidores anteriores. O recibo inclui o destino; recibos de texto sem resposta mantêm a impressão digital anterior. Referências de outro canal/inexistentes são recusadas e não consomem a identificação do envio. O autor da original recebe contagem de menção conforme o contrato existente. Não há mudança de banco nem deploy automático.
+
+As respostas e a sheet foram incluídas no IPA build 8 (#222). A continuação de envios sem perda usa `sendConfirmed` após negociação em `pong`, com nonce UUID e os mesmos recibos duráveis do HTTP. Servidores anteriores mantêm o envio HTTP confirmado. A recuperação reconcilia o histórico ativo, preserva a referência de resposta e faz até cinco tentativas automáticas por período conectado (espera de 1, 2, 4, 8 e 16 segundos), serializadas entre conversas. Recusas definitivas e gravações locais malsucedidas não são reenviadas automaticamente; a tentativa manual continua disponível. Não há reenvio depois de logout ou encerramento do workspace.
+
+Esta continuação é posterior ao IPA build 8, que permanece inalterado e deve ser preservado. Exige um próximo build para distribuição e o backend novo para o transporte WS confirmado; não altera o Android. O aceite físico ainda deve cobrir perda de confirmação, troca de rede/reabertura, respostas, conta/origem, bloqueio/expulsão e exclusão da mensagem. Merge e geração de IPA não fazem deploy.
+
 ## Assinatura e capacidades (#46/#56/#57)
 
 Caminho a validar: **AltStore Classic com contas gratuitas**, cada amigo usando sua própria conta Apple. O roteiro inicial usa AltServer no computador. PAL instala apps notarizados, enquanto Classic permite importar o IPA; disponibilidade regional de PAL não comprova compatibilidade com este artefato ([comparação oficial](https://github.com/altstoreio/FAQ/blob/main/altstore-pal-v.-altstore-classic.md)). A documentação atual também oferece [Remote AltServers](https://faq.altstore.io/altstore-classic/remote-altservers), com pareamento e Wi-Fi/VPN; esse caminho ainda não foi exercitado pelo grupo. Uma conta paga fica fora do requisito do núcleo inicial. A escolha gratuita está confirmada; a instalação e as capacidades efetivas continuam pendentes.
@@ -69,7 +79,7 @@ Sem prova da extensão após reassinatura, a versão atual **não oferece botão
 
 ## Build e entrega (#58)
 
-O build 7 acrescenta o tratamento nativo de interrupções e a recuperação de gateway da #54, mantendo a correção de sessão da #191. A entrega aponta diretamente para main. O manifesto identifica o commit usado; os cenários físicos da #54/#59 continuam pendentes. O build 6 foi instalado no iPhone 15 do usuário por sideload direto do AltServer 1.8.4; renovação e importação pela Classic ainda não foram comprovadas. Preservar os artefatos anteriores e usar novo número para cada binário.
+O build 8 parte da main com #205 (teclado/imagens), #208 (servidor padrão), #219 (respostas e sheet de ações) e #221 (câmera silenciada e avatar), mantendo os módulos nativos de áudio anteriores. O manifesto identifica o commit exato usado. As notas e o roteiro desta atualização estão em [apps/ios/README.md](../../apps/ios/README.md#notas-da-versão-040-build-8-58). O aceite físico anterior das #47/#53/#54/#55 está registrado nas issues; não aprova por si só este novo IPA nem instalação/renovação na Classic. Preservar os artefatos anteriores e usar novo número para cada binário.
 
 Em macOS com Xcode/SDK compatíveis e CocoaPods, após `pnpm install`:
 
@@ -79,16 +89,16 @@ pnpm ios:ipa
 
 O script gera o projeto nativo a partir da configuração versionada, instala Pods, faz archive Release sem assinatura, inclui JavaScript e empacota o IPA. A versão e o build vêm de `apps/ios/package.json`; `app.config.ts` usa os mesmos valores. Saídas:
 
-- `apps/ios/release/Turtle-0.4.0-build7.ipa`
-- `apps/ios/release/Turtle-0.4.0-build7.ipa.sha256`
-- `apps/ios/release/Turtle-0.4.0-build7.ipa.json`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa.sha256`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa.json`
 
 O manifesto registra versão, build, bundle ID, iOS mínimo, commit, presença de alterações locais (`sourceDirty`) e SHA-256. Para identificar o código pelo commit, distribuir somente um artefato com `sourceDirty: false`. O empacotamento recusa sobrescrever IPA, checksum ou manifesto do mesmo build; incrementar `iosBuildNumber` para uma nova entrega. O script confere a versão do archive e a presença das descrições de câmera/microfone. Artefatos e o projeto gerado são ignorados pelo Git. O IPA é **para importar e reassinar**, não uma distribuição já assinada. Compartilhar o IPA e o checksum juntos pelo canal privado do grupo; não criar release pública nem source AltStore antes do aceite de instalação manual. Não há workflow automático de publicação.
 
 Para conferir a transferência, rode na pasta do IPA:
 
 ```sh
-shasum -a 256 -c Turtle-0.4.0-build7.ipa.sha256
+shasum -a 256 -c Turtle-0.4.0-build8.ipa.sha256
 ```
 
 Instalação: AltServer no computador, AltStore Classic no iPhone, importar o IPA em My Apps > + e seguir os pedidos de confiança/Modo Desenvolvedor. Cada participante usa a própria conta. No modelo gratuito, a documentação Classic informa renovação em sete dias, três apps ativos (AltStore ocupa uma vaga) e até dez App IDs registrados simultaneamente. Extensões usam App IDs adicionais. Conferir os limites que a instalação final mostrar.
@@ -119,7 +129,7 @@ Registrar por cenário: versão/build/commit do app, versão do backend, iPhone/
 
 Com o backend desta etapa da #54, uma chamada que perde o socket de chat conserva o estado apenas mediante sessão válida, permissão atual e presença real no LiveKit. A consulta periódica usa intervalo de 15 s, prazo de confirmação de 45 s e timeout de até 5 s; revogação e saída da mídia removem o estado. Um novo relatório de voz substitui o antigo e impede que uma consulta atrasada restaure participantes fantasmas. A presença online continua vinculada ao chat, separada da presença na chamada. A preservação exige o deploy autorizado desse backend; gerar o IPA não publica o servidor.
 
-No build 7, AVAudioSession é observado por um módulo Expo local Swift. Ele bloqueia o áudio nativo durante interrupção e só libera depois de o TypeScript fechar a track do microfone; o estado pendente também é consultado na retomada. A câmera desliga ao deixar o estado ativo, inclusive ao abrir notificações, e permanece desligada ao voltar por decisão do usuário. PiP fica para outra etapa. O gateway detecta abertura sem conclusão (10 s) e falta de pong (15 s), usa backoff e renova as leituras ao retomar, preservando rascunhos e evitando reenvio automático de pendências. Ver detalhes e roteiro em [apps/ios/README.md](../../apps/ios/README.md).
+No build 7, AVAudioSession é observado por um módulo Expo local Swift. Ele bloqueia o áudio nativo durante interrupção e só libera depois de o TypeScript fechar a track do microfone; o estado pendente também é consultado na retomada. A câmera desliga ao deixar o estado ativo, inclusive ao abrir notificações, e permanece desligada ao voltar por decisão do usuário. PiP fica para outra etapa. O gateway detecta abertura sem conclusão (10 s) e falta de pong (15 s), usa backoff e renova as leituras ao retomar, preservando rascunhos. A recuperação automática de envios descrita acima foi acrescentada depois do build 8. Ver detalhes e roteiro em [apps/ios/README.md](../../apps/ios/README.md).
 
 As verificações automatizadas e a compilação do módulo não aprovam Siri, Bluetooth, 30 minutos bloqueado, troca Wi-Fi/celular ou rede restritiva. Registrar essas evidências usando o build 7 e o backend desta etapa na #54/#59. TURN e backups mantêm seu escopo nas issues próprias.
 

@@ -9,7 +9,7 @@ const uuid = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc";
 const message = (n: number, patch: Partial<Message> = {}): Message => messageSchema.parse({ id: String(n).padStart(4, "0"), channelId: "a", userId: "other", username: "friend", displayName: "Amiga", avatar: null, staff: false, content: `texto ${n}`, createdAt: new Date(1_700_000_000_000 + n * 1000).toISOString(), editedAt: null, attachments: [], ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 const stores: ChatStore[] = [];
-afterEach(async () => { for (const store of stores.splice(0)) await store.dispose(); });
+afterEach(async () => { for (const store of stores.splice(0)) await store.dispose(); vi.useRealTimers(); });
 function setup(disk = new Map<string, string>(), origin = "https://chat.test", userId = "self") {
   const storage = { getItem: vi.fn(async (key: string) => disk.get(key) ?? null), setItem: vi.fn(async (key: string, value: string) => { disk.set(key, value); }), removeItem: vi.fn(async (key: string) => { disk.delete(key); }) };
   const api = {
@@ -57,7 +57,7 @@ describe("conversation state", () => {
     expect(c.getSnapshot().messages).toEqual([saved]); expect(c.getSnapshot().outbox).toEqual([]);
     expect(c.getSnapshot().draft.text).toBe("segunda");
   });
-  it("keeps ambiguous failures and retries the same identity only on request", async () => {
+  it("keeps ambiguous failures and allows an immediate manual retry with the same identity", async () => {
     const { store, api } = setup(); await store.ready; store.setConnected(true);
     const c = store.get("a"); c.edit("não perder");
     api.sendText.mockRejectedValueOnce(new TypeError("rede caiu"));
@@ -82,7 +82,7 @@ describe("conversation state", () => {
     await vi.waitFor(() => expect(api.sendText).toHaveBeenCalledOnce());
     wait.resolve(message(100, { id, userId: "self" })); await first;
   });
-  it("restores a recorded in-flight send as uncertain without auto retry", async () => {
+  it("restores a recorded in-flight send as uncertain before connection recovery", async () => {
     const { store, disk } = setup(); await store.ready; store.setConnected(true);
     const c = store.get("a");
     c.restore({ draft: emptyDraft(), outbox: [{ id: sentMessageId("self", uuid), requestId: uuid, content: "pendente", draft: { text: "pendente", mentions: [] }, createdAt: new Date().toISOString(), status: "sending" }] });
@@ -439,5 +439,83 @@ describe("message actions", () => {
     response.resolve(message(1, { userId: "self", content: "privado" }));
     expect(await editing).toBe(false);
     expect(c.getSnapshot().messages).toEqual([]);
+  });
+});
+
+describe("automatic outbox recovery", () => {
+  it("restores and retries a reply from disk after connecting, preserving its identity and the newer draft", async () => {
+    vi.useFakeTimers();
+    const first = setup(); await first.store.ready; first.store.setConnected(true);
+    const c = first.store.get("a");
+    first.store.receive({ t: "message", message: message(1) }); c.replyTo(message(1).id); c.edit("resposta pendente");
+    first.api.sendText.mockRejectedValueOnce(new Error("offline")); await c.send();
+    c.edit("próximo rascunho"); await first.store.flush(); await first.store.dispose();
+    const next = setup(first.disk); await next.store.ready;
+    await vi.advanceTimersByTimeAsync(10_000); expect(next.api.sendText).not.toHaveBeenCalled();
+    next.store.setConnected(true); await vi.advanceTimersByTimeAsync(1000);
+    expect(next.api.sendText).toHaveBeenCalledExactlyOnceWith("a", { requestId: uuid, content: "resposta pendente", replyTo: message(1).id });
+    expect(next.store.get("a").getSnapshot()).toMatchObject({ outbox: [], draft: { text: "próximo rascunho" } });
+  });
+  it("reconciles active history before retrying, so an already confirmed send is not replayed", async () => {
+    vi.useFakeTimers();
+    const { store, api } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("enviada"); api.sendText.mockRejectedValueOnce(new Error("confirmação perdida")); await c.send();
+    const confirmed = message(100, { id: sentMessageId("self", uuid), userId: "self", content: "enviada" });
+    store.setConnected(false);
+    const history = deferred<Message[]>(); api.messages.mockResolvedValue([confirmed]); api.messages.mockReturnValueOnce(history.promise);
+    store.activate("a"); store.setConnected(true);
+    await vi.advanceTimersByTimeAsync(2000); expect(api.sendText).toHaveBeenCalledOnce();
+    history.resolve([confirmed]); await vi.advanceTimersByTimeAsync(2000);
+    expect(api.sendText).toHaveBeenCalledOnce(); expect(c.getSnapshot().outbox).toHaveLength(0);
+  });
+  it("bounds retries with backoff and leaves manual retry available after exhaustion", async () => {
+    vi.useFakeTimers();
+    const { store, api } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("persistir"); api.sendText.mockRejectedValue(new ApiError(503, "manutenção")); await c.send();
+    await vi.advanceTimersByTimeAsync(999); expect(api.sendText).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1); expect(api.sendText).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1999); expect(api.sendText).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(120_000); expect(api.sendText).toHaveBeenCalledTimes(6);
+    expect(c.getSnapshot().outbox[0]?.status).toBe("uncertain");
+    await c.retry(sentMessageId("self", uuid)); expect(api.sendText).toHaveBeenCalledTimes(7);
+    await store.dispose(); await vi.advanceTimersByTimeAsync(60_000); expect(api.sendText).toHaveBeenCalledTimes(7);
+  });
+  it.each([400, 401, 403, 404, 409, 410])("does not automatically replay definitive HTTP %s failures", async status => {
+    vi.useFakeTimers();
+    const { store, api } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("recusada"); api.sendText.mockRejectedValue(new ApiError(status, "recusada")); await c.send();
+    store.setConnected(false); store.setConnected(true); await vi.advanceTimersByTimeAsync(60_000);
+    expect(api.sendText).toHaveBeenCalledOnce(); expect(c.getSnapshot().outbox[0]?.status).toBe("failed");
+  });
+  it("retries a temporary rate limit, but not a send that could not be saved", async () => {
+    vi.useFakeTimers();
+    const { store, api, storage } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("limitada"); api.sendText.mockRejectedValueOnce(new ApiError(429, "aguarde")); await c.send();
+    await vi.advanceTimersByTimeAsync(1000); expect(c.getSnapshot().outbox).toHaveLength(0); expect(api.sendText).toHaveBeenCalledTimes(2);
+    c.edit("disco cheio"); storage.setItem.mockRejectedValue(new Error("sem espaço")); await c.send();
+    await vi.advanceTimersByTimeAsync(60_000); expect(api.sendText).toHaveBeenCalledTimes(2); expect(c.getSnapshot().outbox[0]?.status).toBe("failed");
+  });
+  it("does not duplicate an attempt still running across another connection transition", async () => {
+    vi.useFakeTimers();
+    const { store, api } = setup(); await store.ready; store.setConnected(true);
+    const c = store.get("a"); c.edit("única"); api.sendText.mockRejectedValueOnce(new Error("rede")); await c.send();
+    const pending = deferred<Message>(); api.sendText.mockReturnValueOnce(pending.promise);
+    await vi.advanceTimersByTimeAsync(1000); expect(api.sendText).toHaveBeenCalledTimes(2);
+    store.setConnected(false); store.setConnected(true); await vi.advanceTimersByTimeAsync(5000);
+    expect(api.sendText).toHaveBeenCalledTimes(2);
+    pending.resolve(message(100, { id: sentMessageId("self", uuid), userId: "self" })); await vi.advanceTimersByTimeAsync(2000);
+    expect(c.getSnapshot().outbox).toHaveLength(0); expect(api.sendText).toHaveBeenCalledTimes(2);
+  });
+  it("serializes retries across conversations and spaces them to preserve gateway control capacity", async () => {
+    vi.useFakeTimers();
+    const { store, api } = setup(); await store.ready;
+    const secondId = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccd";
+    for (const [channel, requestId] of [["a", uuid], ["b", secondId]]) store.get(channel!).restore({ draft: emptyDraft(), outbox: [{ id: sentMessageId("self", requestId!), requestId: requestId!, content: "pendente", draft: { text: "pendente", mentions: [] }, createdAt: new Date().toISOString(), status: "uncertain" }] });
+    const pending = deferred<Message>(); api.sendText.mockReturnValueOnce(pending.promise);
+    store.setConnected(true); await vi.advanceTimersByTimeAsync(5000); expect(api.sendText).toHaveBeenCalledOnce();
+    pending.resolve(message(100, { id: sentMessageId("self", uuid), userId: "self" })); await vi.advanceTimersByTimeAsync(249);
+    expect(api.sendText).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1); expect(api.sendText).toHaveBeenCalledTimes(2);
+    expect(store.get("a").getSnapshot().outbox).toHaveLength(0); expect(store.get("b").getSnapshot().outbox).toHaveLength(0);
   });
 });

@@ -1,11 +1,11 @@
 import { z } from "zod";
-import type { ServerEvent } from "@turtle/protocol";
+import { replyPreviewSchema, type ServerEvent } from "@turtle/protocol";
 import type { Api } from "../api";
 import { Conversation, type ConversationApi, type ConversationDisk } from "./conversation";
 
 export interface ChatStorage { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<unknown>; removeItem(key: string): Promise<unknown> }
 export interface ChatOptions { userId: string; storage: ChatStorage; id: () => string }
-const draftSchema = z.object({ text: z.string(), mentions: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), userId: z.string(), label: z.string() })) });
+const draftSchema = z.object({ text: z.string(), mentions: z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), userId: z.string(), label: z.string() })), reply: z.object({ id: z.string().min(1).max(128), preview: replyPreviewSchema.nullable() }).optional() });
 const savedSchema = z.object({ version: z.literal(1), conversations: z.record(z.object({
   draft: draftSchema,
   outbox: z.array(z.object({ id: z.string(), requestId: z.string().uuid(), content: z.string().max(4000), draft: draftSchema, createdAt: z.string(), status: z.enum(["sending", "failed", "uncertain"]), error: z.string().optional() })),
@@ -69,7 +69,7 @@ export class ChatStore {
     if (this.stopped) return;
     await this.ready;
     if (this.stopped) return;
-    const conversations = Object.fromEntries([...this.conversations].map(([id, c]) => [id, c.disk()]).filter(([, data]) => (data as ConversationDisk).draft.text || (data as ConversationDisk).outbox.length));
+    const conversations = Object.fromEntries([...this.conversations].map(([id, c]) => [id, c.disk()]).filter(([, data]) => (data as ConversationDisk).draft.text || (data as ConversationDisk).draft.reply || (data as ConversationDisk).outbox.length));
     const snapshot = JSON.stringify({ version: 1, conversations });
     this.write = this.write.catch(() => {}).then(() => this.options.storage.setItem(this.key, snapshot));
     try { await this.write; for (const c of this.conversations.values()) c.storageError(); }

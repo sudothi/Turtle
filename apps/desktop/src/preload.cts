@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
       return () => void ipcRenderer.removeListener("screen:audio", h);
     },
   },
+  /** Iniciar com o Windows (só no instalado, Windows). */
+  startup: {
+    get: (): Promise<{ supported: boolean; on: boolean }> => ipcRenderer.invoke("startup:get"),
+    set: (on: boolean): Promise<boolean> => ipcRenderer.invoke("startup:set", on),
+  },
   openWebrtcInternals() {
     ipcRenderer.send("debug:webrtc");
   },

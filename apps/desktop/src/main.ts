@@ -20,6 +20,15 @@ let win: BrowserWindow | undefined;
 let quitting = false;
 const keepInTray = app.isPackaged;
 
+/**
+ * Início com o Windows: a entrada de inicialização (HKCU\\...\\Run) abre o app com --hidden, que fica só
+ * na bandeja. O instalador (build/installer.nsh) grava a mesma entrada, com o mesmo nome e argumento.
+ */
+const LOGIN_ITEM = { name: "Turtle", args: ["--hidden"] };
+const startupSupported = app.isPackaged && process.platform === "win32";
+const startHidden = startupSupported && process.argv.includes("--hidden");
+const startsWithWindows = () => startupSupported && app.getLoginItemSettings(LOGIN_ITEM).executableWillLaunchAtLogin;
+
 /** Pedido de captura em andamento: o app web mostra o seletor e responde com o id escolhido. */
 let pending: ((id: string | null) => void) | undefined;
 /** O app web vai pedir o áudio por processo (screen-audio.ts) depois de escolher a fonte. */
@@ -107,7 +116,7 @@ function createWindow(splash?: Splash) {
     height: 800,
     minWidth: 940,
     minHeight: 560,
-    show: !splash,
+    show: !splash && !startHidden,
     backgroundColor: "#000000",
     title: "Turtle",
     icon: appIcon,
@@ -171,7 +180,7 @@ function createWindow(splash?: Splash) {
     const reveal = () => {
       if (revealed) return;
       revealed = true;
-      void splash.close().then(() => win?.show());
+      void splash.close().then(() => !startHidden && win?.show());
     };
     win.webContents.once("did-finish-load", reveal);
     win.webContents.once("did-fail-load", reveal);
@@ -260,6 +269,12 @@ else {
       if (fromApp(event.sender) && win && !win.isFocused()) win.flashFrame(true);
     });
     ipcMain.on("win:focus", (event) => fromApp(event.sender) && showWindow());
+    // Iniciar com o Windows (Configurações): o site lê e muda a entrada de inicialização.
+    ipcMain.handle("startup:get", (event) => (fromApp(event.sender) ? { supported: startupSupported, on: startsWithWindows() } : { supported: false, on: false }));
+    ipcMain.handle("startup:set", (event, on: unknown) => {
+      if (fromApp(event.sender) && startupSupported && typeof on === "boolean") app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin: on });
+      return startsWithWindows();
+    });
     // Atalhos globais de mudo e ensurdecer: o site manda as teclas; ao apertar, o processo principal avisa o site.
     ipcMain.on("shortcuts:set", (event, s: unknown) => {
       if (!fromApp(event.sender) || !s || typeof s !== "object") return;
@@ -313,7 +328,7 @@ else {
       return true;
     });
     setUpdateServer(clientOrigin);
-    const splash = new Splash();
+    const splash = new Splash(startHidden);
     if (await updateOnLaunch(splash)) return; // fecha para instalar a versão nova
     splash.status("Abrindo…");
     if (keepInTray) {

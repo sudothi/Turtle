@@ -6,7 +6,9 @@ export class Splash {
   private win: BrowserWindow | undefined;
   private readonly shownAt = Date.now();
 
-  constructor() {
+  /** `silent`: início automático com o Windows; nada aparece na tela. */
+  constructor(silent = false) {
+    if (silent) return;
     this.win = new BrowserWindow({
       width: 340,
       height: 400,
@@ -37,7 +39,7 @@ export class Splash {
 
   /** Fecha sem piscar: a splash fica pelo menos um instante na tela. */
   async close(minMs = 700) {
-    const wait = minMs - (Date.now() - this.shownAt);
+    const wait = this.win ? minMs - (Date.now() - this.shownAt) : 0;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     this.win?.destroy();
     this.win = undefined;

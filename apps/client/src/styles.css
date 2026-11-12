@@ -545,11 +545,15 @@
 @media (max-width: 720px) { .profile-editor { grid-template-columns: 1fr; } }
 .t-modal.t-modal-wide, .t-modal:has(.profile-editor) { width: min(780px, calc(100vw - 32px)); max-width: none; }
 
-/* Configurações em abas */
-.settings-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--ink-4); margin-bottom: 16px; }
-.settings-tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 8px 12px; color: var(--dim); font: inherit; font-weight: 600; cursor: pointer; }
-.settings-tab:hover { color: var(--fg); }
-.settings-tab.active { color: var(--fg); border-bottom-color: var(--paper); }
+/* Configurações com barra lateral (estilo Discord) */
+.settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 24px; align-items: start; }
+.settings-nav { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 0; }
+.settings-group { display: flex; flex-direction: column; gap: 2px; }
+.settings-group-label { padding: 0 10px 4px; color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.settings-tab { background: none; border: 0; border-left: 3px solid transparent; border-radius: 4px; padding: 7px 10px; color: var(--dim); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.settings-tab:hover { color: var(--fg); background: var(--ink-3); }
+.settings-tab.active { color: var(--fg); background: var(--ink-3); border-left-color: var(--paper); }
+.settings-panel { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .settings-voice .panel { width: auto; max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
 .settings-voice .panel::before { display: none; }
 
@@ -770,8 +774,12 @@
   .t-modal-backdrop, .modal { padding: 8px; align-items: end; }
   .t-modal, .panel { width: 100%; max-height: calc(100dvh - 16px - env(safe-area-inset-top)); }
   .up-popout { left: 8px !important; right: 8px; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important; width: auto; }
-  .settings-tabs { overflow-x: auto; }
-  .settings-tab { flex: none; }
+  .settings-layout { grid-template-columns: 1fr; gap: 12px; }
+  .settings-nav { position: static; flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none; border-bottom: 2px solid var(--ink-4); }
+  .settings-group { flex-direction: row; gap: 4px; }
+  .settings-group-label { display: none; }
+  .settings-tab { flex: none; border-left: 0; border-radius: 0; border-bottom: 2px solid transparent; margin-bottom: -2px; background: none !important; }
+  .settings-tab.active { border-bottom-color: var(--paper); }
 }
 
 /* Telas de toque (sem mouse): mostra o que só aparecia com o cursor em cima */
@@ -840,7 +848,7 @@
   .t-modal-head { padding: 20px 44px 8px 16px; text-align: left; }
   .profile-editor { gap: 16px; }
   /* flex: none: com overflow a faixa de abas encolhia até sumir dentro do corpo do modal (coluna flex) */
-  .server-settings-tabs, .settings-tabs { flex: none; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .server-settings-tabs { flex: none; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .lightbox img { max-width: 100vw; max-height: 80dvh; }
   .lightbox-bar { flex-wrap: wrap; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }

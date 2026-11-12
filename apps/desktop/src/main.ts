@@ -1,16 +1,17 @@
 import { join } from "node:path";
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, session, shell, type WebContents } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, session, shell, type WebContents } from "electron";
 import { appIcon } from "./paths.js";
 import { Splash } from "./splash.js";
 import { createTray } from "./tray.js";
-import { updateOnLaunch, watchUpdates } from "./updater.js";
+import { setUpdateServer, updateOnLaunch, watchUpdates } from "./updater.js";
+import { parseLink, saveServer, savedServer } from "./server-config.js";
 import { watchGames } from "./games.js";
 import { rememberPicked, shareAudioSupported, startShareAudio, stopShareAudio } from "./screen-audio.js";
 
-/** O instalado abre o site publicado; no dev (`pnpm desktop`), o Vite local. */
-const PROD_URL = "https://turtlechat.tech";
-const clientUrl = process.env.TURTLE_CLIENT_URL ?? (app.isPackaged ? PROD_URL : "http://localhost:5173");
-const clientOrigin = new URL(clientUrl).origin;
+/** O instalado abre o servidor guardado (link de convite) ou o padrão; no dev (`pnpm desktop`), o Vite local. */
+let clientUrl = process.env.TURTLE_CLIENT_URL ?? (app.isPackaged ? savedServer() : "http://localhost:5173");
+let clientOrigin = new URL(clientUrl).origin;
+const LINK_SCHEME = "turtle";
 let win: BrowserWindow | undefined;
 /** Fechar a janela só esconde (fica na bandeja); sair de verdade é pelo menu da bandeja. */
 let quitting = false;
@@ -201,11 +202,51 @@ function createWindow(splash?: Splash) {
   void win.loadURL(clientUrl);
 }
 
+/**
+ * Link turtle://convite?server=...&code=...: troca o servidor e abre o cadastro com o código. Como qualquer
+ * página pode disparar o link, a pessoa confirma o endereço antes (evita mandar o login para um site falso).
+ */
+async function handleLink(raw: string) {
+  const link = parseLink(raw);
+  if (!link) return;
+  const origin = link.server ?? clientOrigin;
+  if (link.server && link.server !== clientOrigin) {
+    const host = new URL(link.server).host;
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: ["Conectar", "Cancelar"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Trocar de servidor",
+      message: `Conectar o Turtle a ${host}?`,
+      detail: "Só continue se esse endereço é de quem te convidou. Você vai entrar com a conta desse servidor.",
+    });
+    if (response !== 0) return;
+    saveServer(link.server);
+    clientUrl = link.server;
+    clientOrigin = origin;
+    setUpdateServer(origin);
+  }
+  const target = link.code ? `${origin}/convite/${encodeURIComponent(link.code)}` : clientUrl;
+  showWindow();
+  void win?.loadURL(target);
+}
+const linkIn = (argv: string[]) => argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
+
 // Uma instância só: abrir de novo traz a janela existente.
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   if (process.platform === "win32") app.setAppUserModelId("xyz.ogturtle.turtle");
-  app.on("second-instance", showWindow);
+  if (app.isPackaged) app.setAsDefaultProtocolClient(LINK_SCHEME);
+  app.on("second-instance", (_e, argv) => {
+    const link = linkIn(argv);
+    if (link) void handleLink(link);
+    else showWindow();
+  });
+  app.on("open-url", (e, url) => {
+    e.preventDefault();
+    void handleLink(url); // macOS
+  });
   app.on("before-quit", () => (quitting = true));
   void app.whenReady().then(async () => {
     installPermissions();
@@ -240,6 +281,7 @@ else {
       gamesWatch.set(on === true);
       gamesWatch.replay();
     });
+    setUpdateServer(clientOrigin);
     const splash = new Splash();
     if (await updateOnLaunch(splash)) return; // fecha para instalar a versão nova
     splash.status("Abrindo…");
@@ -248,6 +290,8 @@ else {
       watchUpdates(refreshTray);
     }
     createWindow(splash);
+    const first = linkIn(process.argv); // aberto pelo link com o app fechado (Windows/Linux)
+    if (first) void handleLink(first);
   });
   app.on("window-all-closed", () => {
     if (!keepInTray) app.quit();

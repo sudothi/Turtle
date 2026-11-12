@@ -47,9 +47,8 @@ const calcDb = (buf: Float32Array) => {
 
 const dbToPct = (db: number) => Math.max(0, Math.min(1, (db + 60) / 60)) * 100;
 
-/** Atalhos globais de mudo e ensurdecer (só no app desktop): clique no campo e aperte a combinação. */
 /** Privacidade: mostrar aos outros o jogo aberto (só jogos da lista; desligado, o detector nem roda). */
-function ShowGameSetting() {
+export function ShowGameSetting() {
   const [on, setOn] = useState(loadShowGame);
   return (
     <label className="check-row">
@@ -60,7 +59,7 @@ function ShowGameSetting() {
 }
 
 /** Iniciar o Turtle junto com o Windows (abre direto na bandeja). Só no app instalado. */
-function StartupSetting() {
+export function StartupSetting() {
   const [state, setState] = useState<{ supported: boolean; on: boolean }>({ supported: false, on: false });
   useEffect(() => {
     void desktop()?.startup?.get().then(setState).catch(() => {});
@@ -81,7 +80,8 @@ function StartupSetting() {
   );
 }
 
-function ShortcutSettings() {
+/** Atalhos globais de mudo e ensurdecer (só no app desktop): clique no campo e aperte a combinação. */
+export function ShortcutSettings() {
   const [keys, setKeys] = useState<Shortcuts>(loadShortcuts);
   const [rec, setRec] = useState<keyof Shortcuts | null>(null);
   const [warn, setWarn] = useState("");
@@ -235,7 +235,7 @@ function MicTest({ prefs }: { prefs: AudioPrefs }) {
   );
 }
 
-/** Configurações > Voz: dispositivos, supressão de ruído, ganho e teste do microfone. */
+/** Configurações > Voz e áudio: dispositivos, supressão de ruído, ganho e teste do microfone. */
 export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: AudioPrefs }) {
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] });
 
@@ -310,9 +310,6 @@ export function VoiceSettings({ voice, prefs }: { voice: VoiceClient; prefs: Aud
           <span className="field-note">Volume dos sons que as pessoas tocam na chamada (só para você). Para não ouvir os sons de uma pessoa, clique com o botão direito nela na chamada.</span>
         </div>
         <MicTest prefs={prefs} />
-        {desktop()?.setShortcuts && <ShortcutSettings />}
-        {desktop()?.setActivityEnabled && <ShowGameSetting />}
-        {desktop()?.startup && <StartupSetting />}
         <p className="dim">Cancelamento de eco e ganho automático ficam sempre ligados. Áudio Opus 48 kHz, 64 kb/s.</p>
       </div>
     </div>

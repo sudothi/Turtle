@@ -7,6 +7,7 @@ import type { VoiceClient, VoiceSnapshot } from "../voice/client";
 import { desktop } from "../desktop";
 import { SoundboardButton } from "./Soundboard";
 import { JukeboxButton } from "./Jukebox";
+import { GameAutomationsButton } from "./GameAutomations";
 
 const statusText: Record<VoiceSnapshot["status"], string> = {
   idle: "",
@@ -119,6 +120,7 @@ export function UserPanel({
         <IconButton label="Ensurdecer" aria-pressed={snap.deafened} className={snap.deafened ? "is-off" : ""} onClick={() => void voice.toggleDeafen()}>
           <Icon name={snap.deafened ? "headphones-off" : "headphones"} />
         </IconButton>
+        <GameAutomationsButton compact />
         <IconButton label="Configurações de voz" onClick={onSettings}>
           <Icon name="settings" />
         </IconButton>

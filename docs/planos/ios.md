@@ -41,7 +41,7 @@ A migração de mensagens confirmadas da #113 precisa estar no backend antes de 
 
 ## Respostas no próximo build (#112)
 
-O código acrescenta Responder ao menu, prévia no compositor/histórico, cancelamento sem perder texto e referência persistida no rascunho e no envio pendente. Citações de mensagens apagadas são limpas quando o cliente recebe a exclusão ou a confirma pelo histórico/erro de envio. Retentativas mantêm o destino original e não duplicam a mensagem.
+O código acrescenta Responder à sheet aberta ao segurar a mensagem, prévia no compositor/histórico, cancelamento sem perder texto e referência persistida no rascunho e no envio pendente. A sheet segue a referência fornecida do Discord: emojis rápidos e acesso a mais reações no topo, ações agrupadas com ícones abaixo, fundo escurecido, alça e fechamento por arraste. O botão de opções em cada linha foi removido. Citações de mensagens apagadas são limpas quando o cliente recebe a exclusão ou a confirma pelo histórico/erro de envio. Retentativas mantêm o destino original e não duplicam a mensagem.
 
 O backend estende o envio HTTP confirmado com referência opcional e oferece `/channels/:id/messages/replies`, usada pelo iOS para falhar de forma segura em servidores anteriores. O recibo inclui o destino; recibos de texto sem resposta mantêm a impressão digital anterior. Referências de outro canal/inexistentes são recusadas e não consomem a identificação do envio. O autor da original recebe contagem de menção conforme o contrato existente. Não há mudança de banco nem deploy automático.
 

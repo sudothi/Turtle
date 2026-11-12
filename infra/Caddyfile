@@ -42,7 +42,9 @@
 		header Sec-Fetch-Mode navigate
 		not path /desktop/*
 	}
-	respond @pagina "Endereço desativado." 410
+	handle @pagina {
+		respond "Endereço desativado." 410
+	}
 	import app
 }
 

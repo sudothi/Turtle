@@ -1214,3 +1214,14 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
 .t-icon-btn.ga-live::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--paper); box-shadow: 0 0 0 2px var(--bg-panel, var(--ink-2)); }
 .t-icon-btn.ga-live.is-on::after { background: var(--ink-0); box-shadow: 0 0 0 2px var(--paper); }
 @media (prefers-reduced-motion: reduce) { .ga-status.open .ga-dot, .ga-tool.danger { animation: none; } }
+.ga-strip { border-bottom: 2px solid var(--ink-3); }
+.ga-strip-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; background: transparent; color: var(--paper); font: inherit; text-align: left; cursor: pointer; }
+.ga-strip-btn:hover, .ga-strip-btn:focus-visible, .ga-strip.open .ga-strip-btn { background: var(--ink-2); outline: none; }
+.ga-strip-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--ink-1); }
+.ga-strip.lol-open .ga-strip-icon { background: var(--paper); color: var(--ink-0); }
+.ga-strip-text { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: var(--fs-sm); line-height: 1.25; }
+.ga-strip-text b { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ga-strip-text .t-muted { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-strip .ga-dot { width: 6px; height: 6px; }
+.ga-strip.lol-open .ga-dot { background: var(--paper); }
+.ga-setting { --lino-bg: var(--ink-3); --lino-radius: 10px; --slash-gap: var(--ink-3); display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 12px 0; }

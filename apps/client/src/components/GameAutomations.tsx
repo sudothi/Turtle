@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button, Icon, IconButton, type IconName } from "@turtle/ui";
 import type { AutoConfig, AutoStatus, Champion, DesktopAutomations, RevealProvider, RevealResult } from "../desktop";
@@ -11,6 +11,29 @@ import { copyText } from "../clipboard";
  */
 const api = (): DesktopAutomations | undefined => window.turtleDesktop?.automations;
 export const hasAutomations = () => !!api();
+
+// Liga/desliga o recurso inteiro (Configurações > App desktop). Começa desligado: só aparece para quem ativar.
+const ENABLED_KEY = "turtle.gameAutomations";
+const ENABLED_EVENT = "turtle:game-automations";
+const readEnabled = () => {
+  try { return localStorage.getItem(ENABLED_KEY) === "1"; } catch { return false; }
+};
+export function setGameAutomationsEnabled(on: boolean) {
+  try { localStorage.setItem(ENABLED_KEY, on ? "1" : "0"); } catch { /* sem armazenamento */ }
+  // Desativar o recurso também desliga as automações que estavam rodando no desktop.
+  if (!on) void api()?.set({ accept: { on: false }, pick: { on: false }, ban: { on: false } });
+  window.dispatchEvent(new Event(ENABLED_EVENT));
+}
+export function useGameAutomationsEnabled() {
+  return useSyncExternalStore(
+    (cb) => {
+      window.addEventListener(ENABLED_EVENT, cb);
+      window.addEventListener("storage", cb);
+      return () => { window.removeEventListener(ENABLED_EVENT, cb); window.removeEventListener("storage", cb); };
+    },
+    () => hasAutomations() && readEnabled(),
+  );
+}
 
 export const RANDOM = -1;
 const PHASES: Record<string, string> = {
@@ -321,8 +344,17 @@ function Panel({ config, status, setConfig, place }: { config: AutoConfig; statu
   );
 }
 
-/** Botão do Game Automations (ao lado da discoteca na chamada e no painel do usuário). Só aparece no desktop novo. */
-export function GameAutomationsButton({ compact }: { compact?: boolean }) {
+/**
+ * Game Automations: ícone ao lado da discoteca na chamada (`compact` no painel de voz, grande nos controles)
+ * ou, fora da chamada, a faixa `strip` acima da barra do usuário (mesmo lugar do bloco "Voz conectada").
+ * Só aparece no desktop novo e para quem ativou nas configurações.
+ */
+export function GameAutomationsButton({ compact, strip }: { compact?: boolean; strip?: boolean }) {
+  const enabled = useGameAutomationsEnabled();
+  return enabled ? <GameAutomationsInner compact={compact || strip} strip={strip} /> : null;
+}
+
+function GameAutomationsInner({ compact, strip }: { compact?: boolean; strip?: boolean }) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ left: number; bottom: number }>();
   const [config, setConfigState] = useState<AutoConfig | null>(null);
@@ -374,6 +406,24 @@ export function GameAutomationsButton({ compact }: { compact?: boolean }) {
     setOpen(true);
   };
   const live = !!config && (config.accept.on || config.pick.on || config.ban.on);
+  const panel = open && config && createPortal(<Panel config={config} status={status} setConfig={setConfig} place={place} />, document.body);
+  if (strip) {
+    const on = config ? [config.accept.on && "Aceitar", config.pick.on && "Pick", config.ban.on && "Ban"].filter(Boolean) as string[] : [];
+    const where = status.client === "open" ? PHASES[status.phase ?? "None"] ?? "Cliente aberto" : "LoL fechado";
+    return (
+      <div className={`ga-strip ${open ? "open" : ""} ${status.client === "open" ? "lol-open" : ""}`} ref={box}>
+        <button className="ga-strip-btn" aria-expanded={open} aria-label="Game Automations" onClick={toggle}>
+          <span className="ga-strip-icon" aria-hidden="true"><Icon name="gamepad" size={18} /></span>
+          <span className="ga-strip-text">
+            <b>{where}<span className="ga-dot" aria-hidden="true" /></b>
+            <span className="t-muted">{on.length ? `${on.join(" · ")} ligado${on.length > 1 ? "s" : ""}` : "Automações desligadas"}</span>
+          </span>
+          <Icon name="chevron-right" size={16} />
+        </button>
+        {panel}
+      </div>
+    );
+  }
   return (
     <div className={`sb-anchor ${compact ? "side" : ""}`} ref={box}>
       <IconButton
@@ -382,7 +432,23 @@ export function GameAutomationsButton({ compact }: { compact?: boolean }) {
       >
         <Icon name="gamepad" size={compact ? 20 : 24} />
       </IconButton>
-      {open && config && createPortal(<Panel config={config} status={status} setConfig={setConfig} place={place} />, document.body)}
+      {panel}
     </div>
+  );
+}
+
+/** Configurações > App desktop: ativar o Game Automations (só no app desktop novo). */
+export function GameAutomationsSetting() {
+  const enabled = useGameAutomationsEnabled();
+  if (!hasAutomations()) return null;
+  return (
+    <section className="ga-setting lino">
+      <span className="ga-row-icon" aria-hidden="true"><Icon name="gamepad" size={18} /></span>
+      <span className="ga-row-text">
+        <b>Game Automations</b>
+        <span className="t-muted">Aceitar partida, pick e ban automáticos e ferramentas da seleção do League of Legends. Aparece ao lado da discoteca e acima da sua barra de usuário.</span>
+      </span>
+      <Switch on={enabled} label="Ativar Game Automations" onChange={setGameAutomationsEnabled} />
+    </section>
   );
 }

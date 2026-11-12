@@ -21,10 +21,14 @@ Ficaram de fora: cosméticos (ícone, fundo, emblemas, Riot ID, status), remover
 ![escolher campeão](game-automations/2-escolher.png)
 
 ## Onde fica a tela
-- Botão de controle (ícone `gamepad`) no painel do usuário, ao lado da engrenagem, sempre visível no desktop novo; e nos controles grandes da chamada, ao lado do botão da Discoteca.
-- Um pontinho no botão avisa que alguma automação está ligada.
+- **Desligado por padrão.** Cada pessoa ativa em Configurações > App desktop > Game Automations (guardado no aparelho). Desativar também desliga as automações que estavam rodando.
+- **Na chamada:** ícone de controle (`gamepad`) ao lado do botão da Discoteca, no painel "Voz conectada" e nos controles grandes da chamada.
+- **Fora da chamada:** uma faixa no mesmo lugar do bloco "Voz conectada", acima da barra do usuário, com a fase do LoL ("Na fila", "Seleção de campeões"…) e o que está ligado. Clicar abre o painel.
+- Um pontinho no ícone avisa que alguma automação está ligada.
 - O painel segue o padrão da Discoteca: abas, cartões com interruptor, espera em segundos, seletor de campeão com busca e ícones, e a última ação no rodapé.
-- No navegador e no Android o botão não aparece (`window.turtleDesktop.automations` não existe).
+- No navegador e no Android nada aparece (`window.turtleDesktop.automations` não existe).
+
+![faixa fora da chamada](game-automations/7-faixa.png)
 
 ## Arquitetura
 - `apps/desktop/src/lcu/client.ts`: acha o cliente pela linha de comando do `LeagueClientUx.exe` (`--app-port`, `--remoting-auth-token` e as do Riot Client), com `tasklist` antes para só chamar o PowerShell se o processo existir; reserva pelo `lockfile`. HTTPS só para `127.0.0.1`. A rich presence (`games.ts`) passou a usar o mesmo cliente.

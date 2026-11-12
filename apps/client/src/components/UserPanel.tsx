@@ -92,6 +92,7 @@ export function UserPanel({
               </IconButton>
               {callServer && <SoundboardButton server={callServer} meId={user.id} deafened={snap.deafened} compact />}
               {callServer && snap.channelId && <JukeboxButton channelId={snap.channelId} nameOf={nameOf ?? (() => "alguém")} deafened={snap.deafened} compact />}
+              <GameAutomationsButton compact />
             </div>
           )}
           {snap.needsAudioUnlock && (
@@ -101,6 +102,7 @@ export function UserPanel({
           )}
         </div>
       )}
+      {snap.status === "idle" && <GameAutomationsButton strip />}
       {snap.error && (
         <div className="voice-error" role="alert">
           {snap.error}
@@ -120,7 +122,6 @@ export function UserPanel({
         <IconButton label="Ensurdecer" aria-pressed={snap.deafened} className={snap.deafened ? "is-off" : ""} onClick={() => void voice.toggleDeafen()}>
           <Icon name={snap.deafened ? "headphones-off" : "headphones"} />
         </IconButton>
-        <GameAutomationsButton compact />
         <IconButton label="Configurações de voz" onClick={onSettings}>
           <Icon name="settings" />
         </IconButton>

@@ -39,13 +39,15 @@ O deployment target configurado é **iOS 26.0**. O mínimo é o do projeto gerad
 
 A migração de mensagens confirmadas da #113 precisa estar no backend antes de usar os envios HTTP. Nenhum deploy é feito pela criação do IPA ou merge de PR.
 
-## Respostas no próximo build (#112)
+## Respostas e recuperação de envios (#112)
 
 O código acrescenta Responder à sheet aberta ao segurar a mensagem, prévia no compositor/histórico, cancelamento sem perder texto e referência persistida no rascunho e no envio pendente. A sheet segue a referência fornecida do Discord: emojis rápidos e acesso a mais reações no topo, ações agrupadas com ícones abaixo, fundo escurecido, alça e fechamento por arraste. O botão de opções em cada linha foi removido. Citações de mensagens apagadas são limpas quando o cliente recebe a exclusão ou a confirma pelo histórico/erro de envio. Retentativas mantêm o destino original e não duplicam a mensagem.
 
 O backend estende o envio HTTP confirmado com referência opcional e oferece `/channels/:id/messages/replies`, usada pelo iOS para falhar de forma segura em servidores anteriores. O recibo inclui o destino; recibos de texto sem resposta mantêm a impressão digital anterior. Referências de outro canal/inexistentes são recusadas e não consomem a identificação do envio. O autor da original recebe contagem de menção conforme o contrato existente. Não há mudança de banco nem deploy automático.
 
-O IPA build 7 anterior permanece inalterado; a entrega pertence ao próximo build, junto do domínio `turtlechat.tech` já presente na main (#208/#58). Antes de distribuir: publicar o backend com autorização e testar respostas entre iPhone/web/desktop em canal/DM/grupo, menções, rascunhos, cancelamento, queda de rede e exclusão/edição da original. A #112 mantém seu restante de escopo, incluindo a diferença entre retentativa manual HTTP e reenvio automático WS.
+As respostas e a sheet foram incluídas no IPA build 8 (#222). A continuação de envios sem perda usa `sendConfirmed` após negociação em `pong`, com nonce UUID e os mesmos recibos duráveis do HTTP. Servidores anteriores mantêm o envio HTTP confirmado. A recuperação reconcilia o histórico ativo, preserva a referência de resposta e faz até cinco tentativas automáticas por período conectado (espera de 1, 2, 4, 8 e 16 segundos), serializadas entre conversas. Recusas definitivas e gravações locais malsucedidas não são reenviadas automaticamente; a tentativa manual continua disponível. Não há reenvio depois de logout ou encerramento do workspace.
+
+Esta continuação é posterior ao IPA build 8, que permanece inalterado e deve ser preservado. Exige um próximo build para distribuição e o backend novo para o transporte WS confirmado; não altera o Android. O aceite físico ainda deve cobrir perda de confirmação, troca de rede/reabertura, respostas, conta/origem, bloqueio/expulsão e exclusão da mensagem. Merge e geração de IPA não fazem deploy.
 
 ## Assinatura e capacidades (#46/#56/#57)
 
@@ -127,7 +129,7 @@ Registrar por cenário: versão/build/commit do app, versão do backend, iPhone/
 
 Com o backend desta etapa da #54, uma chamada que perde o socket de chat conserva o estado apenas mediante sessão válida, permissão atual e presença real no LiveKit. A consulta periódica usa intervalo de 15 s, prazo de confirmação de 45 s e timeout de até 5 s; revogação e saída da mídia removem o estado. Um novo relatório de voz substitui o antigo e impede que uma consulta atrasada restaure participantes fantasmas. A presença online continua vinculada ao chat, separada da presença na chamada. A preservação exige o deploy autorizado desse backend; gerar o IPA não publica o servidor.
 
-No build 7, AVAudioSession é observado por um módulo Expo local Swift. Ele bloqueia o áudio nativo durante interrupção e só libera depois de o TypeScript fechar a track do microfone; o estado pendente também é consultado na retomada. A câmera desliga ao deixar o estado ativo, inclusive ao abrir notificações, e permanece desligada ao voltar por decisão do usuário. PiP fica para outra etapa. O gateway detecta abertura sem conclusão (10 s) e falta de pong (15 s), usa backoff e renova as leituras ao retomar, preservando rascunhos e evitando reenvio automático de pendências. Ver detalhes e roteiro em [apps/ios/README.md](../../apps/ios/README.md).
+No build 7, AVAudioSession é observado por um módulo Expo local Swift. Ele bloqueia o áudio nativo durante interrupção e só libera depois de o TypeScript fechar a track do microfone; o estado pendente também é consultado na retomada. A câmera desliga ao deixar o estado ativo, inclusive ao abrir notificações, e permanece desligada ao voltar por decisão do usuário. PiP fica para outra etapa. O gateway detecta abertura sem conclusão (10 s) e falta de pong (15 s), usa backoff e renova as leituras ao retomar, preservando rascunhos. A recuperação automática de envios descrita acima foi acrescentada depois do build 8. Ver detalhes e roteiro em [apps/ios/README.md](../../apps/ios/README.md).
 
 As verificações automatizadas e a compilação do módulo não aprovam Siri, Bluetooth, 30 minutos bloqueado, troca Wi-Fi/celular ou rede restritiva. Registrar essas evidências usando o build 7 e o backend desta etapa na #54/#59. TURN e backups mantêm seu escopo nas issues próprias.
 

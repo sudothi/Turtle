@@ -16,6 +16,7 @@ services:
       DOMAIN_LK: ${DOMAIN_LK:?rode ./install.sh}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./desktop:/srv/desktop:ro
       - caddy_data:/data
       - caddy_config:/config
 

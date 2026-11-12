@@ -121,3 +121,7 @@ O site funciona direto no navegador, inclusive no celular. Os instaladores ofici
 - Mantenha o sistema atualizado (`sudo apt upgrade`, e `unattended-upgrades` ajuda).
 - `fail2ban` ativo, SSH só por chave.
 - Convites de conta só pelo admin; revogue os que não usou.
+
+## App desktop do seu servidor (opcional)
+
+Para a sua turma baixar o Turtle para Windows direto do seu domínio, coloque em `infra/selfhost/desktop/` o `Turtle-Setup-<versão>.exe`, o `.blockmap` e o `latest.yml` (o `latest.yml` por último) e rode `docker compose up -d`. A página Configurações > App desktop passa a mostrar o botão de download. O arquivo baixado se chama `Turtle-Setup@app.seudominio.com.exe`: o instalador lê o domínio do próprio nome e grava em `%APPDATA%\Turtle\server.json`, então ninguém precisa digitar o endereço. **Não renomeie o arquivo** (um "(1)" no nome do navegador também impede a leitura; nesse caso o app abre no servidor padrão e o link de convite resolve). As atualizações automáticas vêm do mesmo `/desktop/`.

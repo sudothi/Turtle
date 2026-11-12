@@ -77,7 +77,7 @@ Sem prova da extensão após reassinatura, a versão atual **não oferece botão
 
 ## Build e entrega (#58)
 
-O build 7 acrescenta o tratamento nativo de interrupções e a recuperação de gateway da #54, mantendo a correção de sessão da #191. A entrega aponta diretamente para main. O manifesto identifica o commit usado; os cenários físicos da #54/#59 continuam pendentes. O build 6 foi instalado no iPhone 15 do usuário por sideload direto do AltServer 1.8.4; renovação e importação pela Classic ainda não foram comprovadas. Preservar os artefatos anteriores e usar novo número para cada binário.
+O build 8 parte da main com #205 (teclado/imagens), #208 (servidor padrão), #219 (respostas e sheet de ações) e #221 (câmera silenciada e avatar), mantendo os módulos nativos de áudio anteriores. O manifesto identifica o commit exato usado. As notas e o roteiro desta atualização estão em [apps/ios/README.md](../../apps/ios/README.md#notas-da-versão-040-build-8-58). O aceite físico anterior das #47/#53/#54/#55 está registrado nas issues; não aprova por si só este novo IPA nem instalação/renovação na Classic. Preservar os artefatos anteriores e usar novo número para cada binário.
 
 Em macOS com Xcode/SDK compatíveis e CocoaPods, após `pnpm install`:
 
@@ -87,16 +87,16 @@ pnpm ios:ipa
 
 O script gera o projeto nativo a partir da configuração versionada, instala Pods, faz archive Release sem assinatura, inclui JavaScript e empacota o IPA. A versão e o build vêm de `apps/ios/package.json`; `app.config.ts` usa os mesmos valores. Saídas:
 
-- `apps/ios/release/Turtle-0.4.0-build7.ipa`
-- `apps/ios/release/Turtle-0.4.0-build7.ipa.sha256`
-- `apps/ios/release/Turtle-0.4.0-build7.ipa.json`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa.sha256`
+- `apps/ios/release/Turtle-0.4.0-build8.ipa.json`
 
 O manifesto registra versão, build, bundle ID, iOS mínimo, commit, presença de alterações locais (`sourceDirty`) e SHA-256. Para identificar o código pelo commit, distribuir somente um artefato com `sourceDirty: false`. O empacotamento recusa sobrescrever IPA, checksum ou manifesto do mesmo build; incrementar `iosBuildNumber` para uma nova entrega. O script confere a versão do archive e a presença das descrições de câmera/microfone. Artefatos e o projeto gerado são ignorados pelo Git. O IPA é **para importar e reassinar**, não uma distribuição já assinada. Compartilhar o IPA e o checksum juntos pelo canal privado do grupo; não criar release pública nem source AltStore antes do aceite de instalação manual. Não há workflow automático de publicação.
 
 Para conferir a transferência, rode na pasta do IPA:
 
 ```sh
-shasum -a 256 -c Turtle-0.4.0-build7.ipa.sha256
+shasum -a 256 -c Turtle-0.4.0-build8.ipa.sha256
 ```
 
 Instalação: AltServer no computador, AltStore Classic no iPhone, importar o IPA em My Apps > + e seguir os pedidos de confiança/Modo Desenvolvedor. Cada participante usa a própria conta. No modelo gratuito, a documentação Classic informa renovação em sete dias, três apps ativos (AltStore ocupa uma vaga) e até dez App IDs registrados simultaneamente. Extensões usam App IDs adicionais. Conferir os limites que a instalação final mostrar.

@@ -49,11 +49,22 @@ O endereço padrão é o servidor padrão definido no build (`EXPO_PUBLIC_API_OR
 pnpm ios:ipa
 ```
 
-O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.4.0-build7.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; o build number vem de `package.json` e o bundle ID de `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
+O script faz prebuild, instala Pods e compila um archive Release sem assinatura, com JavaScript embutido. Empacota `apps/ios/release/Turtle-0.4.0-build8.ipa` para importação e reassinatura pela Classic. Não precisa de login EAS nem servidor Metro. A versão vem de `package.json`; o build number vem de `package.json` e o bundle ID de `app.config.ts`. Use uma nova versão/build ao distribuir atualizações. O diretório `ios` é gerado e os artefatos ficam ignorados pelo Git.
 
 Instale AltServer no Mac/Windows e AltStore Classic no iPhone seguindo os guias oficiais abaixo. Cada participante usa sua própria conta Apple gratuita. Transfira o IPA ao iPhone, abra AltStore > My Apps > `+` e selecione-o. Autorize confiança/Modo Desenvolvedor quando solicitado. O fluxo de importação, reassinatura e renovação ainda exige validação no aparelho do grupo.
 
 Contas gratuitas exigem renovação em 7 dias e têm limites de apps/App IDs; confira a disponibilidade na própria AltStore antes de instalar. Mantenha AltServer acessível e renove antes de vencer. Se expirar, reconecte ao AltServer para renovar; não desinstale como primeiro passo. Preservação de sessão após reinstalação, mudança de Team ID/bundle ID ou reassinatura não é garantida. Confira os guias oficiais [macOS](https://faq.altstore.io/altstore-classic/how-to-install-altstore-macos), [Windows](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows), [renovação](https://faq.altstore.io/altstore-classic/your-altstore) e [App IDs](https://faq.altstore.io/altstore-classic/app-ids).
+
+## Notas da versão 0.4.0, build 8 (#58)
+
+- Novo endereço padrão de servidor no login, já definido pela #208. Uma sessão salva conserva a origem anterior: para usar o novo endereço, saia da conta, confira **Configurar servidor** no login e entre novamente. A atualização não migra sessões automaticamente.
+- Correções de teclado e envio de avatar/banner (#205).
+- Responder/citar com prévia e rascunho persistido; segurar a mensagem abre a sheet com emojis e ações (#219).
+- Publicação de câmera silenciada deixa de renderizar mesmo com a track mantida; o cartão usa avatar ou iniciais (#221).
+
+Respostas exigem o backend da #219 atualizado: versões anteriores recusam a operação sem perder o rascunho. O build não publica esse backend. O IPA inclui o módulo nativo de áudio e dispensa Metro; continua sendo um pacote sem assinatura para reassinatura individual pela AltStore Classic.
+
+Reteste no aparelho: atualização por cima preservando sessão/preferências quando permitido pela assinatura; origem efetiva no login; login/WS/imagens/voz; responder entre iPhone e outro cliente; segurar mensagem e usar reações/edição/exclusão; desligar/religar câmeras locais/remotas e colocar o app em segundo plano. Instalação, renovação e entitlements após reassinatura continuam nas #46/#58/#59.
 
 ## Roteiro de aceite em aparelho
 

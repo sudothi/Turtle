@@ -5,26 +5,40 @@ const colorOn = () => !!process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (/** @type {number} */ n) => (/** @type {string} */ s) => (colorOn() ? `\x1b[${n}m${s}\x1b[0m` : s);
 export const bold = paint(1), dim = paint(2), red = paint(31), green = paint(32), yellow = paint(33), cyan = paint(36), magenta = paint(35);
 
-export const BANNER = [
-  "        _.-''''-._",
-  "      .'  *   *   '.          Turtle Setup",
-  "     /  *  _____  *  \\        o seu Turtle, na sua VPS",
-  "    |  *  /_/_/_\\  *  |",
-  "     \\  *  -----  *  /",
-  "      '._  *   *  _.'  _",
-  "         '-....-'  (_)>",
-].join("\n");
+export const BANNER_ART = [
+  "            ▄▄▄▄▄▄           ▄▄████",
+  "         ███████████▄       ▄██████",
+  "       ▄████████▀ ▄▄▄▄▄▄▄▄  ███████",
+  "            ▀▀   ██████████  ▀███▀",
+  "            ▄███ █████████▀▄▄▄",
+  "          ▄██████ █████▀ ▄█████",
+  "          ███████▄▄▄▄▄  ▄██████",
+  "          ▀▀▀▀▀████████ ███████ ▄▄",
+  "     ▄▄  ████▄ ████████ ▀██████ ██▄",
+  "  ▄█████ █████ ███████▀▄▄▄▀▀▀▀ ▄███",
+  " ▄██████ █████ ▀▀███▀▄██████▄  ████",
+  " ███▀▀▀  ████▀▄▄███▄ ███████▀ █████",
+  " ▀▀       ▀▀▄████████ ████▀    ███▀",
+  "            ▀███████▀  ▀       ██▀",
+  "               ▄▄▄▄▄          ▀▀",
+  "              ▄█████",
+  "              █████",
+  "             ███▀▀",
+];
+
+/** Logo do Turtle em meio-bloco (gerada a partir de packages/ui/assets/turtle-mark.svg). */
+const TEXT = ["", "", "", "", "", "Turtle Setup", "o seu Turtle, na sua VPS", "", "instala e cuida do servidor", "por SSH, direto do seu PC"];
+export const BANNER = BANNER_ART.join("\n");
 
 export function banner() {
-  const lines = BANNER.split("\n");
   console.log("");
-  for (const l of lines) {
-    const i = l.indexOf("Turtle Setup");
-    const j = l.indexOf("o seu Turtle");
-    if (i > 0) console.log(cyan(l.slice(0, i)) + bold(l.slice(i)));
-    else if (j > 0) console.log(cyan(l.slice(0, j)) + dim(l.slice(j)));
-    else console.log(cyan(l));
-  }
+  const off = Math.max(0, Math.floor((BANNER_ART.length - TEXT.length) / 2));
+  BANNER_ART.forEach((l, i) => {
+    const t = TEXT[i - off + 0] ?? "";
+    const pad = " ".repeat(35 - l.length + 4);
+    const label = i - off === 5 ? bold(t) : dim(t);
+    console.log("  " + cyan(l) + (t ? pad + label : ""));
+  });
   console.log("");
 }
 

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { AudioSession, VideoTrack } from "@livekit/react-native";
+import type { Person } from "@turtle/protocol";
 import { Button, Notice } from "../ui/components";
 import { Avatar, Page } from "../ui/layout";
 import { Icon, type IconName } from "../ui/Icon";
 import { styles as text, colors } from "../ui/theme";
-import { useCall, useWorkspace } from "../workspace-context";
+import { useCall, useDirectory, useRead, useWorkspace } from "../workspace-context";
 import { callStatus } from "../navigation/call-access";
 import { useAppNavigation } from "../navigation/types";
 
@@ -15,7 +16,14 @@ function CallControl({ name, label, onPress, disabled, hangup }: { name: IconNam
 }
 export default function CallScreen() {
   const call = useCall();
-  const { workspace } = useWorkspace();
+  const { workspace, user } = useWorkspace();
+  const directory = useDirectory();
+  const serverId = directory.data.find(entry => entry.channels.some(channel => channel.id === call.channelId))?.server.id;
+  const people = useRead<Person[]>([], useCallback(async () => {
+    if (!call.channelId) return [];
+    if (serverId) return (await workspace.api.members(serverId)).map(member => ({ id: member.userId, username: member.username, displayName: member.displayName, avatar: member.avatar }));
+    return (await workspace.api.dms()).find(dm => dm.channelId === call.channelId)?.users ?? [];
+  }, [workspace, serverId, call.channelId]));
   const navigation = useAppNavigation();
   const [focus, setFocus] = useState<string>();
   useFocusEffect(useCallback(() => { workspace.voice.setVideoVisible(true); return () => workspace.voice.setVideoVisible(false); }, [workspace]));
@@ -30,7 +38,7 @@ export default function CallScreen() {
       <Notice>{error || call.error}</Notice>
       {!!focus && <Button secondary onPress={() => setFocus(undefined)}>Voltar à grade</Button>}
       <View style={s.tiles}>{call.members.filter(member => !focus || member.id === focus).map(member => <View key={member.id} accessibilityLabel={`${member.name}${member.local ? ", você" : ""}. ${member.speaking ? "Falando" : member.muted ? "Microfone fechado" : "Na conversa"}`} style={[s.tile, { width: single ? "100%" : "48%" }, member.speaking && { borderColor: colors.paper }]}>
-        {member.video ? <VideoTrack trackRef={member.video} mirror={member.local && call.facing === "user"} objectFit="contain" style={{ width: "100%", height: "100%", borderRadius: 8 }} /> : <View pointerEvents="none" style={s.avatar}><Avatar name={member.name} size={single ? 80 : 64} /></View>}
+        {member.video ? <VideoTrack trackRef={member.video} mirror={member.local && call.facing === "user"} objectFit="contain" style={{ width: "100%", height: "100%", borderRadius: 8 }} /> : <View pointerEvents="none" style={s.avatar}><Avatar name={member.name} uri={workspace.api.fileUrl(member.local ? user.avatar : people.data.find(person => person.id === member.id)?.avatar)} size={single ? 80 : 64} /></View>}
         <Pressable accessibilityRole="button" accessibilityLabel={`Ampliar ${member.name}`} onPress={() => setFocus(member.id)} style={({ pressed }) => [s.expandTarget, pressed && { opacity: 0.65 }]}><View style={s.expandIcon}><Icon name="maximize" color={colors.paper} size={16} /></View></Pressable>
         {!!member.quality && <Text style={[text.caption, { position: "absolute", top: 8, left: 8 }]}>{member.quality}</Text>}
         <View style={s.memberName}>{member.muted && <Icon name="mic-off" size={16} color={colors.paper} />}<Text maxFontSizeMultiplier={2} numberOfLines={2} style={[text.label, { fontSize: 14, flexShrink: 1 }]}>{member.name}{member.local ? " (você)" : ""}{member.speaking ? " · Falando" : ""}</Text></View>

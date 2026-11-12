@@ -85,6 +85,7 @@ Para a navegação da #48, validar também:
 ## Ciclo de vida da chamada — build 7 (#54)
 
 - Trocar de app, bloquear a tela ou abrir a Central de Notificações desliga a câmera; retornar não a religa. Somente o botão Ligar câmera retoma vídeo. PiP fica para uma evolução futura.
+- Uma publicação de vídeo silenciada deixa de renderizar mesmo que o LiveKit conserve a track. O cartão volta ao avatar da conta (ou iniciais sem foto); perfis de participantes são atualizados ao receber foco/eventos do gateway. A regressão local/remota, inclusive ao entrar em segundo plano, tem cobertura automatizada (#193).
 - Uma interrupção real de áudio (Siri/ligação) segura a unidade de áudio nativa do WebRTC até o app fechar o microfone. Ao terminar, volta à escuta, respeitando ensurdecer; abrir microfone exige ação manual. A proteção também cobre um evento que o JavaScript perdeu durante suspensão, consultando o estado nativo ao retornar.
 - O módulo local `modules/turtle-call-audio` observa AVAudioSession e não solicita novos entitlements. **Atualizar o IPA é obrigatório**; Metro sozinho não instala esse módulo.
 - O gateway aguarda no máximo 10 s pela abertura e 15 s por uma resposta a ping. Falhas usam espera crescente com jitter, preservam a sessão em falha temporária e reenviam o estado de voz ao reconectar. Um 401/4401 continua invalidando a sessão.

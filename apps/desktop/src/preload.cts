@@ -67,4 +67,21 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
     ipcRenderer.on("activity:changed", h);
     return () => void ipcRenderer.removeListener("activity:changed", h);
   },
+  /** Game Automations do LoL (só Windows na prática): estado, configurações e ferramentas. */
+  automations: {
+    get: () => ipcRenderer.invoke("auto:get"),
+    set: (patch: unknown) => ipcRenderer.invoke("auto:set", patch),
+    watch(on: boolean) {
+      ipcRenderer.send("auto:watch", on);
+    },
+    champions: () => ipcRenderer.invoke("auto:champions"),
+    icon: (id: number) => ipcRenderer.invoke("auto:icon", id),
+    tool: (which: "reveal" | "dodge" | "restart") => ipcRenderer.invoke("auto:tool", which),
+    open: (url: string) => ipcRenderer.invoke("auto:open", url),
+    onStatus(cb: (s: unknown) => void) {
+      const h = (_: unknown, st: unknown) => cb(st);
+      ipcRenderer.on("auto:status", h);
+      return () => void ipcRenderer.removeListener("auto:status", h);
+    },
+  },
 });

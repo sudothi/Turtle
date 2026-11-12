@@ -6,6 +6,9 @@ import { createTray } from "./tray.js";
 import { setUpdateServer, updateOnLaunch, watchUpdates } from "./updater.js";
 import { parseLink, saveServer, savedServer } from "./server-config.js";
 import { watchGames } from "./games.js";
+import { sharedLcu } from "./lcu/client.js";
+import { createAutomations } from "./lcu/automations.js";
+import { REVEAL_HOSTS } from "./lcu/logic.js";
 import { rememberPicked, shareAudioSupported, startShareAudio, stopShareAudio } from "./screen-audio.js";
 
 /** O instalado abre o servidor guardado (link de convite) ou o padrão; no dev (`pnpm desktop`), o Vite local. */
@@ -280,6 +283,34 @@ else {
       if (!fromApp(event.sender)) return;
       gamesWatch.set(on === true);
       gamesWatch.replay();
+    });
+    // Game Automations (LoL): roda aqui; o site só vê o estado e manda configurações. Só fala com 127.0.0.1.
+    const auto = createAutomations({ lcu: sharedLcu, dir: app.getPath("userData"), onStatus: (st) => win?.webContents.send("auto:status", st) });
+    void auto.init();
+    const tool = async (fn: () => Promise<unknown>) => {
+      try { return { ok: true, result: await fn() }; } catch (e) { return { ok: false, error: (e as Error).message || "Falhou." }; }
+    };
+    ipcMain.handle("auto:get", (event) => (fromApp(event.sender) ? { config: auto.getConfig(), status: auto.getStatus() } : null));
+    ipcMain.handle("auto:set", (event, patch: unknown) => (fromApp(event.sender) ? auto.setConfig(patch) : null));
+    ipcMain.on("auto:watch", (event, on: unknown) => fromApp(event.sender) && auto.watch(on === true));
+    ipcMain.handle("auto:champions", (event) => (fromApp(event.sender) ? auto.champions() : []));
+    ipcMain.handle("auto:icon", (event, id: unknown) => (fromApp(event.sender) && typeof id === "number" ? auto.icon(id) : null));
+    ipcMain.handle("auto:tool", (event, which: unknown) => {
+      if (!fromApp(event.sender)) return { ok: false, error: "Não permitido." };
+      if (which === "reveal") return tool(auto.reveal);
+      if (which === "dodge") return tool(auto.dodge);
+      if (which === "restart") return tool(auto.restartUx);
+      return { ok: false, error: "Ferramenta desconhecida." };
+    });
+    // Só abre os sites de multi-busca do "revelar lobby".
+    ipcMain.handle("auto:open", (event, url: unknown) => {
+      if (!fromApp(event.sender) || typeof url !== "string") return false;
+      try {
+        const u = new URL(url);
+        if (u.protocol !== "https:" || !REVEAL_HOSTS.includes(u.hostname)) return false;
+      } catch { return false; }
+      void shell.openExternal(url);
+      return true;
     });
     setUpdateServer(clientOrigin);
     const splash = new Splash();

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { request } from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { sharedLcu } from "./lcu/client.js";
 
 /**
  * Detector de jogos leve: a cada 30 s olha a lista de processos (tasklist/ps) contra uma lista fixa de
@@ -44,43 +45,19 @@ function processNames(): Promise<Set<string>> {
   });
 }
 
-/** GET numa API local (127.0.0.1) com certificado próprio do jogo. */
-function local(port: number, path: string, auth?: string): Promise<any> {
-  return new Promise((resolve) => {
-    const req = request(
-      { host: "127.0.0.1", port, path, rejectUnauthorized: false, timeout: 3000, headers: auth ? { authorization: `Basic ${auth}` } : {} },
-      (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve(undefined); } });
-      },
-    );
-    req.on("error", () => resolve(undefined));
-    req.on("timeout", () => req.destroy());
-    req.end();
-  });
-}
-
-const LOL_LOCKFILES = ["C:\\Riot Games\\League of Legends\\lockfile", "D:\\Riot Games\\League of Legends\\lockfile", "/Applications/League of Legends.app/Contents/LoL/lockfile"];
 async function lolState(): Promise<{ phase: Phase; detail: string | null }> {
-  for (const file of LOL_LOCKFILES) {
-    const text = await fs.readFile(file, "utf8").catch(() => "");
-    const [, , port, password] = text.split(":");
-    if (!port || !password) continue;
-    const auth = Buffer.from(`riot:${password}`).toString("base64");
-    const raw: unknown = await local(Number(port), "/lol-gameflow/v1/gameflow-phase", auth);
-    const phase: Phase =
-      raw === "Lobby" ? "lobby"
-      : raw === "Matchmaking" || raw === "ReadyCheck" ? "queue"
-      : raw === "ChampSelect" ? "champSelect"
-      : raw === "GameStart" || raw === "InProgress" || raw === "Reconnect" ? "inGame"
-      : null;
-    if (!phase) return { phase: null, detail: null };
-    const session = await local(Number(port), "/lol-gameflow/v1/session", auth);
-    const queue = session?.gameData?.queue?.description;
-    return { phase, detail: typeof queue === "string" && queue ? queue.slice(0, 60) : null };
-  }
-  return { phase: null, detail: null };
+  const get = (path: string) => sharedLcu.request("GET", path).then((r) => (r.status === 200 ? r.data : undefined)).catch(() => undefined);
+  const raw: unknown = await get("/lol-gameflow/v1/gameflow-phase");
+  const phase: Phase =
+    raw === "Lobby" ? "lobby"
+    : raw === "Matchmaking" || raw === "ReadyCheck" ? "queue"
+    : raw === "ChampSelect" ? "champSelect"
+    : raw === "GameStart" || raw === "InProgress" || raw === "Reconnect" ? "inGame"
+    : null;
+  if (!phase) return { phase: null, detail: null };
+  const session = await get("/lol-gameflow/v1/session");
+  const queue = session?.gameData?.queue?.description;
+  return { phase, detail: typeof queue === "string" && queue ? queue.slice(0, 60) : null };
 }
 
 const robloxNames = new Map<string, string | null>();

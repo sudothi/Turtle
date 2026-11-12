@@ -10,7 +10,9 @@ const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "
 const out = join(root, "release");
 mkdirSync(out, { recursive: true });
 
-const plat = { win32: "windows", darwin: "macos", linux: "linux" }[process.platform] ?? process.platform;
+/** @type {Record<string, string>} */
+const names = { win32: "windows", darwin: "macos", linux: "linux" };
+const plat = names[process.platform] ?? process.platform;
 const name = `turtle-setup-${plat}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`;
 const bin = join(out, name);
 const blob = join(out, "sea.blob");

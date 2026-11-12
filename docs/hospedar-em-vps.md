@@ -1,6 +1,6 @@
 # Hospedar o Turtle numa VPS
 
-Guia manual, do zero. Se preferir que uma IA faça isso por você, use [instalar-com-ia.md](instalar-com-ia.md).
+Guia manual, do zero. Se preferir que uma IA faça isso por você, use [instalar-com-ia.md](instalar-com-ia.md); se preferir um assistente de terminal que faz os passos 1 a 6 por SSH, use o [Turtle Setup](../tools/turtle-setup/README.md).
 
 ## O que você vai precisar
 

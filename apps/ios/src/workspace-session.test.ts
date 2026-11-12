@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { messageSchema, sentMessageId } from "@turtle/protocol";
 import { ApiError, type Api } from "./api";
-const fake = vi.hoisted(() => ({ voices: [] as { leave: ReturnType<typeof vi.fn>; join: ReturnType<typeof vi.fn>; expired: (error: unknown) => void }[], gateways: [] as { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] }));
+const fake = vi.hoisted(() => ({ voices: [] as { leave: ReturnType<typeof vi.fn>; join: ReturnType<typeof vi.fn>; expired: (error: unknown) => void }[], gateways: [] as { sendText: ReturnType<typeof vi.fn>; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] }));
 vi.mock("react-native", () => ({ AppState: { currentState: "active" } }));
 vi.mock("./voice", () => ({ Voice: class {
   leave = vi.fn(async () => {}); join = vi.fn(async () => {});
@@ -8,17 +9,27 @@ vi.mock("./voice", () => ({ Voice: class {
 } }));
 vi.mock("./gateway", () => ({ Gateway: class {
   start = vi.fn(); stop = vi.fn(); resume = vi.fn(); update = vi.fn();
+  sendText = vi.fn(async (channelId: string, body: { requestId: string; content: string }) => messageSchema.parse({ id: sentMessageId("test", body.requestId), channelId, userId: "test", username: "test", content: body.content, createdAt: new Date().toISOString(), attachments: [] }));
   subscribe = vi.fn(() => () => {}); subscribeEvents = vi.fn(() => () => {});
   constructor() { fake.gateways.push(this); }
 } }));
 import { WorkspaceSession } from "./workspace-session";
 
 function setup() {
-  const api = { servers: vi.fn(async () => []), channels: vi.fn(async () => []) } as unknown as Api;
+  const api = { servers: vi.fn(async () => []), channels: vi.fn(async () => []), sendText: vi.fn() } as unknown as Api;
   const auth = { logout: vi.fn(async () => {}), rejectIfUnauthorized: vi.fn(async () => true) };
-  return { workspace: new WorkspaceSession(api, auth, { userId: "test", id: () => "", storage: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }), auth, voice: fake.voices.at(-1)!, gateway: fake.gateways.at(-1)! };
+  return { workspace: new WorkspaceSession(api, auth, { userId: "test", id: () => "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc", storage: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } }), api, auth, voice: fake.voices.at(-1)!, gateway: fake.gateways.at(-1)! };
 }
 describe("workspace lifetime", () => {
+  it("routes confirmed chat delivery through the gateway transport", async () => {
+    const { workspace, api, gateway } = setup();
+    await workspace.chat.ready; workspace.chat.setConnected(true);
+    const conversation = workspace.chat.get("channel"); conversation.edit("confirmada"); await conversation.send();
+    expect(gateway.sendText).toHaveBeenCalledWith("channel", { requestId: "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc", content: "confirmada" });
+    expect(api.sendText).not.toHaveBeenCalled();
+    expect(conversation.getSnapshot().outbox).toHaveLength(0);
+    await workspace.dispose();
+  });
   it("starts transport only once and view subscriptions never stop the call", async () => {
     const { workspace, voice, gateway } = setup();
     workspace.start(); workspace.start();

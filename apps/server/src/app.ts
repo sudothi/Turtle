@@ -813,6 +813,40 @@ export async function buildApp({
   });
 
   // Rotas autenticadas
+  class TextSendError extends Error {
+    constructor(readonly status: number, message: string, readonly code?: string) { super(message); }
+  }
+  // HTTP and WebSocket share receipts, permission checks and transaction boundaries.
+  const confirmText = async (user: User, channelId: string, body: ReturnType<typeof sendTextBody.parse>) => {
+    const channel = await findChannel(channelId);
+    if (!channel || !(await canUseText(channel, user.id))) throw new TextSendError(404, "canal não existe");
+    if (channel.kind === "dm" && await dmBlocked(channel.id)) throw new TextSendError(403, "não é possível enviar mensagem para essa pessoa");
+    const { requestId, content, replyTo } = body;
+    const id = sentMessageId(user.id, requestId);
+    // Preserve pre-existing receipts for plain text, and distinguish replies from any raw text.
+    const bodyHash = replyTo ? `reply-v1:${createHash("sha256").update(JSON.stringify([content, replyTo])).digest("hex")}` : createHash("sha256").update(content).digest("hex");
+    const result = await db.transaction(async tx => {
+      const inserted = await tx.insert(messageReceipts).values({ userId: user.id, requestId, channelId: channel.id, bodyHash }).onConflictDoNothing().returning();
+      if (!inserted.length) {
+        const [receipt] = await tx.select().from(messageReceipts).where(and(eq(messageReceipts.userId, user.id), eq(messageReceipts.requestId, requestId)));
+        return receipt?.channelId === channel.id && receipt.bodyHash === bodyHash ? "replay" : "conflict";
+      }
+      // Check only new sends: a confirmed reply remains replayable after its original is deleted.
+      if (replyTo) {
+        const [target] = await tx.select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, replyTo)).limit(1);
+        if (!target || target.channelId !== channel.id) throw new TextSendError(400, "a mensagem respondida não existe mais neste canal", "REPLY_UNAVAILABLE");
+      }
+      await tx.insert(messages).values({ id, channelId: channel.id, userId: user.id, content, createdAt: new Date(), replyTo: replyTo ?? null });
+      return "created";
+    });
+    if (result === "conflict") throw new TextSendError(409, "identificador de envio já usado com outra mensagem");
+    const message = await loadMessage(id);
+    if (!message) throw new TextSendError(410, "esta mensagem já foi enviada e apagada");
+    if (result === "created") await toChannel(channel, { t: "message", message });
+    await markRead(user.id, channel.id);
+    return message;
+  };
+
   app.register(async (authed) => {
     authed.decorateRequest("user", null);
     authed.addHook("preHandler", async (req, reply) => {
@@ -1584,43 +1618,15 @@ export async function buildApp({
       return { ok: true };
     });
 
-    class ReplyUnavailable extends Error {}
     const sendConfirmedText = (requireReply = false) => async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const body = sendTextBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: "mensagem inválida (1 a 4000 caracteres)" });
       if (requireReply && !body.data.replyTo) return reply.code(400).send({ error: "escolha a mensagem que deseja responder" });
-      const channel = await findChannel(req.params.id);
-      const user = me(req);
-      if (!channel || !(await canUseText(channel, user.id))) return reply.code(404).send({ error: "canal não existe" });
-      if (channel.kind === "dm" && await dmBlocked(channel.id)) return reply.code(403).send({ error: "não é possível enviar mensagem para essa pessoa" });
-      const { requestId, content, replyTo } = body.data;
-      const id = sentMessageId(user.id, requestId);
-      // Preserve pre-existing receipts for plain text, and distinguish replies from any raw text.
-      const bodyHash = replyTo ? `reply-v1:${createHash("sha256").update(JSON.stringify([content, replyTo])).digest("hex")}` : createHash("sha256").update(content).digest("hex");
-      let result: "created" | "replay" | "conflict";
-      try { result = await db.transaction(async tx => {
-        const inserted = await tx.insert(messageReceipts).values({ userId: user.id, requestId, channelId: channel.id, bodyHash }).onConflictDoNothing().returning();
-        if (!inserted.length) {
-          const [receipt] = await tx.select().from(messageReceipts).where(and(eq(messageReceipts.userId, user.id), eq(messageReceipts.requestId, requestId)));
-          return receipt?.channelId === channel.id && receipt.bodyHash === bodyHash ? "replay" : "conflict";
-        }
-        // Check only new sends: a confirmed reply remains replayable after its original is deleted.
-        if (replyTo) {
-          const [target] = await tx.select({ channelId: messages.channelId }).from(messages).where(eq(messages.id, replyTo)).limit(1);
-          if (!target || target.channelId !== channel.id) throw new ReplyUnavailable();
-        }
-        await tx.insert(messages).values({ id, channelId: channel.id, userId: user.id, content, createdAt: new Date(), replyTo: replyTo ?? null });
-        return "created";
-      }); } catch (error) {
-        if (error instanceof ReplyUnavailable) return reply.code(400).send({ error: "a mensagem respondida não existe mais neste canal", code: "REPLY_UNAVAILABLE" });
+      try { return await confirmText(me(req), req.params.id, body.data); }
+      catch (error) {
+        if (error instanceof TextSendError) return reply.code(error.status).send({ error: error.message, ...(error.code ? { code: error.code } : {}) });
         throw error;
       }
-      if (result === "conflict") return reply.code(409).send({ error: "identificador de envio já usado com outra mensagem" });
-      const message = await loadMessage(id);
-      if (!message) return reply.code(410).send({ error: "esta mensagem já foi enviada e apagada" });
-      if (result === "created") await toChannel(channel, { t: "message", message });
-      await markRead(user.id, channel.id);
-      return message;
     };
     authed.post("/channels/:id/messages", sendConfirmedText());
     // Old backends return 404 for this route instead of silently stripping the replyTo field.
@@ -2157,15 +2163,25 @@ export async function buildApp({
         }
         // O perfil pode ter mudado desde que a conexão abriu.
         const user = online.get(socket) ?? connected;
-        if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong" } satisfies ServerEvent));
+        if (evt.t === "ping") return socket.send(JSON.stringify({ t: "pong", confirmedText: true } satisfies ServerEvent));
         // Contra flood: por conexão, no máximo 10 eventos por segundo e 60 a cada 10 s (ping não conta).
         if (evt.t !== "auth") {
           if (floodSecond.blockedFor("c") || floodWindow.blockedFor("c"))
-            return socket.send(JSON.stringify({ t: "error", error: "calma: eventos demais; tente de novo em instantes" } satisfies ServerEvent));
+            return socket.send(JSON.stringify({ t: "error", error: "calma: eventos demais; tente de novo em instantes", ...(evt.t === "sendConfirmed" ? { nonce: evt.nonce, status: 429 } : {}) } satisfies ServerEvent));
           floodSecond.hit("c");
           floodWindow.hit("c");
         }
         if (evt.t === "auth") return; // já autenticado (token veio na URL)
+        if (evt.t === "sendConfirmed") {
+          try {
+            const message = await confirmText(user, evt.channelId, { requestId: evt.nonce, content: evt.content, ...(evt.replyTo ? { replyTo: evt.replyTo } : {}) });
+            socket.send(JSON.stringify({ t: "message", message, nonce: evt.nonce } satisfies ServerEvent));
+          } catch (error) {
+            if (!(error instanceof TextSendError)) req.log.error({ err: error, userId: user.id }, "ws: falha no envio confirmado");
+            socket.send(JSON.stringify({ t: "error", nonce: evt.nonce, status: error instanceof TextSendError ? error.status : 503, error: error instanceof TextSendError ? error.message : "erro no servidor; tente de novo", ...(error instanceof TextSendError && error.code ? { code: error.code } : {}) } satisfies ServerEvent));
+          }
+          return;
+        }
         if (evt.t === "activity") {
           const prev = activities.get(socket);
           const next = evt.activity;

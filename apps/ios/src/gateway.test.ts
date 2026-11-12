@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Api } from "./api";
+import { ApiError, type Api } from "./api";
+import { messageSchema, sentMessageId } from "@turtle/protocol";
 import { Gateway } from "./gateway";
 
 class Socket {
@@ -15,7 +16,7 @@ class Socket {
   receive(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
 }
 let gateway: Gateway;
-beforeEach(() => { vi.useFakeTimers(); Socket.all = []; vi.stubGlobal("WebSocket", Socket); gateway = new Gateway({ gatewayUrl: () => "wss://test/ws", authenticateGateway: (socket: Socket) => socket.send(JSON.stringify({ t: "auth", token: "session" })) } as Api, vi.fn(), vi.fn()); });
+beforeEach(() => { vi.useFakeTimers(); Socket.all = []; vi.stubGlobal("WebSocket", Socket); gateway = new Gateway({ gatewayUrl: () => "wss://test/ws", authenticateGateway: (socket: Socket) => socket.send(JSON.stringify({ t: "auth", token: "session" })) } as Api, vi.fn(), vi.fn(), "self"); });
 afterEach(() => { gateway.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it("replaces a transport that remains connecting instead of waiting forever", async () => {
   vi.spyOn(Math, "random").mockReturnValue(0);
@@ -117,4 +118,67 @@ it("declines only the current call and clears call cards on reconnect", () => {
   socket.receive(ring); socket.receive({ t: "ringEnd", channelId: "other" });
   expect(gateway.getSnapshot().ring).toBeDefined();
   gateway.resume(); expect(gateway.getSnapshot().ring).toBeUndefined();
+});
+
+const nonce = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc";
+const confirmedMessage = () => messageSchema.parse({ id: sentMessageId("self", nonce), channelId: "a", userId: "self", username: "self", content: "texto", createdAt: new Date().toISOString(), attachments: [] });
+const sending = () => { gateway.start(); const socket = Socket.all[0]!; socket.open(); socket.receive({ t: "pong", confirmedText: true }); return socket; };
+it("sends a durable nonce and reply over WS only after negotiation, then settles the exact acknowledgement", async () => {
+  const socket = sending();
+  const promise = gateway.sendText("a", { requestId: nonce, content: "texto", replyTo: "original" });
+  expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ t: "sendConfirmed", channelId: "a", nonce, content: "texto", replyTo: "original" }));
+  const message = { ...confirmedMessage(), replyToId: "original" };
+  socket.receive({ t: "message", message, nonce: "other" });
+  socket.receive({ t: "message", message: { ...message, channelId: "other" }, nonce });
+  socket.receive({ t: "message", message: { ...message, userId: "other", id: sentMessageId("other", nonce) }, nonce });
+  const settled = vi.fn(); void promise.then(settled);
+  await Promise.resolve(); expect(settled).not.toHaveBeenCalled();
+  socket.receive({ t: "message", message, nonce });
+  expect(await promise).toMatchObject(message);
+});
+it("preserves structured rejection codes and leaves no timeout after confirmation", async () => {
+  const socket = sending();
+  const promise = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  const rejection = expect(promise).rejects.toMatchObject({ status: 400, code: "REPLY_UNAVAILABLE" });
+  socket.receive({ t: "error", nonce, status: 400, code: "REPLY_UNAVAILABLE", error: "apagada" });
+  await rejection;
+  const next = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  const closed = expect(next).rejects.toThrow();
+  gateway.stop(); await closed;
+});
+it("rejects unacknowledged sends on timeout and never switches an in-flight send to HTTP", async () => {
+  sending();
+  const promise = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  const rejection = expect(promise).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(15_000);
+  await rejection;
+});
+it("drops pending transports on resume and ignores an acknowledgement from the replaced socket", async () => {
+  const socket = sending(), stale = socket.onmessage;
+  const promise = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  const rejection = expect(promise).rejects.toThrow("Conexão interrompida");
+  gateway.resume(); await rejection;
+  const next = Socket.all[1]!; next.open(); next.receive({ t: "pong", confirmedText: true });
+  const retry = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  const done = vi.fn(); void retry.then(done);
+  stale?.({ data: JSON.stringify({ t: "message", message: confirmedMessage(), nonce }) });
+  await Promise.resolve(); expect(done).not.toHaveBeenCalled();
+  next.receive({ t: "message", message: confirmedMessage(), nonce }); await retry;
+});
+it("uses HTTP on legacy servers and clears the negotiated capability when reconnecting", async () => {
+  gateway.stop();
+  const sendText = vi.fn(async () => confirmedMessage());
+  gateway = new Gateway({ gatewayUrl: () => "wss://test/ws", authenticateGateway: () => {}, sendText } as unknown as Api, vi.fn(), vi.fn(), "self");
+  const socket = sending();
+  gateway.resume(); const next = Socket.all[1]!; next.open(); next.receive({ t: "pong" });
+  await gateway.sendText("a", { requestId: nonce, content: "texto" });
+  expect(sendText).toHaveBeenCalledOnce();
+  expect(socket.send.mock.calls.some(([value]) => JSON.parse(value).t === "sendConfirmed")).toBe(false);
+});
+it("shares concurrent identical requests and rejects a reused identity with changed content", async () => {
+  const socket = sending();
+  const first = gateway.sendText("a", { requestId: nonce, content: "texto" });
+  expect(gateway.sendText("a", { requestId: nonce, content: "texto" })).toBe(first);
+  await expect(gateway.sendText("a", { requestId: nonce, content: "outro" })).rejects.toBeInstanceOf(ApiError);
+  socket.receive({ t: "message", message: confirmedMessage(), nonce }); await first;
 });

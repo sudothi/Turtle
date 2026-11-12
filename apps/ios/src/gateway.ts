@@ -1,5 +1,6 @@
-import { serverEvent, type ClientEvent, type ServerEvent, type VoiceState, type Activity } from "@turtle/protocol";
-import type { Api } from "./api";
+import { serverEvent, sentMessageId, type ClientEvent, type ServerEvent, type VoiceState, type Activity } from "@turtle/protocol";
+import { ApiError, type Api } from "./api";
+import type { Message } from "@turtle/protocol";
 
 export type VoiceReport = Extract<ClientEvent, { t: "voice" }>;
 export type IncomingCall = Extract<ServerEvent, { t: "ring" }>;
@@ -8,6 +9,8 @@ export interface GatewayState { connected: boolean; ring?: IncomingCall; states:
 /** Best-effort gateway presence. Native media owns the call independently. */
 export class Gateway {
   private socket?: WebSocket;
+  private confirmedText = false;
+  private sends = new Map<string, { channelId: string; body: string; promise: Promise<Message>; resolve: (message: Message) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private retry?: ReturnType<typeof setTimeout>;
   private heartbeat?: ReturnType<typeof setInterval>;
   private connecting?: ReturnType<typeof setTimeout>;
@@ -19,7 +22,7 @@ export class Gateway {
   private listeners = new Set<() => void>();
   private events = new Set<(event: ServerEvent) => void>();
   private report: VoiceReport = { t: "voice", channelId: null, muted: true, deafened: false, camera: false, screen: false };
-  constructor(private readonly api: Api, private readonly expired: () => void, private readonly sync: () => void) {}
+  constructor(private readonly api: Api, private readonly expired: () => void, private readonly sync: () => void, private readonly userId: string) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   subscribeEvents = (fn: (event: ServerEvent) => void) => { this.events.add(fn); return () => { this.events.delete(fn); }; };
@@ -29,6 +32,31 @@ export class Gateway {
     if (socket?.readyState !== 1) return;
     try { socket.send(JSON.stringify(value)); }
     catch { this.disconnected(socket); }
+  }
+  /** Negotiate before using WS; old servers keep the durable HTTP path. Never fall back after sending. */
+  sendText: Api["sendText"] = (channelId, body) => {
+    if (!this.state.connected || !this.socket) return Promise.reject(new Error("Sem conexão para enviar a mensagem."));
+    if (!this.confirmedText) return this.api.sendText(channelId, body);
+    const encoded = JSON.stringify([channelId, body.content, body.replyTo ?? null]);
+    const pending = this.sends.get(body.requestId);
+    if (pending) return pending.body === encoded ? pending.promise : Promise.reject(new ApiError(409, "Identificador já usado em outro envio."));
+    let resolve!: (message: Message) => void, reject!: (error: Error) => void;
+    const promise = new Promise<Message>((done, fail) => { resolve = done; reject = fail; });
+    const timer = setTimeout(() => {
+      this.sends.delete(body.requestId);
+      reject(new Error("O servidor não confirmou o envio. Confira a conversa antes de tentar novamente."));
+    }, 15_000);
+    this.sends.set(body.requestId, { channelId, body: encoded, promise, resolve, reject, timer });
+    this.send({ t: "sendConfirmed", channelId, nonce: body.requestId, content: body.content, ...(body.replyTo ? { replyTo: body.replyTo } : {}) });
+    return promise;
+  };
+  private settleSend(event: ServerEvent) {
+    if ((event.t !== "message" && event.t !== "error") || !event.nonce) return;
+    const pending = this.sends.get(event.nonce);
+    if (!pending || event.t === "message" && (event.message.channelId !== pending.channelId || event.message.userId !== this.userId || event.message.id !== sentMessageId(this.userId, event.nonce))) return;
+    clearTimeout(pending.timer); this.sends.delete(event.nonce);
+    if (event.t === "message") pending.resolve(event.message);
+    else pending.reject(new ApiError(event.status ?? 503, event.error, event.code));
   }
   dismissRing(decline = false) {
     const ring = this.state.ring;
@@ -78,7 +106,8 @@ export class Gateway {
         const parsed = serverEvent.safeParse(JSON.parse(String(event.data)));
         if (!parsed.success) return;
         this.attempts = 0;
-        if (parsed.data.t === "pong") { clearTimeout(this.pong); this.pong = undefined; return; }
+        if (parsed.data.t === "pong") { this.confirmedText = parsed.data.confirmedText === true; clearTimeout(this.pong); this.pong = undefined; return; }
+        this.settleSend(parsed.data);
         if (parsed.data.t === "ring") {
           this.dismissRing();
           this.set({ ring: parsed.data });
@@ -109,6 +138,12 @@ export class Gateway {
   }
 
   private release() {
+    this.confirmedText = false;
+    for (const pending of this.sends.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Conexão interrompida antes da confirmação do envio."));
+    }
+    this.sends.clear();
     clearInterval(this.heartbeat);
     clearTimeout(this.connecting);
     clearTimeout(this.pong);

@@ -237,7 +237,7 @@ export class Conversation {
     } catch (error) {
       if (this.stopped) return;
       if (error instanceof ApiError && error.code === "REPLY_UNAVAILABLE" && item.draft.reply) this.forgetReply(item.draft.reply.id);
-      const definitive = !recorded || (error instanceof ApiError && error.status < 500);
+      const definitive = !recorded || (error instanceof ApiError && error.status < 500 && ![408, 425, 429].includes(error.status));
       this.set({ outbox: this.state.outbox.map(m => m.id === item.id ? { ...m, status: definitive ? "failed" : "uncertain", error: recorded ? errorText(error) : "Não foi possível salvar o envio neste iPhone. Tente novamente." } : m) });
       try { await this.reject(error); } catch (error) { this.set({ error: errorText(error) }); }
       this.changed();

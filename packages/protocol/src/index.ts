@@ -436,6 +436,8 @@ export const clientEvent = z.discriminatedUnion("t", [
      */
     nonce: z.string().max(64).optional(),
   }),
+  /** Texto confirmado durável. nonce é o requestId HTTP; enviar somente após pong.confirmedText. */
+  sendTextBody.omit({ requestId: true }).extend({ t: z.literal("sendConfirmed"), channelId: z.string(), nonce: z.string().uuid() }),
   /** Tocar um som do soundboard na chamada em que estou (todos na chamada ouvem). */
   z.object({ t: z.literal("soundboardPlay"), soundId: z.string().max(64) }),
   /** channelId null = saiu da voz. */
@@ -449,7 +451,7 @@ export const clientEvent = z.discriminatedUnion("t", [
 export const serverEvent = z.discriminatedUnion("t", [
   /** Discoteca de uma chamada do servidor mudou (null = acabou). Vai para todos do servidor: quem está fora vê o que toca. */
   z.object({ t: z.literal("jukebox"), channelId: z.string(), state: z.lazy(() => jukeboxStateSchema).nullable() }),
-  z.object({ t: z.literal("pong") }),
+  z.object({ t: z.literal("pong"), confirmedText: z.boolean().optional() }),
   z.object({ t: z.literal("message"), message: messageSchema, nonce: z.string().optional() }),
   z.object({ t: z.literal("messageUpdate"), message: messageSchema }),
   z.object({ t: z.literal("messageDelete"), channelId: z.string(), id: z.string() }),
@@ -496,7 +498,7 @@ export const serverEvent = z.discriminatedUnion("t", [
   /** Quem você ligou recusou (`busy`: estava em Não perturbe ou recusou na hora). */
   z.object({ t: z.literal("ringDeclined"), channelId: z.string(), by: z.string() }),
   /** `nonce`: o envio que falhou (o cliente marca a mensagem como não enviada). */
-  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional() }),
+  z.object({ t: z.literal("error"), error: z.string(), nonce: z.string().optional(), status: z.number().int().min(400).max(599).optional(), code: z.string().optional() }),
 ]);
 
 export type ClientEvent = z.infer<typeof clientEvent>;

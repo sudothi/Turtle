@@ -20,6 +20,7 @@ export interface LogLine { at: number; kind: "ok" | "info" | "warn" | "error"; t
 export interface AutoStatus { client: ClientState; phase: string | null; me: { name: string; icon: number } | null; log: LogLine[] }
 export interface Champion { id: number; name: string; alias: string }
 export interface RevealResult { players: string[]; region: string; links: Record<RevealProvider, string> }
+export interface Skin { id: number; name: string; champion: string }
 
 export const DEFAULT_CONFIG: AutoConfig = {
   accept: { on: false, delayMs: 0 },
@@ -288,9 +289,9 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
     const path = '/lol-login/v1/session/invoke?destination=lcdsServiceProxy&method=call&args=["","teambuilder-draft","quitV2",""]';
     for (let i = 0; i < 3; i++) {
       const r = await lcu.request("POST", path).catch(() => undefined);
-      if (r && r.status >= 200 && r.status < 300) { log("info", "Você esquivou da seleção"); return; }
+      if (r && r.status >= 200 && r.status < 300) { log("info", "Dodge: você saiu da seleção"); return; }
     }
-    throw new Error("Não consegui esquivar.");
+    throw new Error("Não consegui dar dodge.");
   }
 
   async function restartUx() {
@@ -300,6 +301,106 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
     lcu.reset();
     resetSelect();
     log("info", "Cliente reiniciando");
+  }
+
+  async function needClient() {
+    if (!(await lcu.connect())) throw new Error("Abra o cliente do League of Legends.");
+  }
+
+  /** Troca o Riot ID (igual ao Tiamat: o cliente responde 200 mesmo quando a Riot recusa, então confere). */
+  async function changeRiotId(input: unknown) {
+    const i = (input ?? {}) as { name?: unknown; tag?: unknown };
+    const name = typeof i.name === "string" ? i.name.trim() : "";
+    const tag = typeof i.tag === "string" ? i.tag.trim().replace(/^#/, "") : "";
+    if (!name || !tag) throw new Error("Preencha o nome e a tag.");
+    if (name.length < 3 || name.length > 16) throw new Error("O nome precisa ter de 3 a 16 caracteres.");
+    if (tag.length < 3 || tag.length > 5) throw new Error("A tag precisa ter de 3 a 5 caracteres.");
+    await needClient();
+    const r = await lcu.request("POST", "/lol-summoner/v1/save-alias", { gameName: name, tagLine: tag });
+    if (r.status < 200 || r.status >= 300) throw new Error("Não consegui trocar o Riot ID.");
+    const res = r.data;
+    if (res && typeof res === "object" && res.isSuccess === false) {
+      const why: Record<string, string> = {
+        name_change_forbidden: "A Riot não está deixando esta conta trocar o Riot ID agora.",
+        name_not_available: "Esse Riot ID não está disponível.",
+        rate_limited: "Muitas tentativas. Tente de novo mais tarde.",
+      };
+      throw new Error(why[String(res.errorCode)] ?? "A Riot recusou a troca do Riot ID.");
+    }
+    const me = await loadMe();
+    if (me) set({ me });
+    log("ok", `Riot ID trocado para ${name}#${tag}`);
+    return `${name}#${tag}`;
+  }
+
+  let skinsCache: Skin[] | null = null;
+  /** Skins para o fundo do perfil, só com nome (o cliente tem a lista; nada de imagem nem internet). */
+  async function skins(): Promise<Skin[]> {
+    if (skinsCache) return skinsCache;
+    await needClient();
+    const r = await lcu.request("GET", "/lol-game-data/assets/v1/skins.json");
+    if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error("Não consegui carregar as skins.");
+    const list = await champs();
+    const champName = (id: number) => list.find((c) => c.id === Math.floor(id / 1000))?.name ?? "";
+    const out: Skin[] = [];
+    for (const [key, v] of Object.entries(r.data as Record<string, any>)) {
+      const id = Number(v?.id ?? key);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const champion = champName(id);
+      const tiers = Array.isArray(v?.questSkinInfo?.tiers) ? v.questSkinInfo.tiers : null;
+      if (tiers) {
+        for (const t of tiers) if (Number(t?.id) > 0 && t.name) out.push({ id: Number(t.id), name: String(t.name), champion });
+      } else if (v?.name) out.push({ id, name: v.isBase ? `${champion || v.name} (padrão)` : String(v.name), champion });
+    }
+    out.sort((a, b) => a.champion.localeCompare(b.champion, "pt-BR") || a.id - b.id);
+    if (out.length) skinsCache = out;
+    return out;
+  }
+
+  async function setBackground(id: unknown) {
+    if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) throw new Error("Skin inválida.");
+    await needClient();
+    const r = await lcu.request("POST", "/lol-summoner/v1/current-summoner/summoner-profile", { key: "backgroundSkinId", value: id });
+    if (r.status < 200 || r.status >= 300) throw new Error("Não consegui trocar o fundo do perfil.");
+    const name = skinsCache?.find((s) => s.id === id)?.name;
+    log("ok", name ? `Fundo do perfil: ${name}` : "Fundo do perfil trocado");
+    return id;
+  }
+
+  /** Chat do Riot Client: desconectado = você aparece offline para os amigos do LoL. */
+  async function chatOffline(): Promise<boolean> {
+    await needClient();
+    const r = await lcu.request("GET", "/chat/v1/session", undefined, "riot");
+    if (r.status !== 200) throw new Error("Não consegui ler o chat.");
+    return r.data?.state === "disconnected";
+  }
+  async function setChatOffline(on: unknown) {
+    await needClient();
+    const r = on === true
+      ? await lcu.request("POST", "/chat/v1/suspend", { config: "disable" }, "riot")
+      : await lcu.request("POST", "/chat/v1/resume", undefined, "riot");
+    if (r.status < 200 || r.status >= 300) throw new Error(on === true ? "Não consegui desconectar o chat." : "Não consegui reconectar o chat.");
+    log("info", on === true ? "Chat desconectado: você aparece offline" : "Chat reconectado");
+    return on === true;
+  }
+
+  async function friendIds(): Promise<string[]> {
+    await needClient();
+    const r = await lcu.request("GET", "/lol-chat/v1/friends");
+    if (r.status !== 200 || !Array.isArray(r.data)) throw new Error("Não consegui ler a lista de amigos.");
+    return (r.data as any[]).map((f) => f?.pid).filter((pid): pid is string => typeof pid === "string" && pid.length > 0);
+  }
+  /** Remove todos os amigos do LoL. Só depois de a pessoa confirmar com a quantidade certa na tela. */
+  async function removeFriends(expected: unknown) {
+    const ids = await friendIds();
+    if (typeof expected !== "number" || expected !== ids.length) throw new Error("A lista de amigos mudou. Confira e confirme de novo.");
+    let removed = 0;
+    for (const pid of ids) {
+      const r = await lcu.request("DELETE", `/lol-chat/v1/friends/${encodeURIComponent(pid)}`).catch(() => undefined);
+      if (r && (r.status === 200 || r.status === 204)) removed++;
+    }
+    log(removed === ids.length ? "ok" : "warn", `${removed} de ${ids.length} amigos removidos`);
+    return { removed, failed: ids.length - removed };
   }
 
   return {
@@ -332,6 +433,13 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
     reveal,
     dodge,
     restartUx,
+    changeRiotId,
+    skins,
+    setBackground,
+    chatOffline,
+    setChatOffline,
+    friendCount: async () => (await friendIds()).length,
+    removeFriends,
     /** Para os testes: roda um ciclo agora. */
     tick,
     stop() {

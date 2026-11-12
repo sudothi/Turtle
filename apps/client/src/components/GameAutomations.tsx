@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button, Icon, IconButton, type IconName } from "@turtle/ui";
-import type { AutoConfig, AutoStatus, Champion, DesktopAutomations, RevealProvider, RevealResult } from "../desktop";
+import type { AutoConfig, AutoStatus, Champion, DesktopAutomations, RevealProvider, RevealResult, Skin } from "../desktop";
 import { copyText } from "../clipboard";
 
 /**
@@ -198,6 +198,7 @@ const clock = (t: number) => new Date(t).toLocaleTimeString("pt-BR", { hour: "2-
 
 function Panel({ config, status, setConfig, place }: { config: AutoConfig; status: AutoStatus; setConfig: (p: { [K in keyof AutoConfig]?: Partial<AutoConfig[K]> }) => void; place?: { left: number; bottom: number } }) {
   const [slot, setSlot] = useState<Slot | null>(null);
+  const [view, setView] = useState<"match" | "profile">("match");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDodge, setConfirmDodge] = useState(false);
@@ -227,7 +228,7 @@ function Panel({ config, status, setConfig, place }: { config: AutoConfig; statu
     setError(null);
     try {
       if (which === "reveal") {
-        const r = await a.tool("reveal");
+        const r = await a.tool<RevealResult>("reveal");
         if (r.ok) setReveal(r.result); else setError(r.error);
       } else {
         const r = await a.tool(which);
@@ -261,7 +262,16 @@ function Panel({ config, status, setConfig, place }: { config: AutoConfig; statu
         <button role="tab" aria-selected="false" className="ga-tab" disabled title="Em breve">Jogos <small>em breve</small></button>
       </div>
 
-      {slot ? (
+      {!slot && (
+        <div className="ga-seg ga-views" role="tablist" aria-label="Seção">
+          <button role="tab" aria-selected={view === "match"} className={view === "match" ? "on" : ""} onClick={() => setView("match")}>Partida</button>
+          <button role="tab" aria-selected={view === "profile"} className={view === "profile" ? "on" : ""} onClick={() => setView("profile")}>Perfil e social</button>
+        </div>
+      )}
+
+      {view === "profile" && !slot ? (
+        <ProfileTools open={open} me={status.me?.name ?? null} onError={setError} />
+      ) : slot ? (
         <ChampPicker slot={slot} champions={champions} current={slot === "pick" ? config.pick.champion : slot === "fallback" ? config.pick.fallback : config.ban.champion} onPick={pickChamp} onBack={() => setSlot(null)} />
       ) : (
         <div className="ga-body">
@@ -297,8 +307,8 @@ function Panel({ config, status, setConfig, place }: { config: AutoConfig; statu
               title={inSelect ? "Sai da seleção sem fechar o cliente" : "Só na seleção de campeões"}
             >
               <Icon name="logout" size={22} />
-              <b>{busy === "dodge" ? "Saindo…" : confirmDodge ? "Confirmar?" : "Esquivar"}</b>
-              <small>{confirmDodge ? "Clique de novo" : "Sem reiniciar o cliente"}</small>
+              <b>{busy === "dodge" ? "Saindo…" : confirmDodge ? "Confirmar dodge?" : "Dodge"}</b>
+              <small>{confirmDodge ? "Clique de novo" : "Sai sem reiniciar o cliente"}</small>
             </button>
             <button className="ga-tool lino" disabled={!open || !!busy} onClick={() => void run("restart")} title={open ? "Reinicia a interface do cliente" : "Abra o cliente do LoL"}>
               <Icon name="refresh" size={22} />
@@ -340,6 +350,155 @@ function Panel({ config, status, setConfig, place }: { config: AutoConfig; statu
       <div className="sb-foot t-muted">
         {notice ? <span role="status" className={error ? "sb-notice ga-error" : "sb-notice"}>{notice}</span> : <span>Tudo roda no seu computador, direto no cliente do LoL.</span>}
       </div>
+    </div>
+  );
+}
+
+/** Lista de skins só com nome (fundo do perfil), com busca por skin ou campeão. */
+function SkinPicker({ skins, onPick, onBack }: { skins: Skin[] | null; onPick: (s: Skin) => void; onBack: () => void }) {
+  const [q, setQ] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); }, []);
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const shown = useMemo(() => {
+    const t = norm(q.trim());
+    const list = skins ?? [];
+    return (t ? list.filter((s) => norm(s.name).includes(t) || norm(s.champion).includes(t)) : list).slice(0, 200);
+  }, [q, skins]);
+  return (
+    <div className="ga-picker">
+      <div className="ga-picker-head">
+        <IconButton label="Voltar" onClick={onBack}><Icon name="arrow-left" size={18} /></IconButton>
+        <b>Fundo do perfil</b>
+      </div>
+      <div className="jb-search">
+        <Icon name="search" size={16} />
+        <input
+          ref={input} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar skin ou campeão" aria-label="Buscar skin ou campeão"
+          onKeyDown={(e) => { if (e.key === "Enter" && shown[0]) onPick(shown[0]); if (e.key === "Escape") { e.stopPropagation(); onBack(); } }}
+        />
+      </div>
+      {!skins ? <p className="ga-empty t-muted">Carregando skins…</p> : (
+        <ul className="ga-skins" role="listbox" aria-label="Skins">
+          {shown.map((s) => (
+            <li key={s.id}>
+              <button role="option" aria-selected="false" className="ga-skin" onClick={() => onPick(s)}>
+                <b>{s.name}</b><span className="t-muted">{s.champion}</span>
+              </button>
+            </li>
+          ))}
+          {!shown.length && <li className="ga-empty t-muted">Nenhuma skin com esse nome.</li>}
+          {shown.length === 200 && <li className="ga-empty t-muted">Mostrando 200. Busque para achar outras.</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Perfil e social: Riot ID, fundo do perfil, chat offline e remover todos os amigos. */
+function ProfileTools({ open, me, onError }: { open: boolean; me: string | null; onError: (e: string | null) => void }) {
+  const a = api();
+  const cut = me ? me.lastIndexOf("#") : -1;
+  const [name, setName] = useState(cut > 0 ? me!.slice(0, cut) : "");
+  const [tag, setTag] = useState(cut > 0 ? me!.slice(cut + 1) : "");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [skins, setSkins] = useState<Skin[] | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [background, setBackground] = useState<string | null>(null);
+  const [offline, setOffline] = useState<boolean | null>(null);
+  const [friends, setFriends] = useState<number | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!a || !open) { setOffline(null); return; }
+    let alive = true;
+    void a.tool<boolean>("chatState").then((r) => alive && r.ok && setOffline(r.result));
+    return () => { alive = false; };
+  }, [a, open]);
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(null), 3000);
+    return () => clearTimeout(t);
+  }, [done]);
+
+  const call = async <T,>(key: string, which: string, arg?: unknown): Promise<T | undefined> => {
+    if (!a || busy) return undefined;
+    setBusy(key);
+    onError(null);
+    try {
+      const r = await a.tool<T>(which, arg);
+      if (!r.ok) { onError(r.error); return undefined; }
+      return r.result;
+    } finally {
+      setBusy(null);
+    }
+  };
+  const openSkins = async () => {
+    setPicking(true);
+    if (!skins) {
+      const list = await call<Skin[]>("skins", "skins");
+      if (list) setSkins(list); else setPicking(false);
+    }
+  };
+  if (picking) {
+    return (
+      <SkinPicker skins={skins} onBack={() => setPicking(false)} onPick={async (s) => {
+        setPicking(false);
+        if ((await call<number>("background", "background", s.id)) !== undefined) setBackground(`${s.name}`);
+      }} />
+    );
+  }
+  const off = !open;
+  return (
+    <div className="ga-body">
+      {off && <p className="ga-me t-muted">Abra o cliente do League of Legends para usar estas opções.</p>}
+      <section className="ga-card lino">
+        <div className="ga-row">
+          <span className="ga-row-icon" aria-hidden="true"><Icon name="pencil" size={18} /></span>
+          <span className="ga-row-text"><b>Trocar Riot ID</b><span className="t-muted">Nome de 3 a 16 caracteres e tag de 3 a 5</span></span>
+        </div>
+        <form className="ga-riotid" onSubmit={(e) => { e.preventDefault(); void call<string>("riotId", "riotId", { name, tag }).then((v) => v && setDone(`Agora você é ${v}`)); }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={16} placeholder="Nome" aria-label="Nome do Riot ID" disabled={off} />
+          <span className="ga-hash">#</span>
+          <input className="ga-tag" value={tag} onChange={(e) => setTag(e.target.value.replace(/^#/, ""))} maxLength={5} placeholder="TAG" aria-label="Tag do Riot ID" disabled={off} />
+          <Button size="sm" type="submit" disabled={off || !!busy || !name.trim() || !tag.trim()}>{busy === "riotId" ? "Salvando…" : "Salvar"}</Button>
+        </form>
+      </section>
+
+      <section className="ga-card lino">
+        <div className="ga-row">
+          <span className="ga-row-icon" aria-hidden="true"><Icon name="profile" size={18} /></span>
+          <span className="ga-row-text"><b>Fundo do perfil</b><span className="t-muted">{background ? `Agora: ${background}` : "Qualquer skin, escolhida pelo nome"}</span></span>
+          <Button size="sm" variant="ghost" disabled={off || !!busy} onClick={() => void openSkins()}>{busy === "skins" || busy === "background" ? "…" : "Escolher"}</Button>
+        </div>
+      </section>
+
+      <Feature
+        icon="chat" title="Desconectar do chat" hint="Você aparece offline para os amigos do LoL" on={!!offline}
+        onToggle={(on) => { if (!off && offline !== null) void call<boolean>("chat", "chatOffline", on).then((v) => v !== undefined && setOffline(v)); }}
+      />
+
+      <section className={`ga-card lino ga-danger-card ${friends !== null ? "on" : ""}`}>
+        <div className="ga-row">
+          <span className="ga-row-icon" aria-hidden="true"><Icon name="trash" size={18} /></span>
+          <span className="ga-row-text"><b>Remover todos os amigos</b><span className="t-muted">Limpa a lista de amigos do LoL. Não dá para desfazer.</span></span>
+          {friends === null && (
+            <Button size="sm" variant="ghost" disabled={off || !!busy} onClick={() => void call<number>("count", "friendCount").then((n) => n !== undefined && (n ? setFriends(n) : setDone("Sua lista de amigos já está vazia")))}>
+              {busy === "count" ? "…" : "Remover"}
+            </Button>
+          )}
+        </div>
+        {friends !== null && (
+          <div className="ga-confirm">
+            <span>Remover <b>{friends}</b> {friends === 1 ? "amigo" : "amigos"}?</span>
+            <Button size="sm" variant="ghost" onClick={() => setFriends(null)}>Cancelar</Button>
+            <button className="ga-danger-btn" disabled={!!busy} onClick={() => void call<{ removed: number; failed: number }>("remove", "removeFriends", friends).then((r) => { setFriends(null); if (r) setDone(`${r.removed} amigos removidos${r.failed ? `, ${r.failed} falharam` : ""}`); })}>
+              {busy === "remove" ? "Removendo…" : `Remover ${friends}`}
+            </button>
+          </div>
+        )}
+      </section>
+      {done && <p className="ga-done" role="status"><Icon name="check" size={14} /> {done}</p>}
     </div>
   );
 }

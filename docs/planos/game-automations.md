@@ -12,10 +12,21 @@ Painel do app desktop, ao lado da Discoteca, que traz para dentro do Turtle as f
 | Escolher campeão | Principal (ou **Aleatório**) e reserva. Antes da sua vez só mostra a intenção ao time (hover); na vez, trava. Pula banidos, travados, o que um aliado já quer jogar e o que você não tem; sem nenhum disponível, avisa para escolher na mão. |
 | Banir campeão | Bane na sua vez. Se um aliado estiver com aquele campeão na intenção, não bane e avisa. |
 | Revelar lobby | Nomes do seu time na seleção (na ranqueada, vindos do chat do Riot Client, como no Tiamat), com links para Porofessor, OP.GG ou U.GG e botão de copiar. |
-| Esquivar | Sai da seleção sem fechar o cliente (mesmo pedido `quitV2` do Tiamat). Pede confirmação com um segundo clique. A penalidade de esquiva da Riot continua valendo. |
+| Dodge | Sai da seleção sem fechar o cliente (mesmo pedido `quitV2` do Tiamat). Pede confirmação com um segundo clique. A penalidade de esquiva da Riot continua valendo. |
 | Reiniciar cliente | `POST /riotclient/kill-and-restart-ux`, para quando o cliente trava. |
 
-Ficaram de fora: cosméticos (ícone, fundo, emblemas, Riot ID, status), remover todos os amigos, fila automática e chat offline. Dá para somar depois no mesmo módulo.
+**Perfil e social** (pedido do thiago em 2026-11-12, segunda seção do painel):
+
+| Função | Como funciona |
+|---|---|
+| Trocar Riot ID | `POST /lol-summoner/v1/save-alias`; o cliente responde 200 mesmo quando a Riot recusa, então o erro (`isSuccess: false`) vira mensagem e o nome novo é conferido. |
+| Fundo do perfil | Lista de skins **só com o nome** (sem imagem), vinda do próprio cliente (`/lol-game-data/assets/v1/skins.json`), com busca por skin ou campeão. |
+| Desconectar do chat | `POST /chat/v1/suspend` e `/chat/v1/resume` no Riot Client: você aparece offline para os amigos do LoL. |
+| Remover todos os amigos | Mostra quantos são e pede confirmação com a quantidade; o desktop só remove se a lista ainda tiver aquele tamanho. |
+
+Ficaram de fora: ícone, emblemas, status, fila automática.
+
+![perfil e social](game-automations/10-perfil.png)
 
 ![seleção](game-automations/4-selecao.png)
 ![escolher campeão](game-automations/2-escolher.png)
@@ -37,7 +48,7 @@ Ficaram de fora: cosméticos (ícone, fundo, emblemas, Riot ID, status), remover
 - IPC fechado (`auto:get`, `auto:set`, `auto:watch`, `auto:champions`, `auto:icon`, `auto:tool`, `auto:open`, evento `auto:status`), todos conferindo que veio da janela do app. O site nunca recebe porta nem senha do cliente; `auto:open` só abre os três sites do revelar lobby. Nada passa pelo servidor do Turtle.
 
 ## Entrega
-Código do processo principal só chega com instalador novo: a versão do desktop subiu para **0.4.0**. Publicar o instalador precisa de ok escrito do thiago. O painel vai junto com o deploy normal do site e fica escondido em desktops antigos.
+Código do processo principal só chega com instalador novo: a versão do desktop subiu para **0.4.0** (e **0.4.1** com Perfil e social). Publicar o instalador precisa de ok escrito do thiago. O painel vai junto com o deploy normal do site e fica escondido em desktops antigos.
 
 ## Riscos
 O LCU não é API oficial: a Riot pode mudar um endpoint e a função quebra (isolada, sem derrubar o resto). Revelar lobby e esquiva usam caminhos que a Riot não documenta; o thiago decidiu seguir porque as ferramentas já existem. Teste com o LoL de verdade só no Windows do thiago (o container da nuvem não tem o cliente).

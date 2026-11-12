@@ -23,6 +23,7 @@ export interface AutoLogLine { at: number; kind: "ok" | "info" | "warn" | "error
 export interface AutoStatus { client: "closed" | "open"; phase: string | null; me: { name: string; icon: number } | null; log: AutoLogLine[] }
 export interface Champion { id: number; name: string; alias: string }
 export interface RevealResult { players: string[]; region: string; links: Record<RevealProvider, string> }
+export interface Skin { id: number; name: string; champion: string }
 export type ToolResult<T = unknown> = { ok: true; result: T } | { ok: false; error: string };
 export interface DesktopAutomations {
   get(): Promise<{ config: AutoConfig; status: AutoStatus } | null>;
@@ -32,8 +33,8 @@ export interface DesktopAutomations {
   background?(on: boolean): void;
   champions(): Promise<Champion[]>;
   icon(id: number): Promise<string | null>;
-  tool(which: "reveal"): Promise<ToolResult<RevealResult>>;
-  tool(which: "dodge" | "restart"): Promise<ToolResult>;
+  /** Ferramentas: reveal, dodge, restart, riotId, skins, background, chatState, chatOffline, friendCount, removeFriends. */
+  tool<T = unknown>(which: string, arg?: unknown): Promise<ToolResult<T>>;
   open(url: string): Promise<boolean>;
   onStatus(cb: (s: AutoStatus) => void): () => void;
 }

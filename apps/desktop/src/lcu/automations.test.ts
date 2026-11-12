@@ -140,3 +140,65 @@ describe("faixa fora da chamada", () => {
     auto.stop();
   });
 });
+
+describe("perfil e social", () => {
+  function social() {
+    const calls: string[] = [];
+    let chat = "connected";
+    const friends = [{ pid: "a@br" }, { pid: "b@br" }];
+    let alias = { gameName: "Velho", tagLine: "BR1" };
+    const lcu: Lcu = {
+      connect: async () => true, reset: () => undefined, bytes: async () => undefined,
+      async request(method, path, body, service) {
+        calls.push(`${service ?? "lcu"} ${method} ${path}`);
+        if (path === "/lol-summoner/v1/save-alias") {
+          const b = body as { gameName: string; tagLine: string };
+          if (b.gameName === "Ocupado") return { status: 200, data: { isSuccess: false, errorCode: "name_not_available" } };
+          alias = b;
+          return { status: 200, data: { isSuccess: true } };
+        }
+        if (path === "/lol-summoner/v1/current-summoner") return { status: 200, data: { ...alias, profileIconId: 1 } };
+        if (path === "/lol-game-data/assets/v1/skins.json") return { status: 200, data: { "103000": { id: 103000, name: "Ahri", isBase: true }, "103001": { id: 103001, name: "Ahri Dinastia" } } };
+        if (path === "/lol-game-data/assets/v1/champion-summary.json") return { status: 200, data: [{ id: 103, name: "Ahri", alias: "Ahri" }] };
+        if (path === "/chat/v1/session") return { status: 200, data: { state: chat } };
+        if (path === "/chat/v1/suspend") { chat = "disconnected"; return { status: 204, data: undefined }; }
+        if (path === "/chat/v1/resume") { chat = "connected"; return { status: 204, data: undefined }; }
+        if (path === "/lol-chat/v1/friends") return { status: 200, data: friends };
+        if (method === "DELETE") return { status: 204, data: undefined };
+        return { status: 204, data: undefined };
+      },
+    };
+    const auto = createAutomations({ lcu, dir: mkdtempSync(join(tmpdir(), "turtle-social-")), onStatus: () => undefined });
+    return { auto, calls };
+  }
+
+  it("troca o Riot ID e mostra o erro da Riot", async () => {
+    const { auto } = social();
+    await expect(auto.changeRiotId({ name: "Tartaruga", tag: "#777" })).resolves.toBe("Tartaruga#777");
+    expect(auto.getStatus().me?.name).toBe("Tartaruga#777");
+    await expect(auto.changeRiotId({ name: "Ocupado", tag: "BR1" })).rejects.toThrow("não está disponível");
+    await expect(auto.changeRiotId({ name: "x", tag: "BR1" })).rejects.toThrow("3 a 16");
+  });
+
+  it("lista skins só com nome e campeão", async () => {
+    const { auto } = social();
+    expect(await auto.skins()).toEqual([{ id: 103000, name: "Ahri (padrão)", champion: "Ahri" }, { id: 103001, name: "Ahri Dinastia", champion: "Ahri" }]);
+    await expect(auto.setBackground(103001)).resolves.toBe(103001);
+  });
+
+  it("desconecta e reconecta o chat no Riot Client", async () => {
+    const { auto, calls } = social();
+    expect(await auto.chatOffline()).toBe(false);
+    await auto.setChatOffline(true);
+    expect(await auto.chatOffline()).toBe(true);
+    expect(calls).toContain("riot POST /chat/v1/suspend");
+  });
+
+  it("só remove amigos com a contagem confirmada", async () => {
+    const { auto, calls } = social();
+    expect(await auto.friendCount()).toBe(2);
+    await expect(auto.removeFriends(5)).rejects.toThrow("mudou");
+    expect(calls.some((c) => c.includes("DELETE"))).toBe(false);
+    await expect(auto.removeFriends(2)).resolves.toEqual({ removed: 2, failed: 0 });
+  });
+});

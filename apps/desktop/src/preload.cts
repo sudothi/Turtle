@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
     },
     champions: () => ipcRenderer.invoke("auto:champions"),
     icon: (id: number) => ipcRenderer.invoke("auto:icon", id),
-    tool: (which: "reveal" | "dodge" | "restart") => ipcRenderer.invoke("auto:tool", which),
+    tool: (which: string, arg?: unknown) => ipcRenderer.invoke("auto:tool", which, arg),
     open: (url: string) => ipcRenderer.invoke("auto:open", url),
     onStatus(cb: (s: unknown) => void) {
       const h = (_: unknown, st: unknown) => cb(st);

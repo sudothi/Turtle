@@ -1233,3 +1233,22 @@ button.jb-row:hover .jb-row-act { color: var(--paper); }
 .ga-strip .ga-dot { width: 6px; height: 6px; }
 .ga-strip.lol-open .ga-dot { background: var(--paper); }
 .ga-setting { --lino-bg: var(--ink-3); --lino-radius: 10px; --slash-gap: var(--ink-3); display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 12px 0; }
+.ga-views { flex: none; }
+.ga-riotid { display: flex; align-items: center; gap: 6px; padding-left: 42px; }
+.ga-riotid input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--ink-5); border-radius: 6px; background: var(--ink-1); color: var(--paper); font: inherit; font-size: var(--fs-sm); }
+.ga-riotid input.ga-tag { flex: 0 0 72px; text-transform: uppercase; }
+.ga-riotid input:focus { outline: 2px solid var(--paper); outline-offset: -1px; }
+.ga-riotid input:disabled { opacity: 0.5; }
+.ga-hash { font-weight: 800; color: var(--paper-dim, #9a9790); }
+.ga-skins { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 380px; }
+.ga-skin { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--paper); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.ga-skin b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-skin .t-muted { flex: none; font-size: var(--fs-xs); }
+.ga-skin:hover, .ga-skin:focus-visible { background: var(--ink-3); outline: none; }
+.ga-danger-card.on { --lino-bg: var(--ink-4); --slash-gap: var(--ink-4); }
+.ga-confirm { display: flex; align-items: center; gap: 8px; padding-left: 42px; font-size: var(--fs-sm); }
+.ga-confirm > span { flex: 1; }
+.ga-danger-btn { padding: 6px 12px; border: 2px solid var(--paper); border-radius: 6px; background: var(--paper); color: var(--ink-0); font: inherit; font-size: var(--fs-sm); font-weight: 800; cursor: pointer; }
+.ga-danger-btn:hover:not(:disabled) { background: var(--ink-0); color: var(--paper); }
+.ga-danger-btn:disabled { opacity: 0.6; cursor: wait; }
+.ga-done { display: flex; align-items: center; gap: 6px; margin: 0 2px; font-size: var(--fs-sm); font-weight: 700; }

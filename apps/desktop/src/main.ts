@@ -311,12 +311,22 @@ else {
     ipcMain.on("auto:background", (event, on: unknown) => fromApp(event.sender) && auto.background(on === true));
     ipcMain.handle("auto:champions", (event) => (fromApp(event.sender) ? auto.champions() : []));
     ipcMain.handle("auto:icon", (event, id: unknown) => (fromApp(event.sender) && typeof id === "number" ? auto.icon(id) : null));
-    ipcMain.handle("auto:tool", (event, which: unknown) => {
+    ipcMain.handle("auto:tool", (event, which: unknown, arg: unknown) => {
       if (!fromApp(event.sender)) return { ok: false, error: "Não permitido." };
-      if (which === "reveal") return tool(auto.reveal);
-      if (which === "dodge") return tool(auto.dodge);
-      if (which === "restart") return tool(auto.restartUx);
-      return { ok: false, error: "Ferramenta desconhecida." };
+      const tools: Record<string, () => Promise<unknown>> = {
+        reveal: auto.reveal,
+        dodge: auto.dodge,
+        restart: auto.restartUx,
+        riotId: () => auto.changeRiotId(arg),
+        skins: auto.skins,
+        background: () => auto.setBackground(arg),
+        chatState: auto.chatOffline,
+        chatOffline: () => auto.setChatOffline(arg),
+        friendCount: auto.friendCount,
+        removeFriends: () => auto.removeFriends(arg),
+      };
+      const fn = typeof which === "string" && Object.hasOwn(tools, which) ? tools[which] : undefined;
+      return fn ? tool(fn) : { ok: false, error: "Ferramenta desconhecida." };
     });
     // Só abre os sites de multi-busca do "revelar lobby".
     ipcMain.handle("auto:open", (event, url: unknown) => {

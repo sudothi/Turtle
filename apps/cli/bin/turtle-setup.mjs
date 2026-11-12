@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Turtle Setup: instala e cuida do seu Turtle numa VPS Ubuntu, a partir do seu computador.
 import { apps, atualizar, backup, desktopPublicar, instalar, logs, status } from "../src/commands.mjs";
-import { banner, bold, dim, red } from "../src/ui.mjs";
+import { banner, bold, dim, prompter, red } from "../src/ui.mjs";
 
 const HELP = `${bold("Uso:")} turtle-setup <comando> [opções]
 
@@ -47,7 +47,45 @@ function parseArgs(/** @type {string[]} */ argv) {
   return { o, words };
 }
 
+const MENU = [
+  ["Instalar o Turtle numa VPS", ["instalar"]],
+  ["Atualizar (com backup antes)", ["atualizar"]],
+  ["Ver o estado do servidor", ["status"]],
+  ["Fazer backup agora", ["backup"]],
+  ["Publicar o app desktop no meu servidor", ["desktop", "publicar"]],
+  ["Links dos apps (web, Windows, Android, iPhone)", ["apps"]],
+  ["Ajuda", ["--help"]],
+];
+
+/** Sem comando e num terminal (duplo clique no .exe): mostra um menu e mantém a janela aberta no fim. */
+async function interactive() {
+  banner();
+  console.log(`  ${bold("O que você quer fazer?")}\n`);
+  MENU.forEach(([label], i) => console.log(`   ${i + 1}) ${label}`));
+  console.log(`   0) Sair\n`);
+  const p = prompter(true);
+  const a = await p.ask("Número:");
+  p.close(); // cada comando abre o próprio prompt: não pode haver dois leitores no mesmo terminal
+  let code = 0;
+  const item = MENU[Number(a) - 1];
+  if (item) code = await dispatch(/** @type {string[]} */ (item[1]));
+  else if (a !== "0") console.log(red("Opção inválida."));
+  await pause();
+  return code;
+}
+
+async function pause() {
+  const p = prompter(true);
+  await p.ask(`\n  ${dim("Pressione Enter para fechar.")}`);
+  p.close();
+}
+
 export async function main(/** @type {string[]} */ argv) {
+  if (!argv.length && process.stdin.isTTY && process.stdout.isTTY) return interactive();
+  return dispatch(argv);
+}
+
+async function dispatch(/** @type {string[]} */ argv) {
   const { o, words } = parseArgs(argv);
   if (o.version || o.v) {
     console.log("turtle-setup 0.1.0");
@@ -88,8 +126,9 @@ export async function main(/** @type {string[]} */ argv) {
 
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
-  (e) => {
+  async (e) => {
     console.error(red(String(e?.stack ?? e)));
+    if (process.stdin.isTTY && !process.argv[2]) await pause();
     process.exit(1);
   },
 );

@@ -73,15 +73,24 @@ export function box(/** @type {string[]} */ lines, title = "") {
 /** Perguntas no terminal. Em modo não interativo (--yes sem TTY) devolve o padrão. */
 export function prompter(interactive = true) {
   const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : undefined;
+  /** Ctrl+C / Ctrl+D / janela fechada: sai sem mostrar stack trace. */
+  const read = async (/** @type {string} */ q) => {
+    try {
+      return await /** @type {import("node:readline/promises").Interface} */ (rl).question(q);
+    } catch {
+      console.log(dim("\n  Cancelado."));
+      process.exit(130);
+    }
+  };
   return {
     async ask(/** @type {string} */ q, def = "") {
       if (!rl) return def;
-      const a = (await rl.question(`  ${q}${def ? dim(` [${def}]`) : ""} `)).trim();
+      const a = (await read(`  ${q}${def ? dim(` [${def}]`) : ""} `)).trim();
       return a || def;
     },
     async confirm(/** @type {string} */ q, def = false) {
       if (!rl) return def;
-      const a = (await rl.question(`  ${q} ${dim(def ? "[S/n]" : "[s/N]")} `)).trim().toLowerCase();
+      const a = (await read(`  ${q} ${dim(def ? "[S/n]" : "[s/N]")} `)).trim().toLowerCase();
       if (!a) return def;
       return a === "s" || a === "sim" || a === "y";
     },

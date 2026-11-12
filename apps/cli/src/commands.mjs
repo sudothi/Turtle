@@ -214,12 +214,14 @@ export async function apps(/** @type {Record<string, any>} */ o) {
     box(
       [
         `${bold("Web")}      https://${c.app}`,
-        `${bold("Windows")}  https://${c.app} > Configurações > App desktop  ${dim("(publique com: turtle-setup desktop publicar)")}`,
-        `${bold("Android")}  APK genérico: https://github.com/sudothi/turtle/releases  ${dim("(abra um convite do seu servidor e ele se configura)")}`,
-        `${bold("iPhone")}   build com AltStore (apps/ios/README.md); na tela de login, "Configurar servidor" → https://${c.app}`,
+        `${bold("Windows")}  Configurações > App desktop do seu Turtle`,
+        `         ${dim("publique o instalador: turtle-setup desktop publicar")}`,
+        `${bold("Android")}  APK genérico em github.com/sudothi/turtle/releases`,
+        `         ${dim("abra um convite do seu servidor e o app se configura")}`,
+        `${bold("iPhone")}   AltStore (apps/ios/README.md); no login: "Configurar servidor"`,
         "",
-        `Link de convite: ${bold(`https://${c.app}/convite/<código>`)}`,
-        "No celular e no PC o botão \"Abrir no Turtle\" aponta o app para o seu servidor e preenche o código.",
+        `Convite: ${bold(`https://${c.app}/convite/<código>`)}`,
+        `${dim('O botão "Abrir no Turtle" do convite aponta o app para o seu servidor.')}`,
       ],
       "Apps do seu Turtle",
     );

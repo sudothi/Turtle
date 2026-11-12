@@ -4,9 +4,10 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const root = fileURLToPath(new URL("..", import.meta.url));
 const out = join(root, "release");
 mkdirSync(out, { recursive: true });
 

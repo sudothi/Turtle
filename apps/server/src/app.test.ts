@@ -898,6 +898,70 @@ describe("chat do dia a dia", () => {
     observer.ws.close();
   });
 
+  it("respostas HTTP confirmadas deduplicam e preservam referência, menção e recibo após exclusão", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-replies" }, dono)).body.id;
+    const url = `/channels/${channel}/messages`;
+    const original = (await post(url, { requestId: randomUUID(), content: "pergunta HTTP" }, membro)).body;
+    const other = (await post(url, { requestId: randomUUID(), content: "outra pergunta" }, membro)).body;
+    await post(`/channels/${channel}/read`, {}, membro);
+    const observer = await listen(membro);
+    const body = { requestId: randomUUID(), content: "resposta confirmada", replyTo: original.id };
+    const results = await Promise.all([post(`${url}/replies`, body, dono), post(`${url}/replies`, body, dono)]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(results[0]!.body).toMatchObject({ id: results[1]!.body.id, replyToId: original.id, replyTo: { userId: membroId, content: "pergunta HTTP" } });
+    await settle();
+    expect(observer.events.filter(e => e.t === "message" && e.message.id === results[0]!.body.id)).toHaveLength(1);
+    expect((await get("/unread", membro)).body.find((u: any) => u.channelId === channel)).toMatchObject({ count: 1, mentions: 1 });
+    expect((await post(`${url}/replies`, { ...body, replyTo: other.id }, dono)).status).toBe(409);
+    expect((await post(url, { requestId: body.requestId, content: body.content }, dono)).status).toBe(409);
+    expect((await get(url, dono)).body.find((m: any) => m.id === results[0]!.body.id).replyTo.id).toBe(original.id);
+    await del(`/messages/${encodeURIComponent(original.id)}`, membro);
+    const replay = await post(`${url}/replies`, body, dono);
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({ id: results[0]!.body.id, replyToId: original.id, replyTo: null });
+    await del(`/messages/${encodeURIComponent(replay.body.id)}`, dono);
+    expect((await post(`${url}/replies`, body, dono)).status).toBe(410);
+    observer.close();
+  });
+
+  it("respostas HTTP não aceitam outro canal ou mensagem inexistente e não consomem o recibo inválido", async () => {
+    const channel = (await post(`/servers/${serverId}/channels`, { name: "reply-access" }, dono)).body.id;
+    const url = `/channels/${channel}/messages/replies`;
+    const original = (await post(`/channels/${channel}/messages`, { requestId: randomUUID(), content: "pergunta" }, membro)).body;
+    const outside = (await post(`/channels/${geral}/messages`, { requestId: randomUUID(), content: "outro canal" }, membro)).body;
+    const body = { requestId: randomUUID(), content: "resposta", replyTo: "inexistente" };
+    expect((await post(url, body, dono)).body).toMatchObject({ code: "REPLY_UNAVAILABLE" });
+    expect((await post(url, { ...body, replyTo: outside.id }, dono)).status).toBe(400);
+    expect((await post(url, { ...body, replyTo: "" }, dono)).status).toBe(400);
+    expect((await post(url, { requestId: body.requestId, content: body.content }, dono)).status).toBe(400);
+    expect((await post(url, { ...body, replyTo: original.id }, fora)).status).toBe(404);
+    expect((await post(url, { ...body, replyTo: original.id }, dono)).status).toBe(200);
+    const voice = (await channelsOf(serverId, dono)).find((c: any) => c.kind === "voice").id;
+    expect((await post(`/channels/${voice}/messages/replies`, { ...body, requestId: randomUUID(), replyTo: original.id }, dono)).status).toBe(404);
+  });
+
+  it("respostas HTTP funcionam em DM e grupo e respeitam bloqueios e participação", async () => {
+    const dm = (await post(`/dms/${membroId}`, {}, dono)).body.channelId;
+    const original = (await post(`/channels/${dm}/messages`, { requestId: randomUUID(), content: "pergunta DM" }, membro)).body;
+    const body = { requestId: randomUUID(), content: "resposta DM", replyTo: original.id };
+    expect((await post(`/channels/${dm}/messages/replies`, body, dono)).body.replyToId).toBe(original.id);
+    expect((await post(`/channels/${dm}/messages/replies`, { ...body, requestId: randomUUID() }, fora)).status).toBe(404);
+    await post(`/blocks/${membroId}`, {}, dono);
+    expect((await post(`/channels/${dm}/messages/replies`, { ...body, requestId: randomUUID() }, dono)).status).toBe(403);
+    await del(`/blocks/${membroId}`, dono);
+    const foraId = (await get("/me", fora)).body.id;
+    for (const [id, token] of [[membroId, membro], [foraId, fora]]) {
+      await post(`/friends/${id}`, {}, dono);
+      await post(`/friends/${donoId}`, {}, token);
+    }
+    const group = (await post("/dms", { userIds: [membroId, foraId], name: "Respostas HTTP" }, dono)).body.channelId;
+    const question = (await post(`/channels/${group}/messages`, { requestId: randomUUID(), content: "pergunta grupo" }, membro)).body;
+    expect((await post(`/channels/${group}/messages/replies`, { requestId: randomUUID(), content: "resposta grupo", replyTo: question.id }, fora)).body.replyToId).toBe(question.id);
+    for (const token of [dono, membro, fora]) await del(`/dms/${group}/members/me`, token);
+    await del(`/friends/${membroId}`, dono);
+    await del(`/friends/${foraId}`, dono);
+  });
+
   it("envio confirmado mantém autorização e valida os limites", async () => {
     const channel = (await post(`/servers/${serverId}/channels`, { name: "confirmed-limits" }, dono)).body.id;
     const body = { requestId: randomUUID(), content: "x".repeat(4000) };

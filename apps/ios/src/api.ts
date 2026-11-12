@@ -3,7 +3,7 @@ import { z } from "zod";
 import { editMessageBody } from "@turtle/protocol";
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) { super(message); }
+  constructor(public readonly status: number, message: string, public readonly code?: string) { super(message); }
 }
 
 /** Only the public origin is configurable. Never put server or Apple secrets here. */
@@ -50,8 +50,8 @@ export class Api {
       });
       const data: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        const parsed = z.object({ error: z.string() }).safeParse(data);
-        throw new ApiError(response.status, parsed.success ? parsed.data.error : `O servidor respondeu com erro ${response.status}.`);
+        const parsed = z.object({ error: z.string(), code: z.string().optional() }).safeParse(data);
+        throw new ApiError(response.status, parsed.success ? parsed.data.error : `O servidor respondeu com erro ${response.status}.`, parsed.success ? parsed.data.code : undefined);
       }
       const parsed = schema.safeParse(data);
       if (!parsed.success) throw new Error("Resposta incompatível do servidor. Confira a versão do app.");
@@ -113,7 +113,16 @@ export class Api {
     if (page.beforeId) query.set("beforeId", page.beforeId);
     return this.request(`/channels/${encodeURIComponent(id)}/messages?${query}`, z.array(messageSchema));
   };
-  sendText = (id: string, body: z.input<typeof sendTextBody>) => this.request(`/channels/${encodeURIComponent(id)}/messages`, messageSchema, sendTextBody.parse(body));
+  sendText = async (id: string, body: z.input<typeof sendTextBody>) => {
+    const parsed = sendTextBody.parse(body);
+    try { return await this.request(`/channels/${encodeURIComponent(id)}/messages${parsed.replyTo ? "/replies" : ""}`, messageSchema, parsed); }
+    catch (error) {
+      if (parsed.replyTo && error instanceof ApiError && error.status === 404 && (error.code === "FST_ERR_NOT_FOUND" || error.message === "Not Found")) {
+        throw new ApiError(404, "Este servidor ainda não permite responder pelo app. Tente novamente após a atualização.", "REPLIES_UNSUPPORTED");
+      }
+      throw error;
+    }
+  };
   editMessage = (id: string, content: string) => this.request(`/messages/${encodeURIComponent(id)}`, messageSchema, editMessageBody.parse({ content }), "PATCH");
   deleteMessage = (id: string) => this.request(`/messages/${encodeURIComponent(id)}`, z.object({ ok: z.literal(true) }), undefined, "DELETE");
   setReaction = (id: string, emoji: string, add: boolean) => this.request(`/messages/${encodeURIComponent(id)}/reactions/${encodeURIComponent(emoji)}`, messageSchema, undefined, add ? "PUT" : "DELETE");

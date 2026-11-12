@@ -1,7 +1,8 @@
 import { mentionToken, shownName, splitMentions, type Person } from "@turtle/protocol";
+import type { ReplyTarget } from "./reply";
 
 export interface Mention { start: number; end: number; userId: string; label: string }
-export interface Draft { text: string; mentions: Mention[] }
+export interface Draft { text: string; mentions: Mention[]; reply?: ReplyTarget }
 export const emptyDraft = (): Draft => ({ text: "", mentions: [] });
 
 export function decodeDraft(content: string, names: Map<string, string>): Draft {
@@ -29,7 +30,7 @@ export function editDraft(draft: Draft, text: string): Draft {
   // one of two @Alex mentions). Drop ambiguous bindings rather than notify the wrong person.
   let safeStart = start, oldEnd = end, newEnd = text.length - suffix;
   while (safeStart > 0 && (oldEnd === safeStart || draft.text[safeStart - 1] === draft.text[oldEnd - 1]) && (newEnd === safeStart || text[safeStart - 1] === text[newEnd - 1])) { safeStart--; oldEnd--; newEnd--; }
-  return { text, mentions: draft.mentions.flatMap(m => m.end <= safeStart ? [m] : m.start >= end ? [{ ...m, start: m.start + delta, end: m.end + delta }] : []) };
+  return { ...draft, text, mentions: draft.mentions.flatMap(m => m.end <= safeStart ? [m] : m.start >= end ? [{ ...m, start: m.start + delta, end: m.end + delta }] : []) };
 }
 export function mentionQuery(text: string, caret: number) {
   const match = /(?:^|[\s([{])@([^\s@]{0,64})$/u.exec(text.slice(0, caret));

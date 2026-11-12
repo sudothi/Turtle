@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentRef } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { shownName, type Person } from "@turtle/protocol";
 import { Avatar } from "../ui/layout";
@@ -6,18 +6,22 @@ import { Icon } from "../ui/Icon";
 import { colors, fonts, styles as text } from "../ui/theme";
 import { chooseMention, encodeDraft, mentionQuery } from "./draft";
 import type { Conversation, ConversationState } from "./conversation";
+import ReplyQuote from "./ReplyQuote";
 
 const searchable = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("pt-BR");
 export default function Composer({ conversation, state, people, online, title, fileUrl, onSend }: { conversation: Conversation; state: ConversationState; people: Person[]; online: boolean; title: string; fileUrl: (key?: string | null) => string | undefined; onSend: () => void }) {
   const input = useRef<ComponentRef<typeof TextInput>>(null);
+  useEffect(() => { if (state.draft.reply) input.current?.focus(); }, [state.draft.reply?.id]);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [requestedSelection, requestSelection] = useState<{ start: number; end: number }>();
   const [height, setHeight] = useState(44);
   const query = selection.start === selection.end ? mentionQuery(state.draft.text, selection.start) : undefined;
   const matching = useMemo(() => query ? people.filter(person => searchable(`${shownName(person)} ${person.username}`).includes(searchable(query.query))).slice(0, 8) : [], [people, query?.query]);
   const length = encodeDraft(state.draft).length;
-  const disabled = state.restoring || !online || !length || length > 4000;
+  const disabled = state.restoring || !online || !length || length > 4000 || state.draft.reply?.preview === null;
+  const names = useMemo(() => new Map(people.map(person => [person.id, shownName(person)])), [people]);
   return <View style={s.composer}>
+    {state.draft.reply && <ReplyQuote reply={state.draft.reply} names={names} fileUrl={fileUrl} onCancel={conversation.cancelReply} />}
     {!!matching.length && query && <ScrollView style={s.mentions} keyboardShouldPersistTaps="always" accessibilityLabel="Sugestões de menção">
       {matching.map(person => <Pressable key={person.id} accessibilityRole="button" accessibilityLabel={`Mencionar ${shownName(person)}, @${person.username}`} style={({ pressed }) => [s.option, pressed && { backgroundColor: colors.active }]} onPress={() => {
         const next = chooseMention(state.draft, query, person);

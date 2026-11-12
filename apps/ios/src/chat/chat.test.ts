@@ -3,6 +3,7 @@ import { messageSchema, sentMessageId, type Message, type Person } from "@turtle
 import { ApiError } from "../api";
 import { ChatStore } from "./store";
 import { chooseMention, decodeDraft, editDraft, emptyDraft, encodeDraft, mentionQuery } from "./draft";
+import { replyPreview, replyText } from "./reply";
 
 const uuid = "c1a1876a-fdf5-44fa-9ae2-399c691d9ccc";
 const message = (n: number, patch: Partial<Message> = {}): Message => messageSchema.parse({ id: String(n).padStart(4, "0"), channelId: "a", userId: "other", username: "friend", displayName: "Amiga", avatar: null, staff: false, content: `texto ${n}`, createdAt: new Date(1_700_000_000_000 + n * 1000).toISOString(), editedAt: null, attachments: [], ...patch });
@@ -13,15 +14,19 @@ function setup(disk = new Map<string, string>(), origin = "https://chat.test", u
   const storage = { getItem: vi.fn(async (key: string) => disk.get(key) ?? null), setItem: vi.fn(async (key: string, value: string) => { disk.set(key, value); }), removeItem: vi.fn(async (key: string) => { disk.delete(key); }) };
   const api = {
     origin, messages: vi.fn(async (_id: string, _page?: { before?: string; beforeId?: string; limit?: number }): Promise<Message[]> => []),
-    sendText: vi.fn(async (channelId: string, body: { requestId: string; content: string }) => message(100, { id: sentMessageId(userId, body.requestId), channelId, content: body.content, userId })),
+    sendText: vi.fn(async (channelId: string, body: { requestId: string; content: string; replyTo?: string }) => {
+      const target = store.get(channelId).getSnapshot().messages.find(message => message.id === body.replyTo);
+      return message(100, { id: sentMessageId(userId, body.requestId), channelId, content: body.content, userId, replyToId: body.replyTo ?? null, replyTo: target ? replyPreview(target) : null });
+    }),
     editMessage: vi.fn(async (id: string, content: string) => message(1, { id, content, userId, editedAt: new Date().toISOString() })),
     deleteMessage: vi.fn(async (_id: string) => ({ ok: true as const })),
     setReaction: vi.fn(async (id: string, emoji: string, add: boolean) => message(1, { id, reactions: add ? [{ emoji, userIds: [userId] }] : [] })),
   };
   const reject = vi.fn(async () => false);
-  const store = new ChatStore(api, { userId, storage, id: () => uuid }, reject);
+  const id = vi.fn(() => uuid);
+  const store = new ChatStore(api, { userId, storage, id }, reject);
   stores.push(store);
-  return { store, api, storage, disk, reject };
+  return { store, api, storage, disk, reject, id };
 }
 
 describe("conversation state", () => {
@@ -176,6 +181,151 @@ describe("conversation state", () => {
     const disposing = store.dispose(); await Promise.resolve();
     const logout = store.dispose(true); write.resolve(); await Promise.all([disposing, logout]);
     expect(disk.size).toBe(0);
+  });
+});
+
+describe("replies", () => {
+  async function opened() {
+    const result = setup(); await result.store.ready; result.store.setConnected(true);
+    const c = result.store.get("a");
+    result.api.messages.mockResolvedValueOnce([message(1), message(2)]); await c.refresh();
+    return { ...result, c };
+  }
+  it("preserves text and selected mentions when choosing, editing and canceling a reply", async () => {
+    const { c } = await opened();
+    const person = { id: "friend", username: "amiga", displayName: "Amiga", avatar: null };
+    c.setDraft(chooseMention({ text: "Oi @am", mentions: [] }, { start: 3, end: 6 }, person).draft);
+    c.replyTo(message(1).id); c.edit(c.getSnapshot().draft.text + "tudo bem?");
+    expect(c.getSnapshot().draft.reply?.id).toBe(message(1).id);
+    expect(encodeDraft(c.getSnapshot().draft)).toBe("Oi <@friend> tudo bem?");
+    c.cancelReply();
+    expect(c.getSnapshot().draft.reply).toBeUndefined();
+    expect(encodeDraft(c.getSnapshot().draft)).toBe("Oi <@friend> tudo bem?");
+  });
+  it("persists a reply-only draft and keeps it isolated from other conversations and accounts", async () => {
+    const { c, store, disk } = await opened();
+    c.replyTo(message(1).id); await store.flush();
+    const restored = setup(disk); await restored.store.ready;
+    expect(restored.store.get("a").getSnapshot().draft.reply).toEqual({ id: message(1).id, preview: replyPreview(message(1)) });
+    expect(restored.store.get("b").getSnapshot().draft.reply).toBeUndefined();
+    const other = setup(disk, "https://chat.test", "another-account"); await other.store.ready;
+    expect(other.store.get("a").getSnapshot().draft.reply).toBeUndefined();
+  });
+  it("records the target before HTTP and retries the same reply even after selecting another draft target", async () => {
+    const { c, api, store, storage } = await opened();
+    c.replyTo(message(1).id); c.edit("resposta");
+    const failed = deferred<Message>(); api.sendText.mockReturnValueOnce(failed.promise);
+    const sending = c.send();
+    await vi.waitFor(() => expect(api.sendText).toHaveBeenCalledOnce());
+    expect(JSON.parse(storage.setItem.mock.calls.at(-1)![1]).conversations.a.outbox[0].draft.reply.id).toBe(message(1).id);
+    c.replyTo(message(2).id); c.edit("próxima resposta");
+    failed.reject(new TypeError("rede caiu")); await sending;
+    store.setConnected(false); store.setConnected(true);
+    expect(api.sendText).toHaveBeenCalledOnce();
+    await c.retry(c.getSnapshot().outbox[0]!.id);
+    expect(api.sendText.mock.calls[1]).toEqual(api.sendText.mock.calls[0]);
+    expect(api.sendText.mock.calls[1]?.[1].replyTo).toBe(message(1).id);
+    expect(c.getSnapshot().draft).toMatchObject({ text: "próxima resposta", reply: { id: message(2).id } });
+  });
+  it("restores an uncertain reply without automatic resend and keeps the original request identity", async () => {
+    const { c, api, store, disk } = await opened();
+    api.sendText.mockRejectedValueOnce(new TypeError("resposta perdida"));
+    c.replyTo(message(1).id); c.edit("resposta"); await c.send(); await store.flush();
+    const restored = setup(disk); await restored.store.ready; restored.store.setConnected(true);
+    const next = restored.store.get("a");
+    expect(restored.api.sendText).not.toHaveBeenCalled();
+    expect(next.getSnapshot().outbox[0]).toMatchObject({ requestId: uuid, status: "uncertain", draft: { reply: { id: message(1).id } } });
+    await next.retry(next.getSnapshot().outbox[0]!.id);
+    expect(restored.api.sendText.mock.calls[0]).toEqual(api.sendText.mock.calls[0]);
+  });
+  it("never confirms a reply as plain text, including a mismatched gateway echo", async () => {
+    const { c, api, store } = await opened();
+    const response = deferred<Message>(); api.sendText.mockReturnValueOnce(response.promise);
+    c.replyTo(message(1).id); c.edit("não perder a referência");
+    const sending = c.send(); await vi.waitFor(() => expect(api.sendText).toHaveBeenCalledOnce());
+    const wrong = message(100, { id: sentMessageId("self", uuid), userId: "self" });
+    store.receive({ t: "message", message: wrong });
+    expect(c.getSnapshot().outbox).toHaveLength(1);
+    response.resolve(wrong); await sending;
+    expect(c.getSnapshot().outbox[0]).toMatchObject({ status: "uncertain", draft: { reply: { id: message(1).id } } });
+    expect(c.getSnapshot().messages.some(m => m.id === wrong.id)).toBe(false);
+  });
+  it("clears deleted content from loaded quotes, draft and pending disk snapshots without changing retry identity", async () => {
+    const { c, api, store, disk } = await opened();
+    const original = message(1, { content: "conteúdo removido" });
+    const quoted = message(3, { replyToId: original.id, replyTo: replyPreview(original) });
+    api.messages.mockResolvedValueOnce([original, message(2), quoted]); await c.refresh();
+    api.sendText.mockRejectedValueOnce(new TypeError("rede caiu"));
+    c.replyTo(original.id); c.edit("resposta"); await c.send(); c.replyTo(original.id);
+    const stale = deferred<Message[]>(); api.messages.mockReturnValueOnce(stale.promise); const refreshing = c.refresh();
+    store.receive({ t: "messageDelete", channelId: "a", id: original.id });
+    store.receive({ t: "messageUpdate", message: original });
+    stale.resolve([original, message(2), quoted]); await refreshing; await store.flush();
+    expect(c.getSnapshot().messages.find(m => m.id === quoted.id)?.replyTo).toBeNull();
+    expect(c.getSnapshot().draft.reply?.preview).toBeNull();
+    expect(c.getSnapshot().outbox[0]?.draft.reply).toEqual({ id: original.id, preview: null });
+    expect([...disk.values()].join("")).not.toContain("conteúdo removido");
+    c.edit("rascunho preservado"); await c.send(); expect(api.sendText).toHaveBeenCalledOnce();
+  });
+  it("updates quoted content outside the loaded page and prevents a stale history response undoing it", async () => {
+    const { api, store } = setup(); await store.ready;
+    const c = store.get("a");
+    const original = message(1), quoted = message(3, { replyToId: original.id, replyTo: replyPreview(original) });
+    api.messages.mockResolvedValueOnce([quoted]); await c.refresh();
+    const stale = deferred<Message[]>(); api.messages.mockReturnValueOnce(stale.promise); const refreshing = c.refresh();
+    store.receive({ t: "messageUpdate", message: { ...original, content: "corrigida" } });
+    stale.resolve([quoted]); await refreshing;
+    expect(c.getSnapshot().messages).toHaveLength(1);
+    expect(c.getSnapshot().messages[0]?.replyTo?.content).toBe("corrigida");
+  });
+  it("handles a missing original as a definitive failure and allows a new plain send only after canceling the quote", async () => {
+    const { c, api, id } = await opened();
+    api.sendText.mockRejectedValueOnce(new ApiError(400, "mensagem apagada", "REPLY_UNAVAILABLE"));
+    c.replyTo(message(1).id); c.edit("não perder meu texto"); await c.send();
+    const pending = c.getSnapshot().outbox[0]!;
+    expect(pending).toMatchObject({ status: "failed", draft: { reply: { id: message(1).id, preview: null } } });
+    c.restoreDraft(pending.id);
+    expect(c.getSnapshot().draft.text).toBe("não perder meu texto");
+    await c.send(); expect(api.sendText).toHaveBeenCalledOnce();
+    c.cancelReply(); id.mockReturnValueOnce("a1a1876a-fdf5-44fa-9ae2-399c691d9ccc"); await c.send();
+    expect(api.sendText.mock.calls[1]?.[1]).not.toHaveProperty("replyTo");
+    expect(api.sendText.mock.calls[1]?.[1].requestId).not.toBe(pending.requestId);
+  });
+  it("keeps a newer HTTP quote after a live edit when a previous older-page request finishes last", async () => {
+    const { store, api } = setup(); await store.ready;
+    const c = store.get("a"), original = message(1);
+    const quoted = message(51, { replyToId: original.id, replyTo: replyPreview(original) });
+    const page = [...Array.from({ length: 49 }, (_, i) => message(i + 2)), quoted];
+    api.messages.mockResolvedValueOnce(page); await c.refresh();
+    const older = deferred<Message[]>(); api.messages.mockReturnValueOnce(older.promise); const loading = c.loadOlder();
+    store.receive({ t: "messageUpdate", message: { ...original, content: "edição ao vivo" } });
+    const current = { ...replyPreview(original), content: "edição mais recente no histórico" };
+    api.messages.mockResolvedValueOnce([...page.slice(0, -1), { ...quoted, replyTo: current }]); await c.refresh();
+    older.resolve([message(0, { replyToId: original.id, replyTo: replyPreview(original) })]); await loading;
+    expect(c.getSnapshot().messages.find(m => m.id === message(0).id)?.replyTo?.content).toBe(current.content);
+    expect(c.getSnapshot().messages.find(m => m.id === quoted.id)?.replyTo?.content).toBe(current.content);
+  });
+  it("clears a restored quote when the original was deleted offline outside the loaded page", async () => {
+    const { store, api } = setup(); await store.ready;
+    const c = store.get("a"), original = message(1);
+    c.setDraft({ text: "meu texto", mentions: [], reply: { id: original.id, preview: replyPreview(original) } });
+    api.messages.mockResolvedValueOnce([message(3, { replyToId: original.id, replyTo: null })]); await c.refresh();
+    expect(c.getSnapshot().draft).toMatchObject({ text: "meu texto", reply: { preview: null } });
+  });
+  it("removes a quote snapshot when refresh detects deletion or access is revoked", async () => {
+    const { c, api } = await opened();
+    c.replyTo(message(1).id); c.edit("rascunho");
+    api.messages.mockResolvedValueOnce([message(2)]); await c.refresh();
+    expect(c.getSnapshot().draft.reply?.preview).toBeNull();
+    c.replyTo(message(2).id);
+    api.messages.mockRejectedValueOnce(new ApiError(403, "sem acesso")); await c.refresh();
+    expect(c.getSnapshot().draft).toMatchObject({ text: "rascunho", reply: { preview: null } });
+  });
+  it("renders names in quote mentions and an attachment summary when the original has no text", () => {
+    const preview = replyPreview(message(1, { content: "Oi <@person>" }));
+    expect(replyText(preview, new Map([["person", "João"]]))).toBe("Oi @João");
+    expect(replyText({ ...preview, content: "", attachments: 2 }, new Map())).toBe("2 anexos");
+    expect(replyPreview(message(1, { content: "x".repeat(500) })).content).toHaveLength(200);
   });
 });
 

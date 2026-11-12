@@ -16,9 +16,7 @@
     "desktop:dist": "pnpm --filter @turtle/desktop dist",
     "ios": "pnpm --filter @turtle/ios start",
     "ios:device": "pnpm --filter @turtle/ios ios",
-    "ios:ipa": "pnpm --filter @turtle/ios ipa",
-    "setup": "node tools/turtle-setup/turtle-setup.mjs",
-    "setup:test": "node --test tools/turtle-setup/test/turtle-setup.test.mjs"
+    "ios:ipa": "pnpm --filter @turtle/ios ipa"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

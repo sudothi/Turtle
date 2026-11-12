@@ -2,10 +2,16 @@ name: Desktop (Windows)
 # Gera o instalador do Windows. Roda em PRs que mexem no desktop e sob demanda (Actions > Run workflow).
 # O instalador fica em "Artifacts" na página da execução. Para publicar no site, rode este
 # workflow na main (Run workflow) e depois Actions > Publish desktop (VPS).
+# Numa tag desktop-v*, também publica uma Release no GitHub com o instalador: é de lá que o
+# `turtle-setup desktop publicar` de quem hospeda por conta própria baixa a última versão.
 on:
   workflow_dispatch:
   pull_request:
     paths: ["apps/desktop/**", ".github/workflows/desktop.yml"]
+  push:
+    tags: ["desktop-v*"]
+permissions:
+  contents: write
 jobs:
   instalador:
     runs-on: windows-latest
@@ -35,3 +41,13 @@ jobs:
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest.yml
           retention-days: 14
+      - name: Release no GitHub (só em tag desktop-v*)
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd apps/desktop/release
+          gh release create "${{ github.ref_name }}" Turtle-Setup-*.exe Turtle-Setup-*.exe.blockmap latest.yml \
+            --repo "${{ github.repository }}" --title "Turtle para Windows ${{ github.ref_name }}" \
+            --notes "Instalador do Turtle para Windows (não assinado: SmartScreen > Mais informações > Executar assim mesmo). Quem hospeda por conta própria publica no próprio servidor com \`turtle-setup desktop publicar\`."

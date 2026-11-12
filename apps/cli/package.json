@@ -1,0 +1,21 @@
+{
+  "name": "@turtle/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turtle Setup: instala e cuida do seu Turtle numa VPS, a partir do seu computador",
+  "type": "module",
+  "bin": { "turtle-setup": "bin/turtle-setup.mjs" },
+  "scripts": {
+    "start": "node bin/turtle-setup.mjs",
+    "build": "esbuild bin/turtle-setup.mjs --bundle --platform=node --format=cjs --target=node22 --outfile=dist/turtle-setup.cjs",
+    "sea": "pnpm build && node scripts/sea.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
+    "typescript": "^5.9.0"
+  }
+}

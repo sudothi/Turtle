@@ -48,7 +48,7 @@ Ficaram de fora: ícone, emblemas, status, fila automática.
 - IPC fechado (`auto:get`, `auto:set`, `auto:watch`, `auto:champions`, `auto:icon`, `auto:tool`, `auto:open`, evento `auto:status`), todos conferindo que veio da janela do app. O site nunca recebe porta nem senha do cliente; `auto:open` só abre os três sites do revelar lobby. Nada passa pelo servidor do Turtle.
 
 ## Entrega
-Código do processo principal só chega com instalador novo: a versão do desktop subiu para **0.4.0**. Publicar o instalador precisa de ok escrito do thiago. O painel vai junto com o deploy normal do site e fica escondido em desktops antigos.
+Código do processo principal só chega com instalador novo: a versão do desktop subiu para **0.4.0** (e **0.4.1** com Perfil e social). Publicar o instalador precisa de ok escrito do thiago. O painel vai junto com o deploy normal do site e fica escondido em desktops antigos.
 
 ## Riscos
 O LCU não é API oficial: a Riot pode mudar um endpoint e a função quebra (isolada, sem derrubar o resto). Revelar lobby e esquiva usam caminhos que a Riot não documenta; o thiago decidiu seguir porque as ferramentas já existem. Teste com o LoL de verdade só no Windows do thiago (o container da nuvem não tem o cliente).

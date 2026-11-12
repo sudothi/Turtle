@@ -22,6 +22,14 @@ export function parseLatestYml(text: string): DesktopRelease | null {
   return { version, file, size: Number.isFinite(size) && size > 0 ? size : undefined, date: pick("releaseDate") };
 }
 
+/**
+ * Nome do arquivo baixado: "Turtle-Setup@<domínio>.exe". O instalador lê o domínio do próprio nome
+ * (apps/desktop/build/installer.nsh), então o app já abre neste servidor, sem a pessoa digitar nada.
+ */
+export function installerName(host: string): string | null {
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) ? `Turtle-Setup@${host.toLowerCase()}.exe` : null;
+}
+
 const mb = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`;
 const day = (iso: string) => {
   const d = new Date(iso);
@@ -71,7 +79,7 @@ export function DesktopDownload() {
 
       {state.kind === "ready" && (
         <div className="desktop-release">
-          <a className="t-btn lino lg desktop-btn" href={`${DESKTOP_BASE}${encodeURIComponent(state.release.file)}`} download>
+          <a className="t-btn lino lg desktop-btn" href={`${DESKTOP_BASE}${encodeURIComponent(state.release.file)}`} download={installerName(location.hostname) ?? true}>
             <Icon name="download" size={20} />
             Baixar para Windows
           </a>

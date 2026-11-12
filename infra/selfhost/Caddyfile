@@ -9,7 +9,18 @@
 		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()"
 		-Server
 	}
-	reverse_proxy app:3000
+	# Instalador do desktop e manifesto do auto-update: coloque Turtle-Setup-<versão>.exe, o .blockmap e o
+	# latest.yml em infra/selfhost/desktop/ (a página de download do app lê esta pasta).
+	handle_path /desktop/* {
+		root * /srv/desktop
+		@manifesto path *.yml
+		header @manifesto Cache-Control "no-cache"
+		file_server
+	}
+
+	handle {
+		reverse_proxy app:3000
+	}
 }
 
 # Sinalização do LiveKit (o LiveKit roda em network_mode: host; as mídias vão direto pelas portas 7881/tcp, 7882/udp e 3478/udp).

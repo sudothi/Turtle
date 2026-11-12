@@ -14,6 +14,7 @@ import type { PendingSend } from "../chat/conversation";
 import KeyboardViewport from "../ui/KeyboardViewport";
 import MessageEditor from "../chat/MessageEditor";
 import { ReactionPicker, showMessageActions } from "../chat/MessageActions";
+import ReplyQuote from "../chat/ReplyQuote";
 
 const timestamp = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 function stamp(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : timestamp.format(date); }
@@ -65,6 +66,7 @@ export default function ConversationScreen() {
   const openActions = (message: Message) => {
     conversation.clearActionError();
     showMessageActions({ mine: message.userId === user.id, canDelete: message.userId === user.id || canModerate,
+      onReply: () => { setEditing(undefined); conversation.replyTo(message.id); },
       onReact: () => setReacting(message.id), onEdit: () => setEditing(message.id),
       onDelete: () => Alert.alert("Excluir mensagem?", "A mensagem será removida para todos. Essa ação não pode ser desfeita.", [
         { text: "Cancelar", style: "cancel" }, { text: "Excluir", style: "destructive", onPress: () => { void conversation.deleteMessage(message.id); } },
@@ -92,23 +94,26 @@ export default function ConversationScreen() {
       renderItem={({ item, index }) => {
         if (item.kind === "pending") return <View style={[s.message, { marginTop: 16 }]}>
           <Avatar name={shownName(user)} uri={workspace.api.fileUrl(user.avatar)} />
-          <View style={layout.rowText}><Text style={text.label}>{shownName(user)}</Text><MessageBody content={item.value.content} names={names} />
+          <View style={layout.rowText}><Text style={text.label}>{shownName(user)}</Text>
+            {item.value.draft.reply && <ReplyQuote reply={item.value.draft.reply} names={names} fileUrl={workspace.api.fileUrl} />}
+            <MessageBody content={item.value.content} names={names} />
             <Text accessibilityLiveRegion="polite" style={text.caption}>{item.value.status === "sending" ? "Enviando…" : item.value.status === "uncertain" ? "Envio sem confirmação" : "Não enviada"}</Text>
             {!!item.value.error && <Text style={text.caption}>{item.value.error}</Text>}
             {item.value.status !== "sending" && <View style={s.retry}>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: !presence.connected }} disabled={!presence.connected} onPress={() => { void conversation.retry(item.id); }} style={[layout.toolbar, !presence.connected && { opacity: 0.4 }]}><Text style={text.label}>Tentar novamente</Text></Pressable>
-              {item.value.status === "failed" && !state.draft.text && <ToolbarButton label="Editar rascunho" onPress={() => conversation.restoreDraft(item.id)} />}
+              {item.value.status === "failed" && !state.draft.text && !state.draft.reply && <ToolbarButton label="Editar rascunho" onPress={() => conversation.restoreDraft(item.id)} />}
             </View>}
           </View>
         </View>;
         const message = item.value, older = rows[index + 1];
         const previous = older?.kind === "message" ? older.value : undefined;
         const gap = Date.parse(message.createdAt) - Date.parse(previous?.createdAt || "");
-        const grouped = previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
+        const grouped = !message.replyToId && previous?.userId === message.userId && gap >= 0 && gap < 5 * 60_000 && message.createdAt.slice(0, 10) === previous.createdAt.slice(0, 10);
         return <Pressable accessible={false} onLongPress={() => openActions(message)} disabled={!!state.acting} style={[s.message, !grouped && { marginTop: 16 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={`Ver perfil de ${shownName(message)}`} onPress={() => navigation.navigate("Profile", { userId: message.userId })} style={{ width: 40, minHeight: 44 }}>{!grouped && <Avatar name={shownName(message)} uri={workspace.api.fileUrl(message.avatar)} />}</Pressable>
           <View style={[layout.rowText, { gap: 2 }]}>
             {!grouped && <Text style={[text.label, { fontFamily: fonts.bold }]}>{shownName(message)} <Text style={[text.caption, { color: colors.faint }]}>{stamp(message.createdAt)}</Text></Text>}
+            {message.replyToId && <ReplyQuote reply={{ id: message.replyToId, preview: message.replyTo }} names={names} fileUrl={workspace.api.fileUrl} />}
             {!!message.content && <MessageBody content={message.content} names={names} />}
             {!!message.editedAt && <Text style={text.caption}>(editado)</Text>}
             {message.attachments.map(attachment => <View key={attachment.id} style={s.attachment}><Icon name="file" /><Text style={[text.caption, { flex: 1 }]}>{attachment.name}</Text></View>)}

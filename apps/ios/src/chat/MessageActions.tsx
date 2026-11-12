@@ -5,10 +5,10 @@ import { Button, Notice } from "../ui/components";
 import KeyboardViewport from "../ui/KeyboardViewport";
 import { colors, fonts, styles as text } from "../ui/theme";
 
-export function showMessageActions({ mine, canDelete, onReact, onEdit, onDelete }: {
-  mine: boolean; canDelete: boolean; onReact: () => void; onEdit: () => void; onDelete: () => void;
+export function showMessageActions({ mine, canDelete, onReply, onReact, onEdit, onDelete }: {
+  mine: boolean; canDelete: boolean; onReply: () => void; onReact: () => void; onEdit: () => void; onDelete: () => void;
 }) {
-  const actions = [{ title: "Reagir", run: onReact }, ...(mine ? [{ title: "Editar mensagem", run: onEdit }] : []), ...(canDelete ? [{ title: "Excluir mensagem", run: onDelete }] : [])];
+  const actions = [{ title: "Responder", run: onReply }, { title: "Reagir", run: onReact }, ...(mine ? [{ title: "Editar mensagem", run: onEdit }] : []), ...(canDelete ? [{ title: "Excluir mensagem", run: onDelete }] : [])];
   const destructive = actions.findIndex(action => action.title === "Excluir mensagem");
   ActionSheetIOS.showActionSheetWithOptions({
     title: "Opções da mensagem", options: [...actions.map(action => action.title), "Cancelar"],

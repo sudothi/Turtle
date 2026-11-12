@@ -66,6 +66,8 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
   let config: AutoConfig = DEFAULT_CONFIG;
   let status: AutoStatus = { client: "closed", phase: null, me: null, log: [] };
   let watching = false;
+  /** Faixa fora da chamada: quer saber quando o cliente abre, mas sem pressa. */
+  let background = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running = false;
   let champions: Champion[] | null = null;
@@ -181,7 +183,7 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
     if (!(await lcu.connect())) {
       if (status.client !== "closed") resetSelect();
       set({ client: "closed", phase: null, me: null });
-      return 5000;
+      return watching ? 5000 : 15000;
     }
     const p = await lcu.request("GET", "/lol-gameflow/v1/gameflow-phase").catch(() => undefined);
     if (!p || p.status !== 200) {
@@ -206,7 +208,7 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
   function schedule(ms: number) {
     if (timer) clearTimeout(timer);
     timer = undefined;
-    if (!watching && !anyOn()) return;
+    if (!watching && !background && !anyOn()) return;
     timer = setTimeout(loop, ms);
     timer.unref?.();
   }
@@ -318,6 +320,11 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
     /** O painel aberto quer o estado ao vivo mesmo sem automação ligada. */
     watch(on: boolean) {
       watching = on;
+      if (on) { emit(); schedule(0); }
+    },
+    /** Acompanha o cliente devagar (a cada 15 s com ele fechado) para a faixa saber quando o LoL abre. */
+    background(on: boolean) {
+      background = on;
       if (on) { emit(); schedule(0); }
     },
     champions: () => champs(),

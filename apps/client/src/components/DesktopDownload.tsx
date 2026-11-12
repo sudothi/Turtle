@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Icon } from "@turtle/ui";
 import { desktop } from "../desktop";
-import { GameAutomationsSetting } from "./GameAutomations";
 
 /** Pasta onde o Caddy serve o instalador e o manifesto do auto-update (infra/Caddyfile). */
 export const DESKTOP_BASE = "/desktop/";
@@ -71,7 +70,6 @@ export function DesktopDownload() {
       </div>
 
       {inApp && <p className="desktop-note">Você já está usando o app desktop. Ele baixa as novas versões sozinho.</p>}
-      <GameAutomationsSetting />
 
       {state.kind === "loading" && <p className="t-muted">Procurando a versão mais nova…</p>}
 

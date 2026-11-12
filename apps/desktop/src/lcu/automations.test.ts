@@ -128,3 +128,15 @@ describe("automações", () => {
     expect(auto.getStatus().client).toBe("closed");
   });
 });
+
+describe("faixa fora da chamada", () => {
+  it("só acompanha o cliente quando a faixa pede", async () => {
+    const { auto, state, seen } = setup();
+    state.open = true;
+    auto.background(true);
+    await auto.tick();
+    expect(seen.at(-1)?.client).toBe("open");
+    auto.background(false);
+    auto.stop();
+  });
+});

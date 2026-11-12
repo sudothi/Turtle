@@ -374,6 +374,12 @@ function GameAutomationsInner({ compact, strip }: { compact?: boolean; strip?: b
     a.watch(true);
     return () => a.watch(false);
   }, [a, open]);
+  // A faixa precisa saber quando o LoL abre mesmo sem automação ligada.
+  useEffect(() => {
+    if (!a || !strip) return;
+    a.background?.(true);
+    return () => a.background?.(false);
+  }, [a, strip]);
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent) => {
@@ -408,6 +414,8 @@ function GameAutomationsInner({ compact, strip }: { compact?: boolean; strip?: b
   const live = !!config && (config.accept.on || config.pick.on || config.ban.on);
   const panel = open && config && createPortal(<Panel config={config} status={status} setConfig={setConfig} place={place} />, document.body);
   if (strip) {
+    // Fora da chamada só aparece com o cliente do LoL aberto ou alguma automação ligada.
+    if (!open && !live && status.client !== "open") return null;
     const on = config ? [config.accept.on && "Aceitar", config.pick.on && "Pick", config.ban.on && "Ban"].filter(Boolean) as string[] : [];
     const where = status.client === "open" ? PHASES[status.phase ?? "None"] ?? "Cliente aberto" : "LoL fechado";
     return (
@@ -437,7 +445,7 @@ function GameAutomationsInner({ compact, strip }: { compact?: boolean; strip?: b
   );
 }
 
-/** Configurações > App desktop: ativar o Game Automations (só no app desktop novo). */
+/** Configurações > Game Automations: ativar o recurso (a seção só existe no app desktop novo). */
 export function GameAutomationsSetting() {
   const enabled = useGameAutomationsEnabled();
   if (!hasAutomations()) return null;
@@ -446,7 +454,7 @@ export function GameAutomationsSetting() {
       <span className="ga-row-icon" aria-hidden="true"><Icon name="gamepad" size={18} /></span>
       <span className="ga-row-text">
         <b>Game Automations</b>
-        <span className="t-muted">Aceitar partida, pick e ban automáticos e ferramentas da seleção do League of Legends. Aparece ao lado da discoteca e acima da sua barra de usuário.</span>
+        <span className="t-muted">Aceitar partida, pick e ban automáticos e ferramentas da seleção do League of Legends. Na chamada fica ao lado da discoteca; fora dela, aparece acima da sua barra de usuário quando o LoL está aberto.</span>
       </span>
       <Switch on={enabled} label="Ativar Game Automations" onChange={setGameAutomationsEnabled} />
     </section>

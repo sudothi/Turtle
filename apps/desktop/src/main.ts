@@ -308,6 +308,7 @@ else {
     ipcMain.handle("auto:get", (event) => (fromApp(event.sender) ? { config: auto.getConfig(), status: auto.getStatus() } : null));
     ipcMain.handle("auto:set", (event, patch: unknown) => (fromApp(event.sender) ? auto.setConfig(patch) : null));
     ipcMain.on("auto:watch", (event, on: unknown) => fromApp(event.sender) && auto.watch(on === true));
+    ipcMain.on("auto:background", (event, on: unknown) => fromApp(event.sender) && auto.background(on === true));
     ipcMain.handle("auto:champions", (event) => (fromApp(event.sender) ? auto.champions() : []));
     ipcMain.handle("auto:icon", (event, id: unknown) => (fromApp(event.sender) && typeof id === "number" ? auto.icon(id) : null));
     ipcMain.handle("auto:tool", (event, which: unknown) => {

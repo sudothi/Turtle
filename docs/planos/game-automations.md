@@ -21,9 +21,9 @@ Ficaram de fora: cosméticos (ícone, fundo, emblemas, Riot ID, status), remover
 ![escolher campeão](game-automations/2-escolher.png)
 
 ## Onde fica a tela
-- **Desligado por padrão.** Cada pessoa ativa em Configurações > App desktop > Game Automations (guardado no aparelho). Desativar também desliga as automações que estavam rodando.
+- **Desligado por padrão.** Cada pessoa ativa em Configurações > Game Automations (seção que só existe no app desktop) (guardado no aparelho). Desativar também desliga as automações que estavam rodando.
 - **Na chamada:** ícone de controle (`gamepad`) ao lado do botão da Discoteca, no painel "Voz conectada" e nos controles grandes da chamada.
-- **Fora da chamada:** uma faixa no mesmo lugar do bloco "Voz conectada", acima da barra do usuário, com a fase do LoL ("Na fila", "Seleção de campeões"…) e o que está ligado. Clicar abre o painel.
+- **Fora da chamada** (decisão do thiago): uma faixa no mesmo lugar do bloco "Voz conectada", acima da barra do usuário, **só com o cliente do LoL aberto ou alguma automação ligada** (o desktop confere o cliente a cada 15 s enquanto a faixa está ativa), com a fase do LoL ("Na fila", "Seleção de campeões"…) e o que está ligado. Clicar abre o painel.
 - Um pontinho no ícone avisa que alguma automação está ligada.
 - O painel segue o padrão da Discoteca: abas, cartões com interruptor, espera em segundos, seletor de campeão com busca e ícones, e a última ação no rodapé.
 - No navegador e no Android nada aparece (`window.turtleDesktop.automations` não existe).

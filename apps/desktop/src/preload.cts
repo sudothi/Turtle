@@ -79,6 +79,9 @@ contextBridge.exposeInMainWorld("turtleDesktop", {
     watch(on: boolean) {
       ipcRenderer.send("auto:watch", on);
     },
+    background(on: boolean) {
+      ipcRenderer.send("auto:background", on);
+    },
     champions: () => ipcRenderer.invoke("auto:champions"),
     icon: (id: number) => ipcRenderer.invoke("auto:icon", id),
     tool: (which: "reveal" | "dodge" | "restart") => ipcRenderer.invoke("auto:tool", which),

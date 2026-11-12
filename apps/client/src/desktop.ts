@@ -28,6 +28,8 @@ export interface DesktopAutomations {
   get(): Promise<{ config: AutoConfig; status: AutoStatus } | null>;
   set(patch: { [K in keyof AutoConfig]?: Partial<AutoConfig[K]> }): Promise<AutoConfig | null>;
   watch(on: boolean): void;
+  /** Acompanha o cliente devagar (faixa fora da chamada). Versões novas do app. */
+  background?(on: boolean): void;
   champions(): Promise<Champion[]>;
   icon(id: number): Promise<string | null>;
   tool(which: "reveal"): Promise<ToolResult<RevealResult>>;

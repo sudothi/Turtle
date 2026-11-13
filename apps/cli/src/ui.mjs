@@ -5,26 +5,65 @@ const colorOn = () => !!process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (/** @type {number} */ n) => (/** @type {string} */ s) => (colorOn() ? `\x1b[${n}m${s}\x1b[0m` : s);
 export const bold = paint(1), dim = paint(2), red = paint(31), green = paint(32), yellow = paint(33), cyan = paint(36), magenta = paint(35);
 
-export const BANNER = [
-  "        _.-''''-._",
-  "      .'  *   *   '.          Turtle Setup",
-  "     /  *  _____  *  \\        o seu Turtle, na sua VPS",
-  "    |  *  /_/_/_\\  *  |",
-  "     \\  *  -----  *  /",
-  "      '._  *   *  _.'  _",
-  "         '-....-'  (_)>",
-].join("\n");
+export const BANNER_ART = [
+  "            ▄▄▄▄▄▄           ▄▄████",
+  "         ███████████▄       ▄██████",
+  "       ▄████████▀ ▄▄▄▄▄▄▄▄  ███████",
+  "            ▀▀   ██████████  ▀███▀",
+  "            ▄███ █████████▀▄▄▄",
+  "          ▄██████ █████▀ ▄█████",
+  "          ███████▄▄▄▄▄  ▄██████",
+  "          ▀▀▀▀▀████████ ███████ ▄▄",
+  "     ▄▄  ████▄ ████████ ▀██████ ██▄",
+  "  ▄█████ █████ ███████▀▄▄▄▀▀▀▀ ▄███",
+  " ▄██████ █████ ▀▀███▀▄██████▄  ████",
+  " ███▀▀▀  ████▀▄▄███▄ ███████▀ █████",
+  " ▀▀       ▀▀▄████████ ████▀    ███▀",
+  "            ▀███████▀  ▀       ██▀",
+  "               ▄▄▄▄▄          ▀▀",
+  "              ▄█████",
+  "              █████",
+  "             ███▀▀",
+];
+
+/** Logo do Turtle em meio-bloco (gerada a partir de packages/ui/assets/turtle-mark.svg). */
+const TEXT = ["", "", "", "", "", "Turtle Setup", "o seu Turtle, na sua VPS", "", "instala e cuida do servidor", "por SSH, direto do seu PC"];
+export const BANNER = BANNER_ART.join("\n");
+
+/** Degradê do banner: vermelho, laranja e amarelo, na diagonal. */
+const FIRE = [[226, 38, 38], [249, 115, 22], [250, 204, 21]];
+const FIRE_256 = [196, 202, 208, 214, 220, 226];
+function fire(/** @type {string} */ l, /** @type {number} */ row) {
+  if (!colorOn()) return l;
+  const truecolor = /truecolor|24bit/i.test(process.env.COLORTERM ?? "") || !!process.env.WT_SESSION;
+  let out = "";
+  for (let x = 0; x < l.length; x++) {
+    if (l[x] === " ") {
+      out += " ";
+      continue;
+    }
+    const t = Math.min(1, (x / 35 + row / (BANNER_ART.length - 1)) / 2 * 1.15);
+    if (truecolor) {
+      const k = t * (FIRE.length - 1);
+      const a = FIRE[Math.min(Math.floor(k), FIRE.length - 2)];
+      const b = FIRE[Math.min(Math.floor(k), FIRE.length - 2) + 1];
+      const f = k - Math.min(Math.floor(k), FIRE.length - 2);
+      const [r, g, bl] = a.map((v, c) => Math.round(v + (b[c] - v) * f));
+      out += `\x1b[38;2;${r};${g};${bl}m${l[x]}`;
+    } else out += `\x1b[38;5;${FIRE_256[Math.min(FIRE_256.length - 1, Math.floor(t * FIRE_256.length))]}m${l[x]}`;
+  }
+  return out + "\x1b[0m";
+}
 
 export function banner() {
-  const lines = BANNER.split("\n");
   console.log("");
-  for (const l of lines) {
-    const i = l.indexOf("Turtle Setup");
-    const j = l.indexOf("o seu Turtle");
-    if (i > 0) console.log(cyan(l.slice(0, i)) + bold(l.slice(i)));
-    else if (j > 0) console.log(cyan(l.slice(0, j)) + dim(l.slice(j)));
-    else console.log(cyan(l));
-  }
+  const off = Math.max(0, Math.floor((BANNER_ART.length - TEXT.length) / 2));
+  BANNER_ART.forEach((l, i) => {
+    const t = TEXT[i - off + 0] ?? "";
+    const pad = " ".repeat(35 - l.length + 4);
+    const label = i - off === 5 ? bold(t) : dim(t);
+    console.log("  " + fire(l, i) + (t ? pad + label : ""));
+  });
   console.log("");
 }
 

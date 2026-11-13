@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.0"
   },
   "devDependencies": {

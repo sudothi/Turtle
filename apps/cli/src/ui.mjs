@@ -30,6 +30,31 @@ export const BANNER_ART = [
 const TEXT = ["", "", "", "", "", "Turtle Setup", "o seu Turtle, na sua VPS", "", "instala e cuida do servidor", "por SSH, direto do seu PC"];
 export const BANNER = BANNER_ART.join("\n");
 
+/** Degradê do banner: vermelho, laranja e amarelo, na diagonal. */
+const FIRE = [[226, 38, 38], [249, 115, 22], [250, 204, 21]];
+const FIRE_256 = [196, 202, 208, 214, 220, 226];
+function fire(/** @type {string} */ l, /** @type {number} */ row) {
+  if (!colorOn()) return l;
+  const truecolor = /truecolor|24bit/i.test(process.env.COLORTERM ?? "") || !!process.env.WT_SESSION;
+  let out = "";
+  for (let x = 0; x < l.length; x++) {
+    if (l[x] === " ") {
+      out += " ";
+      continue;
+    }
+    const t = Math.min(1, (x / 35 + row / (BANNER_ART.length - 1)) / 2 * 1.15);
+    if (truecolor) {
+      const k = t * (FIRE.length - 1);
+      const a = FIRE[Math.min(Math.floor(k), FIRE.length - 2)];
+      const b = FIRE[Math.min(Math.floor(k), FIRE.length - 2) + 1];
+      const f = k - Math.min(Math.floor(k), FIRE.length - 2);
+      const [r, g, bl] = a.map((v, c) => Math.round(v + (b[c] - v) * f));
+      out += `\x1b[38;2;${r};${g};${bl}m${l[x]}`;
+    } else out += `\x1b[38;5;${FIRE_256[Math.min(FIRE_256.length - 1, Math.floor(t * FIRE_256.length))]}m${l[x]}`;
+  }
+  return out + "\x1b[0m";
+}
+
 export function banner() {
   console.log("");
   const off = Math.max(0, Math.floor((BANNER_ART.length - TEXT.length) / 2));
@@ -37,7 +62,7 @@ export function banner() {
     const t = TEXT[i - off + 0] ?? "";
     const pad = " ".repeat(35 - l.length + 4);
     const label = i - off === 5 ? bold(t) : dim(t);
-    console.log("  " + cyan(l) + (t ? pad + label : ""));
+    console.log("  " + fire(l, i) + (t ? pad + label : ""));
   });
   console.log("");
 }

@@ -115,6 +115,36 @@ describe("automações", () => {
     auto.stop();
   });
 
+  it("bane depois que o aliado troca de campeão (não desiste na primeira)", async () => {
+    const { auto, state, calls } = setup();
+    auto.setConfig({ ban: { on: true, champion: 9, delayMs: 0 } });
+    state.session.myTeam![0]!.championPickIntent = 9;
+    state.phase = "ChampSelect";
+    await auto.tick();
+    state.session.myTeam![0]!.championPickIntent = 8;
+    await auto.tick();
+    expect(calls).toContain('PATCH /lol-champ-select/v1/session/actions/10 {"championId":9,"completed":true}');
+    auto.stop();
+  });
+
+  it("bane mesmo sem a lista de baníveis e confirma em separado se o cliente recusar o PATCH completo", async () => {
+    const { auto, state, calls, lcu } = setup();
+    const base = lcu.request.bind(lcu);
+    lcu.request = async (method, path, body, service) => {
+      if (path.endsWith("bannable-champion-ids")) { calls.push(`${method} ${path}`); return { status: 404, data: undefined }; }
+      if (method === "PATCH" && (body as { completed?: boolean })?.completed) { calls.push(`${method} ${path} recusado`); return { status: 500, data: undefined }; }
+      if (method === "POST" && path.endsWith("/complete")) { calls.push(`${method} ${path}`); return { status: 204, data: undefined }; }
+      return base(method, path, body, service);
+    };
+    auto.setConfig({ ban: { on: true, champion: 9, delayMs: 0 } });
+    state.phase = "ChampSelect";
+    await auto.tick();
+    expect(calls).toContain('PATCH /lol-champ-select/v1/session/actions/10 {"championId":9}');
+    expect(calls).toContain("POST /lol-champ-select/v1/session/actions/10/complete");
+    expect(auto.getStatus().log.map((l) => l.text)).toContain("#9 banido");
+    auto.stop();
+  });
+
   it("ferramentas exigem a seleção de campeões", async () => {
     const { auto } = setup();
     await expect(auto.dodge()).rejects.toThrow("seleção");

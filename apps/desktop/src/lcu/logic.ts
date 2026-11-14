@@ -74,7 +74,9 @@ export function choosePick(s: ChampSession, pickable: number[], champion: number
 
 /** Ban automático: não bane o que um aliado quer jogar nem o que já saiu. */
 export function chooseBan(s: ChampSession, bannable: number[], champion: number | null) {
-  if (!champion || !bannable.includes(champion)) return { id: undefined, reason: "indisponível" as const };
+  if (!champion) return { id: undefined, reason: "indisponível" as const };
+  // Lista vazia = o cliente ainda não respondeu (ou o modo não tem a rota): não é motivo para desistir.
+  if (bannable.length && !bannable.includes(champion)) return { id: undefined, reason: "indisponível" as const };
   const me = s.localPlayerCellId;
   const ally = (s.myTeam ?? []).find((p) => p.cellId !== me && p.championPickIntent === champion);
   if (ally) return { id: undefined, reason: "aliado" as const };

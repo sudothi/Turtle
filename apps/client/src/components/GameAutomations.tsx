@@ -395,6 +395,9 @@ function SkinPicker({ skins, onPick, onBack }: { skins: Skin[] | null; onPick: (
   );
 }
 
+/** Desktop antigo não conhece as funções novas: em vez de "Ferramenta desconhecida", diz o que fazer. */
+const toolError = (e: string) => (/desconhecida/i.test(e) ? "Esta função precisa do app desktop atualizado. Feche o Turtle e abra de novo para atualizar." : e);
+
 /** Perfil e social: Riot ID, fundo do perfil, chat offline e remover todos os amigos. */
 function ProfileTools({ open, me, onError }: { open: boolean; me: string | null; onError: (e: string | null) => void }) {
   const a = api();
@@ -412,7 +415,10 @@ function ProfileTools({ open, me, onError }: { open: boolean; me: string | null;
   useEffect(() => {
     if (!a || !open) { setOffline(null); return; }
     let alive = true;
-    void a.tool<boolean>("chatState").then((r) => alive && r.ok && setOffline(r.result));
+    void a.tool<boolean>("chatState").then((r) => {
+      if (!alive) return;
+      if (r.ok) setOffline(r.result); else { setOffline(false); onError(toolError(r.error)); }
+    });
     return () => { alive = false; };
   }, [a, open]);
   useEffect(() => {
@@ -427,7 +433,7 @@ function ProfileTools({ open, me, onError }: { open: boolean; me: string | null;
     onError(null);
     try {
       const r = await a.tool<T>(which, arg);
-      if (!r.ok) { onError(r.error); return undefined; }
+      if (!r.ok) { onError(toolError(r.error)); return undefined; }
       return r.result;
     } finally {
       setBusy(null);
@@ -475,7 +481,7 @@ function ProfileTools({ open, me, onError }: { open: boolean; me: string | null;
 
       <Feature
         icon="chat" title="Desconectar do chat" hint="Você aparece offline para os amigos do LoL" on={!!offline}
-        onToggle={(on) => { if (!off && offline !== null) void call<boolean>("chat", "chatOffline", on).then((v) => v !== undefined && setOffline(v)); }}
+        onToggle={(on) => { if (!off) void call<boolean>("chat", "chatOffline", on).then((v) => v !== undefined && setOffline(v)); }}
       />
 
       <section className={`ga-card lino ga-danger-card ${friends !== null ? "on" : ""}`}>

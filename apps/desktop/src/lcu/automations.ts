@@ -128,8 +128,13 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
   }
 
   async function lock(actionId: number, championId: number, completed: boolean) {
-    const r = await lcu.request("PATCH", `/lol-champ-select/v1/session/actions/${actionId}`, completed ? { championId, completed: true } : { championId });
-    return r.status >= 200 && r.status < 300;
+    const path = `/lol-champ-select/v1/session/actions/${actionId}`;
+    const ok = (r: { status: number }) => r.status >= 200 && r.status < 300;
+    if (!completed) return ok(await lcu.request("PATCH", path, { championId }));
+    if (ok(await lcu.request("PATCH", path, { championId, completed: true }))) return true;
+    // Alguns clientes recusam travar no mesmo PATCH: marca o campeão e confirma em separado.
+    if (!ok(await lcu.request("PATCH", path, { championId }))) return false;
+    return ok(await lcu.request("POST", `${path}/complete`));
   }
 
   async function selectTick() {
@@ -151,8 +156,9 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
           const ban = chooseBan(s, await ids("/lol-champ-select/v1/bannable-champion-ids"), config.ban.champion);
           if (ban.id) {
             if (await lock(a.id, ban.id, true)) { handled.add(a.id); log("ok", `${nameOf(ban.id)} banido`); }
+            else warnOnce(`banfail${a.id}`, `O cliente recusou o ban de ${nameOf(ban.id)}. Tentando de novo…`);
           } else {
-            handled.add(a.id);
+            // Sem desistir: o aliado pode trocar de campeão antes do fim da vez.
             warnOnce(`ban${a.id}`, ban.reason === "aliado" ? `Não bani ${nameOf(config.ban.champion)}: um aliado quer jogar com ele. Escolha o ban.` : `${nameOf(config.ban.champion)} não pode ser banido agora. Escolha o ban.`);
           }
         }
@@ -338,12 +344,13 @@ export function createAutomations(opts: { lcu: Lcu; dir: string; onStatus: (s: A
   async function skins(): Promise<Skin[]> {
     if (skinsCache) return skinsCache;
     await needClient();
-    const r = await lcu.request("GET", "/lol-game-data/assets/v1/skins.json");
+    const r = await lcu.request("GET", "/lol-game-data/assets/v1/skins.json", undefined, "lcu", 30_000); // arquivo grande
     if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error("Não consegui carregar as skins.");
     const list = await champs();
     const champName = (id: number) => list.find((c) => c.id === Math.floor(id / 1000))?.name ?? "";
     const out: Skin[] = [];
-    for (const [key, v] of Object.entries(r.data as Record<string, any>)) {
+    const entries: [string, any][] = Array.isArray(r.data) ? (r.data as any[]).map((v) => [String(v?.id), v]) : Object.entries(r.data as Record<string, any>);
+    for (const [key, v] of entries) {
       const id = Number(v?.id ?? key);
       if (!Number.isInteger(id) || id <= 0) continue;
       const champion = champName(id);

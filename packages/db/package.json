@@ -11,7 +11,7 @@
     "test": "vitest run --testTimeout=20000"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.3.0",
+    "@electric-sql/pglite": "^0.5.16",
     "drizzle-orm": "^0.44.0",
     "postgres": "^3.4.0"
   },

@@ -83,7 +83,8 @@ export class Voice {
       const token = await this.api.voiceToken(channelId);
       if (generation !== this.generation) return;
       await AudioSession.configureAudio({ ios: { defaultOutput: "speaker" } });
-      await AudioSession.setDefaultRemoteAudioTrackVolume(this.state.deafened ? 0 : 1);
+      // New tracks start silent; TrackSubscribed applies voice/screen volume separately.
+      await AudioSession.setDefaultRemoteAudioTrackVolume(0);
       await AudioSession.startAudioSession();
       if (generation !== this.generation) return;
       room = new Room({ adaptiveStream: true, dynacast: true, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, videoCaptureDefaults: { facingMode: "user", resolution: { width: 1280, height: 720, frameRate: 30 } }, publishDefaults: { dtx: true, videoCodec: "h264" } });
@@ -95,7 +96,7 @@ export class Voice {
         this.refresh();
       });
       room.on(RoomEvent.Reconnecting, () => this.set({ status: "reconnecting" }));
-      room.on(RoomEvent.Reconnected, () => { this.set({ status: "connected" }); this.refresh(); });
+      room.on(RoomEvent.Reconnected, () => { if (this.room !== room) return; this.set({ status: "connected" }); this.syncSubscriptions(); this.refresh(); });
       room.on(RoomEvent.Disconnected, reason => {
         if (generation !== this.generation || this.state.status === "connecting") return;
         const terminal = [DisconnectReason.CLIENT_INITIATED, DisconnectReason.PARTICIPANT_REMOVED, DisconnectReason.DUPLICATE_IDENTITY, DisconnectReason.ROOM_DELETED].includes(reason!);
@@ -208,7 +209,10 @@ export class Voice {
       if (publication.track instanceof RemoteAudioTrack) {
         const values = this.volumes.get(participant.identity);
         const screenAudio = publication.source === Track.Source.ScreenShareAudio;
-        publication.track.setVolume(this.state.deafened || screenAudio && !this.isWatching(participant) ? 0 : screenAudio ? values?.screen ?? 1 : values?.voice ?? 1);
+        const volume = screenAudio
+          ? this.isWatching(participant) ? values?.screen ?? 1 : 0
+          : this.state.deafened ? 0 : values?.voice ?? 1;
+        publication.track.setVolume(volume);
       }
     }
   }
@@ -284,7 +288,6 @@ export class Voice {
     try {
       // Deafening always mutes capture; returning to listening never reopens the mic.
       if (deafened) await room.localParticipant.setMicrophoneEnabled(false);
-      await AudioSession.setDefaultRemoteAudioTrackVolume(deafened ? 0 : 1);
       this.set({ deafened });
       this.applyVolumes();
     } catch { this.set({ error: "Não foi possível alterar o áudio. Tente novamente." }); }

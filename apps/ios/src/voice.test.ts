@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceReport } from "./gateway";
 
 const fake = vi.hoisted(() => {
-  class AudioTrack { kind = "audio"; setVolume = vi.fn(); }
+  class AudioTrack { kind = "audio"; setVolume = vi.fn<(volume: number) => void>(); }
   class Room {
     static instances: Room[] = [];
     localParticipant = { isCameraEnabled: false, getTrackPublication: vi.fn(), setCameraEnabled: vi.fn(async (enabled: boolean) => { this.localParticipant.isCameraEnabled = enabled; }), identity: "local", name: "Amigo", isSpeaking: false, isMicrophoneEnabled: false, connectionQuality: "excellent", setMicrophoneEnabled: vi.fn(async (enabled: boolean) => { this.localParticipant.isMicrophoneEnabled = enabled; }) };
@@ -291,7 +291,7 @@ describe("camera and screen subscriptions", () => {
     expect(mic.setSubscribed).toHaveBeenLastCalledWith(true);
     await voice.leave();
   });
-  it("keeps independent voice and screen volumes and applies deafening to both", async () => {
+  it("silences only the voices and preserves the watched screen volume", async () => {
     const { voice, mic, audio } = await receivingScreen();
     const micTrack = mic.track!, screenTrack = audio.track!;
     voice.setVolume("friend", "voice", 0.5); voice.setVolume("friend", "screen", 0.25);
@@ -299,7 +299,7 @@ describe("camera and screen subscriptions", () => {
     expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
     await voice.toggleDeafened();
     expect(micTrack.setVolume).toHaveBeenLastCalledWith(0);
-    expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0);
+    expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
     await voice.toggleDeafened();
     expect(micTrack.setVolume).toHaveBeenLastCalledWith(0.5);
     expect(screenTrack.setVolume).toHaveBeenLastCalledWith(0.25);
@@ -334,6 +334,100 @@ async function receivingScreen() {
 }
 
 describe("screen audio cleanup", () => {
+  it("starts new native tracks silent and applies source-specific volumes without changing the global default", async () => {
+    const { voice, room, participant, mic, audio } = await receivingScreen();
+    expect(fake.audio.setDefaultRemoteAudioTrackVolume).toHaveBeenCalledExactlyOnceWith(0);
+    await voice.toggleDeafened();
+    const newVoice = new fake.AudioTrack(), newScreen = new fake.AudioTrack();
+    mic.track = newVoice; audio.track = newScreen;
+    voice.setVolume(participant.identity, "screen", 0.4);
+    room.emit("trackSubscribed", newVoice, mic, participant);
+    room.emit("trackSubscribed", newScreen, audio, participant);
+    expect(newVoice.setVolume.mock.calls.every(([level]) => level === 0)).toBe(true);
+    expect(newScreen.setVolume).toHaveBeenLastCalledWith(0.4);
+    expect(fake.audio.setDefaultRemoteAudioTrackVolume).toHaveBeenCalledExactlyOnceWith(0);
+    await voice.toggleDeafened();
+    expect(fake.audio.setDefaultRemoteAudioTrackVolume).toHaveBeenCalledExactlyOnceWith(0);
+    await voice.leave();
+  });
+  it("can watch a screen first published while voices are already silenced", async () => {
+    const { voice, room, participant, publications, mic, screen, audio } = await receivingScreen();
+    voice.watchScreen(screen.trackSid, false);
+    publications.delete(screen.trackSid);
+    room.emit("trackUnpublished", screen, participant);
+    await voice.toggleDeafened();
+    const next = { ...screen, trackSid: "screen-after-silencing" };
+    publications.set(next.trackSid, next);
+    room.emit("trackPublished", next, participant);
+    voice.watchScreen(next.trackSid, true);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(1);
+    expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+  it("preserves zero screen volume through repeated toggles and foreground transitions", async () => {
+    const { voice, participant, mic, audio } = await receivingScreen();
+    voice.setVolume(participant.identity, "voice", 0.6);
+    voice.setVolume(participant.identity, "screen", 0);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await voice.toggleDeafened();
+      voice.foreground();
+      expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0);
+      expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+      await voice.toggleDeafened();
+      expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0.6);
+      expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    }
+    expect(voice.getSnapshot().screens[0]!.volume).toBe(0);
+    await voice.leave();
+  });
+  it("reapplies separate levels when the media connection recovers", async () => {
+    const { voice, room, participant, mic, audio } = await receivingScreen();
+    voice.setVolume(participant.identity, "screen", 0.3);
+    await voice.toggleDeafened();
+    mic.track!.setVolume(1); audio.track!.setVolume(1);
+    room.emit("reconnecting");
+    room.emit("reconnected");
+    expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0.3);
+    voice.setVideoVisible(false);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    voice.setVideoVisible(true);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0.3);
+    expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+  it("preserves separate volumes and closed capture after joining a fresh room during recovery", async () => {
+    vi.useFakeTimers();
+    const { voice, room, participant, screen, audio, mic } = await receivingScreen();
+    voice.setVolume(participant.identity, "screen", 0.2);
+    await voice.toggleDeafened();
+    room.emit("disconnected", 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    const recovered = fake.Room.instances[1]!;
+    recovered.remoteParticipants.set(participant.identity, participant);
+    recovered.emit("trackPublished", screen, participant);
+    voice.watchScreen(screen.trackSid, true);
+    expect(voice.getSnapshot()).toMatchObject({ status: "connected", deafened: true, muted: true });
+    expect(recovered.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(mic.track!.setVolume).toHaveBeenLastCalledWith(0);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0.2);
+    expect(fake.audio.setDefaultRemoteAudioTrackVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+  it("does not reopen the microphone during toggles and keeps orphan cleanup while silenced", async () => {
+    const { voice, room, participant, publications, screen, audio } = await receivingScreen();
+    await voice.toggleMute();
+    expect(voice.getSnapshot().muted).toBe(false);
+    room.localParticipant.setMicrophoneEnabled.mockClear();
+    for (let cycle = 0; cycle < 3; cycle++) { await voice.toggleDeafened(); await voice.toggleDeafened(); }
+    expect(room.localParticipant.setMicrophoneEnabled.mock.calls.every(([enabled]) => !enabled)).toBe(true);
+    await voice.toggleDeafened();
+    publications.delete(screen.trackSid);
+    room.emit("trackUnpublished", screen, participant);
+    expect(audio.track!.setVolume).toHaveBeenLastCalledWith(0);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    await voice.leave();
+  });
   it("unsubscribes and silences orphaned screen audio as soon as video is unpublished", async () => {
     const { voice, room, participant, publications, mic, screen, audio } = await receivingScreen();
     publications.delete(screen.trackSid);

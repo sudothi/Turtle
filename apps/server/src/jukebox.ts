@@ -121,6 +121,8 @@ export function jukeboxService(opts: JukeboxOptions) {
   const onDisk = new Map<string, string>();
   for (const f of readdirSync(cacheDir)) if (FILE.test(f) && audioType(f)) onDisk.set(f.slice(0, f.lastIndexOf(".")), f);
   const downloads = new Map<string, Promise<string>>();
+  const removals = new Map<string, Promise<void>>();
+  let eviction = Promise.resolve();
   const covers = new Map<string, Promise<boolean>>();
   /** Capas já gravadas: só elas vão no estado (URL antes do arquivo existir viraria imagem quebrada). */
   const coverReady = new Set<string>();
@@ -183,10 +185,21 @@ export function jukeboxService(opts: JukeboxOptions) {
     return job;
   }
 
-  /** Apaga os arquivos mais antigos até o cache caber no limite (menos os que estão na fila). */
-  async function evict() {
-    const keep = new Set<string>();
-    for (const b of boxes.values()) for (const i of [b.current, ...b.queue]) if (i) keep.add(i.key);
+  function inUse(key: string) {
+    if (downloads.has(key)) return true;
+    for (const b of boxes.values()) if ([b.current, ...b.queue].some((i) => i?.key === key)) return true;
+    return false;
+  }
+
+  /** Uma limpeza por vez, para não remover arquivos com base em totais de outra limpeza. */
+  function evict() {
+    const job = eviction.then(evictUnused);
+    eviction = job.catch(() => {});
+    return job;
+  }
+
+  /** Apaga os mais antigos; fila e downloads podem mudar durante as consultas ao disco. */
+  async function evictUnused() {
     const files = await readdir(cacheDir).catch(() => [] as string[]);
     const list = (await Promise.all(files.filter((f) => FILE.test(f)).map(async (f) => ({ f, s: await stat(join(cacheDir, f)).catch(() => null) }))))
       .filter((x) => x.s?.isFile()) as { f: string; s: import("node:fs").Stats }[];
@@ -194,15 +207,25 @@ export function jukeboxService(opts: JukeboxOptions) {
     for (const x of list.sort((a, b) => a.s.mtimeMs - b.s.mtimeMs)) {
       if (total <= cacheBytes) break;
       const key = x.f.slice(0, x.f.lastIndexOf("."));
-      if (keep.has(key)) continue;
-      await rm(join(cacheDir, x.f), { force: true });
+      if (inUse(key)) continue;
+      // Não anuncie um cache hit enquanto o arquivo está sendo removido. Um novo
+      // pedido aguarda a remoção antes de gravar outro arquivo com o mesmo nome.
       onDisk.delete(key);
+      const removal = rm(join(cacheDir, x.f), { force: true });
+      removals.set(key, removal);
+      try {
+        await removal;
+      } finally {
+        removals.delete(key);
+      }
       total -= x.s.size;
     }
   }
 
   /** Arquivo de áudio da faixa no cache (baixa uma vez só, mesmo que várias chamadas peçam juntas). */
   function ensureAudio(t: Track): Promise<string> {
+    const removal = removals.get(t.key);
+    if (removal) return removal.catch(() => {}).then(() => ensureAudio(t));
     const have = onDisk.get(t.key);
     if (have) return Promise.resolve(have);
     let job = downloads.get(t.key);
@@ -349,6 +372,7 @@ export function jukeboxService(opts: JukeboxOptions) {
     b.votes.clear();
     b.startedAt = null;
     b.pausedAt = b.autoPaused && b.current ? 0 : null;
+    void evict().catch(() => {});
     if (!b.current) return emit(b);
     prefetch(b);
     void begin(b, b.current);
@@ -359,6 +383,7 @@ export function jukeboxService(opts: JukeboxOptions) {
     clearTimeout(b.idle);
     clearTimeout(b.noticeTimer);
     boxes.delete(b.channelId);
+    void evict().catch(() => {});
     emit(b);
   }
 
@@ -446,6 +471,7 @@ export function jukeboxService(opts: JukeboxOptions) {
       if (!b || i < 0) return false;
       if (!manager && b.queue[i]!.addedBy !== userId) return "forbidden";
       b.queue.splice(i, 1);
+      void evict().catch(() => {});
       if (i === 0) prefetch(b);
       emit(b);
       return true;

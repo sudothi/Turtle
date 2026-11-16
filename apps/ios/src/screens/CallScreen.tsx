@@ -11,8 +11,8 @@ import { useCall, useDirectory, useRead, useWorkspace } from "../workspace-conte
 import { callStatus } from "../navigation/call-access";
 import { useAppNavigation } from "../navigation/types";
 
-function CallControl({ name, label, onPress, disabled, hangup }: { name: IconName; label: string; onPress: () => void; disabled?: boolean; hangup?: boolean }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.control, hangup && { width: 64, backgroundColor: colors.paper }, (pressed || disabled) && { opacity: disabled ? 0.35 : 0.65 }]}><Icon name={name} color={hangup ? colors.rail : colors.paper} size={24} /></Pressable>;
+function CallControl({ name, label, onPress, disabled, hangup, selected }: { name: IconName; label: string; onPress: () => void; disabled?: boolean; hangup?: boolean; selected?: boolean }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled, selected }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.control, hangup && { width: 64, backgroundColor: colors.paper }, (pressed || disabled) && { opacity: disabled ? 0.35 : 0.65 }]}><Icon name={name} color={hangup ? colors.rail : colors.paper} size={24} /></Pressable>;
 }
 export default function CallScreen() {
   const call = useCall();
@@ -53,7 +53,7 @@ export default function CallScreen() {
     </ScrollView>
     <View style={s.controls}>
       <CallControl name={call.muted ? "mic-off" : "mic"} label={call.muted ? "Abrir microfone" : "Fechar microfone"} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} />
-      <CallControl name={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir" : "Ensurdecer"} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />
+      <CallControl name={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir as vozes" : "Silenciar vozes da conversa"} selected={call.deafened} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />
       <CallControl name={call.camera ? "video" : "video-off"} label={call.camera ? "Desligar câmera" : "Ligar câmera"} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleCamera(); }} />
       {call.camera && <CallControl name="camera-flip" label="Trocar câmera" disabled={call.busy} onPress={() => { void workspace.voice.flipCamera(); }} />}
       <CallControl name="speaker" label="Saída de áudio" disabled={call.status !== "connected"} onPress={() => { void AudioSession.showAudioRoutePicker().catch(() => setError("Não foi possível abrir as saídas de áudio.")); }} />

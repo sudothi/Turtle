@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -213,11 +214,27 @@ private fun PersonTile(state: UiState, vm: AppViewModel, p: ParticipantUi) {
 @Composable
 private fun ScreenTile(state: UiState, vm: AppViewModel, p: ParticipantUi) {
     val who = whoIs(state, vm, p.identity)
+    var volumeOpen by remember(p.identity) { mutableStateOf(false) }
+    if (volumeOpen) {
+        TurtleDialog(title = "Áudio da tela de ${who.name}", confirmText = "Fechar", onDismiss = { volumeOpen = false }, onConfirm = { volumeOpen = false }) {
+            Column {
+                Text("${(p.screenVolume * 100).roundToInt()}%", color = Ink.Paper)
+                Slider(
+                    value = p.screenVolume, valueRange = 0f..2f,
+                    onValueChange = { vm.voice.setScreenVolume(p.identity, it) },
+                    colors = SliderDefaults.colors(thumbColor = Ink.Paper, activeTrackColor = Ink.Paper, inactiveTrackColor = Ink.Ink2),
+                )
+                Text("Este volume não muda ao silenciar as vozes da conversa.", style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
+            }
+        }
+    }
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Ink.Ink0).border(1.dp, Ink.Paper, shape)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
             if (p.screen != null) {
                 VideoView(p.screen, vm, Modifier.fillMaxSize(), fill = false, mirror = false)
+            } else if (p.watchingScreen) {
+                Text("Conectando transmissão…", color = Ink.Muted)
             } else {
                 Button(
                     onClick = { vm.voice.watchScreen(p.identity, true) },
@@ -231,7 +248,11 @@ private fun ScreenTile(state: UiState, vm: AppViewModel, p: ParticipantUi) {
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("AO VIVO · ${who.name}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (p.screen != null) {
+            if (p.watchingScreen) {
+                OutlinedButton(onClick = { volumeOpen = true }, border = BorderStroke(1.dp, Ink.Line), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) {
+                    Text("Áudio · ${(p.screenVolume * 100).roundToInt()}%", color = Ink.Paper)
+                }
+                Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { vm.voice.watchScreen(p.identity, false) }, border = BorderStroke(1.dp, Ink.Line), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) {
                     Text("Parar", color = Ink.Paper)
                 }
@@ -247,7 +268,7 @@ private fun ControlBar(call: xyz.ogturtle.turtle.data.CallUi, vm: AppViewModel, 
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         RoundButton(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (call.muted) "Ligar microfone" else "Silenciar", active = !call.muted, onClick = vm::toggleMute)
-        RoundButton(if (call.deafened) Icons.Filled.HeadsetOff else Icons.Filled.Headset, if (call.deafened) "Ouvir" else "Ensurdecer", active = !call.deafened, onClick = vm::toggleDeafen)
+        RoundButton(if (call.deafened) Icons.Filled.HeadsetOff else Icons.Filled.Headset, if (call.deafened) "Voltar a ouvir a conversa" else "Silenciar vozes da conversa", active = !call.deafened, onClick = vm::toggleDeafen)
         RoundButton(if (call.cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, if (call.cameraOn) "Desligar câmera" else "Ligar câmera", active = call.cameraOn, onClick = onCamera)
         RoundButton(Icons.Filled.CallEnd, "Sair da chamada", active = true, danger = true, onClick = vm::leaveCall)
     }

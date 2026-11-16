@@ -254,7 +254,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A chamada caiu sem a pessoa sair: tenta voltar com espera crescente (pouco mais de 2 min no total, igual ao web). */
     private var rejoin: kotlinx.coroutines.Job? = null
-    private fun rejoinCall(channelId: String) {
+    private fun rejoinCall(channelId: String, muted: Boolean, deafened: Boolean) {
         rejoin?.cancel()
         rejoin = viewModelScope.launch {
             for (wait in listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 30_000L, 30_000L)) {
@@ -262,7 +262,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (_state.value.user == null || _state.value.call != null) return@launch
                 try {
                     val t = api.voiceToken(channelId)
-                    voice.join(channelId, t.url, t.token)
+                    voice.join(channelId, t.url, t.token, muted = muted, deafened = deafened)
                     return@launch
                 } catch (e: ApiException) {
                     if (e.status in 400..499) break // sem permissão ou canal apagado: não adianta insistir

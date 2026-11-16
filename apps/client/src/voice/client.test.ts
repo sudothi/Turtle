@@ -19,7 +19,7 @@ vi.mock("livekit-client", async original => {
   }
   return { ...sdk, Room, createLocalAudioTrack: vi.fn(async () => { throw new Error("listen only"); }) };
 });
-import { RoomEvent, Track } from "livekit-client";
+import { createLocalAudioTrack, DisconnectReason, type LocalAudioTrack, RoomEvent, Track } from "livekit-client";
 import { VoiceClient } from "./client";
 
 function publication(source: Track.Source, sid = source as string) {
@@ -37,6 +37,7 @@ class Participant {
   get isScreenShareEnabled() { return !!this.getTrackPublication(Track.Source.ScreenShare); }
   getTrackPublication(source: Track.Source) { return [...this.trackPublications.values()].find(p => p.source === source); }
   setVolume = vi.fn((value: number, source: Track.Source) => { this.getTrackPublication(source)?.track.setVolume(value); });
+  publishTrack = vi.fn(async () => {});
   setScreenShareEnabled = vi.fn(async (enabled: boolean) => {
     if (enabled) return;
     // SDK only removes the pair when the video publication still exists.
@@ -61,9 +62,113 @@ async function setup() {
 }
 beforeEach(() => {
   fake.rooms.length = 0;
+  vi.clearAllMocks();
   vi.stubGlobal("document", { querySelectorAll: () => [], body: { appendChild: vi.fn() } });
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe("independent conversation and screen audio", () => {
+  it("silences voices while keeping the watched screen at its chosen volume", async () => {
+    const { voice, participant, audio, mic } = await receiving();
+    voice.setVolume(participant.identity, 0.6);
+    voice.setStreamVolume(participant.identity, 0.35);
+    await voice.toggleDeafen();
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(0);
+    expect(mic.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(mic.track.attachedElements).toHaveLength(0);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0.35);
+    await voice.toggleDeafen();
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(0.6);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0.35);
+    await voice.leave();
+  });
+  it("can start watching a newly published screen while voices are already silenced", async () => {
+    const { voice, room } = await setup();
+    await voice.toggleDeafen();
+    const participant = new Participant("friend");
+    const video = publication(Track.Source.ScreenShare), audio = publication(Track.Source.ScreenShareAudio), mic = publication(Track.Source.Microphone);
+    for (const pub of [video, audio, mic]) participant.trackPublications.set(pub.trackSid, pub);
+    room.remoteParticipants.set(participant.identity, participant);
+    room.emit(RoomEvent.ParticipantConnected, participant);
+    voice.setStreamVolume(participant.identity, 0.4);
+    voice.watch(participant.identity);
+    room.emit(RoomEvent.TrackSubscribed, audio.track, audio, participant);
+    room.emit(RoomEvent.TrackSubscribed, mic.track, mic, participant);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0.4);
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(0);
+    expect(mic.track.attach).not.toHaveBeenCalled();
+    await voice.leave();
+  });
+  it("preserves a zero screen volume when conversation audio is toggled", async () => {
+    const { voice, participant, video, audio, mic } = await receiving();
+    voice.setStreamVolume(participant.identity, 0);
+    await voice.toggleDeafen();
+    await voice.toggleDeafen();
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(video.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(1);
+    expect(voice.getSnapshot().prefs.streamVolumes[participant.identity]).toBe(0);
+    await voice.leave();
+  });
+  it("never reopens the microphone when returning to conversation audio, while explicit unmute still works", async () => {
+    const mic = { mute: vi.fn(async () => {}), unmute: vi.fn(async () => {}), stop: vi.fn(), getProcessor: vi.fn(), setProcessor: vi.fn(async () => {}) };
+    vi.mocked(createLocalAudioTrack).mockResolvedValueOnce(mic as unknown as LocalAudioTrack);
+    const { voice } = await setup();
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await voice.toggleDeafen();
+      await voice.toggleDeafen();
+    }
+    expect(voice.getSnapshot()).toMatchObject({ muted: true, deafened: false });
+    expect(mic.unmute).not.toHaveBeenCalled();
+    await voice.toggleMute();
+    expect(mic.unmute).toHaveBeenCalledOnce();
+    expect(voice.getSnapshot()).toMatchObject({ muted: false, deafened: false });
+    await voice.leave();
+  });
+  it("reapplies separate levels after a media reconnection", async () => {
+    const { voice, room, participant, audio, mic } = await receiving();
+    voice.setStreamVolume(participant.identity, 0.25);
+    await voice.toggleDeafen();
+    audio.track.setVolume(1); mic.track.setVolume(1);
+    room.emit(RoomEvent.Reconnecting);
+    room.emit(RoomEvent.Reconnected);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0.25);
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+  it("keeps screen audio separate after rejoining with a fresh room", async () => {
+    vi.useFakeTimers();
+    const { voice, room, participant, audio, mic } = await receiving();
+    voice.setStreamVolume(participant.identity, 0.3);
+    await voice.toggleDeafen();
+    room.emit(RoomEvent.Disconnected, DisconnectReason.SIGNAL_CLOSE);
+    await vi.advanceTimersByTimeAsync(1000);
+    const recovered = fake.rooms.at(-1)!;
+    expect(recovered).not.toBe(room);
+    recovered.remoteParticipants.set(participant.identity, participant);
+    recovered.emit(RoomEvent.ParticipantConnected, participant);
+    voice.watch(participant.identity);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0.3);
+    expect(mic.track.setVolume).toHaveBeenLastCalledWith(0);
+    expect(voice.getSnapshot()).toMatchObject({ status: "connected", deafened: true, muted: true });
+    await voice.leave();
+    vi.useRealTimers();
+  });
+  it("still cuts screen audio immediately when watching or transmission ends while voices are silenced", async () => {
+    const { voice, room, participant, video, audio } = await receiving();
+    await voice.toggleDeafen();
+    voice.unwatch(participant.identity);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0);
+    voice.watch(participant.identity);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(1);
+    participant.trackPublications.delete(video.trackSid);
+    room.emit(RoomEvent.TrackUnpublished, video, participant);
+    expect(audio.setSubscribed).toHaveBeenLastCalledWith(false);
+    expect(audio.track.setVolume).toHaveBeenLastCalledWith(0);
+    await voice.leave();
+  });
+});
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("ending screen capture", () => {
   it("stops the paired audio when the browser ends only the video", async () => {

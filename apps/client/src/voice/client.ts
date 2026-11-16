@@ -321,13 +321,14 @@ export class VoiceClient {
   }
 
   async toggleDeafen() {
-    // Ensurdecer também muta; sair do ensurdecer volta a falar.
+    // Silenciar as vozes fecha o microfone; voltar a ouvir não reabre a captura.
     const deafened = !this.snap.deafened;
-    await this.setMuteDeaf(deafened, deafened);
+    await this.setMuteDeaf(deafened || this.snap.muted, deafened);
   }
 
   private async setMuteDeaf(muted: boolean, deafened: boolean) {
     this.set({ muted, deafened });
+    this.syncAll();
     if (this.mic) await (muted ? this.mic.mute() : this.mic.unmute());
     else if (!muted && this.room) {
       // Entrou sem microfone: tenta de novo agora.
@@ -342,7 +343,6 @@ export class VoiceClient {
         this.set({ muted: true, error: `Sem acesso ao microfone (${(err as Error).message}).` });
       }
     }
-    this.applyVolumes();
     if (this.snap.channelId) this.reportState();
     this.refresh();
   }
@@ -608,7 +608,7 @@ export class VoiceClient {
 
   setVolume(userId: string, volume: number) {
     this.savePrefs({ volumes: { ...this.snap.prefs.volumes, [userId]: volume } });
-    this.applyVolumes();
+    this.syncAll();
   }
 
   /** Silenciar uma pessoa só para mim (os outros continuam ouvindo). */
@@ -617,13 +617,13 @@ export class VoiceClient {
     if (muted) localMutes[userId] = true;
     else delete localMutes[userId];
     this.savePrefs({ localMutes });
-    this.applyVolumes();
+    this.syncAll();
   }
 
   /** Volume do áudio da transmissão de tela de uma pessoa (separado da voz dela). */
   setStreamVolume(userId: string, volume: number) {
     this.savePrefs({ streamVolumes: { ...this.snap.prefs.streamVolumes, [userId]: volume } });
-    this.applyVolumes();
+    this.syncAll();
   }
 
   async unlockAudio() {
@@ -643,7 +643,7 @@ export class VoiceClient {
 
   private streamVolumeFor(userId: string) {
     const participant = this.room?.remoteParticipants.get(userId);
-    return this.snap.deafened || !participant || !this.isWatching(participant) ? 0 : (this.snap.prefs.streamVolumes[userId] ?? 1);
+    return !participant || !this.isWatching(participant) ? 0 : (this.snap.prefs.streamVolumes[userId] ?? 1);
   }
 
   private applyVolume(p: RemoteParticipant) {
@@ -651,20 +651,20 @@ export class VoiceClient {
     p.setVolume(this.streamVolumeFor(p.identity), Track.Source.ScreenShareAudio);
   }
 
-  private applyVolumes() {
-    if (!this.room) return;
-    for (const p of this.room.remoteParticipants.values()) this.applyVolume(p);
-  }
-
-  /** Voz e câmera sempre; transmissão de tela (e o áudio dela) só de quem você escolheu assistir. */
+  /** A transmissão depende de Assistir, sem depender do silenciamento das vozes. */
   private isWatching(p: RemoteParticipant) {
     const screen = p.getTrackPublication(Track.Source.ScreenShare);
     return !!screen && !screen.isMuted && this.watching.has(p.identity);
   }
 
+  private wantsPublication(pub: RemoteTrackPublication, p: RemoteParticipant) {
+    if (pub.source === Track.Source.Microphone) return this.volumeFor(p.identity) > 0;
+    if (pub.source === Track.Source.ScreenShareAudio) return this.streamVolumeFor(p.identity) > 0;
+    return pub.source !== Track.Source.ScreenShare || this.isWatching(p);
+  }
+
   private syncPub(pub: RemoteTrackPublication, p: RemoteParticipant) {
-    const isScreen = pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio;
-    const want = !isScreen || this.isWatching(p);
+    const want = this.wantsPublication(pub, p);
     const asked = this.asked.has(pub.trackSid);
     if (want && !asked) {
       this.asked.add(pub.trackSid);
@@ -673,10 +673,10 @@ export class VoiceClient {
       this.asked.delete(pub.trackSid);
       pub.setSubscribed(false);
     }
-    if (pub.source === Track.Source.ScreenShareAudio && pub.track) {
+    if (pub.track?.kind === Track.Kind.Audio) {
       if (want) this.attachAudio(pub.track, p);
       else {
-        p.setVolume(0, Track.Source.ScreenShareAudio);
+        p.setVolume(0, pub.source === Track.Source.ScreenShareAudio ? Track.Source.ScreenShareAudio : Track.Source.Microphone);
         this.detachAudio(pub.track);
       }
     }
@@ -690,12 +690,12 @@ export class VoiceClient {
   }
 
   private attachAudio(track: RemoteTrack, p: RemoteParticipant) {
+    this.applyVolume(p);
     if (!track.attachedElements.length) {
       const el = track.attach();
       el.dataset.turtleAudio = track.sid ?? p.identity;
       document.body.appendChild(el);
     }
-    this.applyVolume(p);
   }
 
   private detachAudio(track: RemoteTrack) {
@@ -824,8 +824,8 @@ export class VoiceClient {
         if (this.room !== room) return;
         this.syncSubscriptions(p);
         if (track.kind === Track.Kind.Audio) {
-          if (pub.source === Track.Source.ScreenShareAudio && !this.isWatching(p)) {
-            p.setVolume(0, Track.Source.ScreenShareAudio);
+          if (!this.wantsPublication(pub, p)) {
+            p.setVolume(0, pub.source === Track.Source.ScreenShareAudio ? Track.Source.ScreenShareAudio : Track.Source.Microphone);
             this.detachAudio(track);
           } else this.attachAudio(track, p);
         }

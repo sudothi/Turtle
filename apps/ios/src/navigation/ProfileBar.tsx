@@ -10,8 +10,8 @@ import { colors, fonts, styles as text } from "../ui/theme";
 import { useAppNavigation } from "./types";
 import { callStatus } from "./call-access";
 
-function ProfileAction({ icon, label, onPress, disabled = false }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean }) {
-  return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, pressed && { backgroundColor: colors.active }, disabled && { opacity: 0.35 }]}><Icon name={icon} color={colors.paperDim} /><Text style={[text.label, { flex: 1 }]}>{label}</Text></Pressable>;
+function ProfileAction({ icon, label, onPress, disabled = false, selected }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean; selected?: boolean }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ disabled, selected }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, pressed && { backgroundColor: colors.active }, disabled && { opacity: 0.35 }]}><Icon name={icon} color={colors.paperDim} /><Text style={[text.label, { flex: 1 }]}>{label}</Text></Pressable>;
 }
 
 /** Floating account access across both navigation columns; media stays in WorkspaceSession. */
@@ -62,7 +62,7 @@ export default function ProfileBar({ onHeightChange }: { onHeightChange: (height
               <Notice>{call.error}</Notice>
               <ProfileAction icon="speaker" label="Abrir chamada e áudio" onPress={() => openRoute("Call")} />
               <ProfileAction icon={call.muted ? "mic-off" : "mic"} label={call.muted ? "Abrir microfone" : "Fechar microfone"} disabled={call.status !== "connected" || call.busy || call.deafened} onPress={() => { void workspace.voice.toggleMute(); }} />
-              <ProfileAction icon={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir" : "Ensurdecer"} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />
+              <ProfileAction icon={call.deafened ? "headphones-off" : "headphones"} label={call.deafened ? "Voltar a ouvir as vozes" : "Silenciar vozes da conversa"} selected={call.deafened} disabled={call.status !== "connected" || call.busy} onPress={() => { void workspace.voice.toggleDeafened(); }} />
               <ProfileAction icon="phone-off" label="Sair da chamada" disabled={call.status === "leaving"} onPress={() => { void workspace.voice.leave(); }} />
               <View style={s.divider} />
             </>}

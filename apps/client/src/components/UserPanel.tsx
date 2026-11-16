@@ -119,7 +119,7 @@ export function UserPanel({
         <IconButton label="Mudo" aria-pressed={snap.muted} className={snap.muted ? "is-off" : ""} onClick={() => void voice.toggleMute()}>
           <Icon name={snap.muted ? "mic-off" : "mic"} />
         </IconButton>
-        <IconButton label="Ensurdecer" aria-pressed={snap.deafened} className={snap.deafened ? "is-off" : ""} onClick={() => void voice.toggleDeafen()}>
+        <IconButton label="Ensurdecer" aria-label={snap.deafened ? "Voltar a ouvir as vozes" : "Silenciar vozes da conversa"} aria-description="O áudio da transmissão tem volume independente." aria-pressed={snap.deafened} className={snap.deafened ? "is-off" : ""} onClick={() => void voice.toggleDeafen()}>
           <Icon name={snap.deafened ? "headphones-off" : "headphones"} />
         </IconButton>
         <IconButton label="Configurações de voz" onClick={onSettings}>

@@ -122,6 +122,7 @@ export function prompter(interactive = true) {
     }
   };
   return {
+    interactive: !!rl,
     async ask(/** @type {string} */ q, def = "") {
       if (!rl) return def;
       const a = (await read(`  ${q}${def ? dim(` [${def}]`) : ""} `)).trim();

@@ -1,6 +1,6 @@
 // Os comandos do Turtle Setup. Cada um recebe as opções já lidas da linha de comando.
 import { resolve4 } from "node:dns/promises";
-import { buildConfig, loadSaved, save } from "./config.mjs";
+import { buildConfig, loadSaved, save, validHost, validIp, validUser } from "./config.mjs";
 import { findLatestRelease, localInstallerAssets, stageInstaller, tarStream } from "./desktop.mjs";
 import { run, sshHelp } from "./ssh.mjs";
 import { backupScript, installSteps, inviteScript, logsScript, publishDesktopScript, statusScript, updateScript } from "./steps.mjs";
@@ -13,9 +13,18 @@ async function resolveConfig(/** @type {Record<string, any>} */ o, /** @type {Re
   const saved = loadSaved();
   /** @type {Record<string, any>} */
   const merged = { ...saved, ...Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) };
-  if (!merged.ip) merged.ip = await p.ask("IP da VPS:");
-  if (!merged.user) merged.user = await p.ask("Usuário SSH (com sudo sem senha):", "ubuntu");
-  if (askDomain && !merged.app && !merged.domain) merged.domain = await p.ask("Seu domínio (ex.: seudominio.com):");
+  /** Pergunta até vir um valor válido (no modo não interativo, devolve o padrão e o erro aparece depois). */
+  const askValid = async (/** @type {string} */ q, /** @type {(s: string) => boolean} */ ok, /** @type {string} */ msg, def = "") => {
+    for (;;) {
+      const a = await p.ask(q, def);
+      if (ok(a) || !p.interactive) return a;
+      fail(msg);
+    }
+  };
+  if (!merged.ip) merged.ip = await askValid("IP da VPS:", validIp, "IP inválido. Use o formato 203.0.113.10.");
+  if (!merged.user) merged.user = await askValid("Usuário SSH (com sudo sem senha):", validUser, "Usuário inválido: letras minúsculas, números, - e _.", "ubuntu");
+  if (askDomain && !merged.app && !merged.domain)
+    merged.domain = await askValid("Seu domínio (ex.: seudominio.com):", (s) => validHost(s.toLowerCase()), "Domínio inválido. Exemplo: seudominio.com.");
   const { cfg, error } = buildConfig(merged);
   if (error) {
     fail(error);

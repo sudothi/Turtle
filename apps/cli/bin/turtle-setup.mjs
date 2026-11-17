@@ -57,26 +57,39 @@ const MENU = [
   ["Ajuda", ["--help"]],
 ];
 
-/** Sem comando e num terminal (duplo clique no .exe): mostra um menu e mantém a janela aberta no fim. */
+/** Limpa a tela e volta o cursor ao topo (só em terminal). */
+const clear = () => process.stdout.isTTY && process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+
+/** Sem comando e num terminal (duplo clique no .exe): menu em loop, até a pessoa escolher Sair. */
 async function interactive() {
-  banner();
-  console.log(`  ${bold("O que você quer fazer?")}\n`);
-  MENU.forEach(([label], i) => console.log(`   ${i + 1}) ${label}`));
-  console.log(`   0) Sair\n`);
-  const p = prompter(true);
-  const a = await p.ask("Número:");
-  p.close(); // cada comando abre o próprio prompt: não pode haver dois leitores no mesmo terminal
   let code = 0;
-  const item = MENU[Number(a) - 1];
-  if (item) code = await dispatch(/** @type {string[]} */ (item[1]));
-  else if (a !== "0") console.log(red("Opção inválida."));
-  await pause();
-  return code;
+  for (;;) {
+    clear();
+    banner();
+    console.log(`  ${bold("O que você quer fazer?")}\n`);
+    MENU.forEach(([label], i) => console.log(`   ${i + 1}) ${label}`));
+    console.log(`   0) Sair\n`);
+    const p = prompter(true);
+    const a = await p.ask("Número:");
+    p.close(); // cada comando abre o próprio prompt: não pode haver dois leitores no mesmo terminal
+    if (a === "0") return code;
+    const item = MENU[Number(a) - 1];
+    if (!item) continue;
+    clear();
+    banner();
+    try {
+      code = await dispatch(/** @type {string[]} */ (item[1]), { quiet: true });
+    } catch (e) {
+      console.error(red(String(/** @type {any} */ (e)?.message ?? e)));
+      code = 1;
+    }
+    await pause("Pressione Enter para voltar ao menu.");
+  }
 }
 
-async function pause() {
+async function pause(msg = "Pressione Enter para fechar.") {
   const p = prompter(true);
-  await p.ask(`\n  ${dim("Pressione Enter para fechar.")}`);
+  await p.ask(`\n  ${dim(msg)}`);
   p.close();
 }
 
@@ -85,7 +98,7 @@ export async function main(/** @type {string[]} */ argv) {
   return dispatch(argv);
 }
 
-async function dispatch(/** @type {string[]} */ argv) {
+async function dispatch(/** @type {string[]} */ argv, { quiet = false } = {}) {
   const { o, words } = parseArgs(argv);
   if (o.version || o.v) {
     console.log("turtle-setup 0.1.0");
@@ -93,11 +106,11 @@ async function dispatch(/** @type {string[]} */ argv) {
   }
   const [cmd, sub] = words;
   if (o.help || o.h || !cmd) {
-    banner();
+    if (!quiet) banner();
     console.log(HELP);
     return cmd ? 0 : 1;
   }
-  banner();
+  if (!quiet) banner();
   switch (cmd) {
     case "instalar":
     case "install":
